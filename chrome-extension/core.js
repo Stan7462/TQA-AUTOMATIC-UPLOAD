@@ -1,4 +1,4 @@
-export const API_ORIGIN = "https://stanislavs-macbook-air.tailbf5c58.ts.net";
+export const API_ORIGIN = "https://qc.leadtechx.com";
 export const JOBS_URL = "https://catalystqms.comcast.net/TechOps/jobs";
 export const observationUrl = (jobId) => `https://catalystqms.comcast.net/TechOps/observation/?jobid=${encodeURIComponent(jobId)}`;
 
