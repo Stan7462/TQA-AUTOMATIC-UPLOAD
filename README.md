@@ -14,8 +14,16 @@ The six QCs, 27 photos, Tech 7462 account, and five blocked Tech IDs from the ea
 
 ## Start and update
 
-The user LaunchAgent `com.tqa.automatic-upload` starts the production server at login. Check it with `launchctl print gui/$(id -u)/com.tqa.automatic-upload`. After code changes, run `./.tqa-data/node ./node_modules/vinext/dist/cli.js build`, then `launchctl kickstart -k gui/$(id -u)/com.tqa.automatic-upload`.
+The user LaunchAgent `com.tqa.automatic-upload` starts the production server at login. Check it with `launchctl print gui/$(id -u)/com.tqa.automatic-upload`. After code changes, run `./.tqa-data/node ./node_modules/vinext/dist/cli.js build`, then `launchctl kickstart -k gui/$(id -u)/com.tqa.automatic-upload`. Startup runs `prisma migrate deploy` before opening the web server.
 
 `TQA_PUBLIC_ORIGIN` is loaded from `.tqa-data/public-origin.txt`, which should contain exactly the Funnel HTTPS origin (for example, `https://mac.tailnet.ts.net`). Set it when Tailscale provides the hostname, then restart the LaunchAgent. This keeps upload and sign-in origin checks working through Funnel.
 
 Do not publish the local data directory or PINs. Back up `.tqa-data`, including the SQLite database, photos, and secrets, with Time Machine or an equivalent local backup. The PIN encryption key in the secrets file is required to display existing PINs in Settings.
+
+## Coolify database migrations
+
+Deploy the repository with its `Dockerfile`, expose port `3000`, and mount persistent storage at `/data`. Set `TQA_PUBLIC_ORIGIN` to the public HTTPS origin. The container runs `scripts/migrate.mjs` before starting Vinext, so every redeployment applies pending Prisma migrations to `/data/tqa.sqlite`.
+
+The first Prisma migration is a full baseline. A new empty volume receives the complete schema. An existing TQA database is verified and marked with that baseline without recreating its tables or deleting data. If an existing database does not match the expected baseline, startup stops instead of applying an unsafe partial migration.
+
+For a future schema change, update `prisma/schema.prisma`, run `npm run db:generate -- --name descriptive_change`, review the generated SQL under `prisma/migrations`, and commit it. Coolify will run the committed migration during its next deployment. Back up the `/data` volume before deploying schema changes.

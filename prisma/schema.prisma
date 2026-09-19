@@ -1,0 +1,89 @@
+datasource db {
+  provider = "sqlite"
+}
+
+model Technician {
+  techId         String        @id @map("tech_id")
+  pinSalt        String        @map("pin_salt")
+  pinHash        String        @map("pin_hash")
+  pinCiphertext  String?       @map("pin_ciphertext")
+  active         Int           @default(1)
+  failedAttempts Int           @default(0) @map("failed_attempts")
+  lockedUntil    BigInt        @default(0) @map("locked_until")
+  createdAt      BigInt        @map("created_at")
+  sessions       TechSession[]
+
+  @@map("technicians")
+}
+
+model TechSession {
+  tokenHash  String     @id @map("token_hash")
+  techId     String     @map("tech_id")
+  expiresAt  BigInt     @map("expires_at")
+  createdAt  BigInt     @map("created_at")
+  technician Technician @relation(fields: [techId], references: [techId], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("tech_sessions")
+}
+
+model TechnicianRemoval {
+  techId    String @id @map("tech_id")
+  state     String @default("deleting")
+  startedAt BigInt @map("started_at")
+
+  @@map("technician_removals")
+}
+
+model QcSubmission {
+  id                     String  @id
+  techId                 String  @map("tech_id")
+  jobNumber              String  @default("") @map("job_number")
+  screenshotId           String  @map("screenshot_id")
+  photoIds               String  @map("photo_ids")
+  status                 String  @default("pending")
+  submittedAt            BigInt  @map("submitted_at")
+  reviewedAt             BigInt? @map("reviewed_at")
+  reviewNote             String? @map("review_note")
+  trustUploadStatus      String  @default("ready") @map("trust_upload_status")
+  trustUploadedAt        BigInt? @map("trust_uploaded_at")
+  trustExternalReference String? @map("trust_external_reference")
+  trustUploadError       String? @map("trust_upload_error")
+  trustUploadAttempts    Int     @default(0) @map("trust_upload_attempts")
+  trustLastAttemptAt     BigInt? @map("trust_last_attempt_at")
+  trustUploadedByKeyId   String? @map("trust_uploaded_by_key_id")
+
+  @@index([status, submittedAt], map: "idx_qc_submissions_status_submitted")
+  @@index([techId, submittedAt], map: "idx_qc_submissions_tech_submitted")
+  @@index([status, trustUploadStatus, reviewedAt, id], map: "idx_qc_submissions_trust_queue")
+  @@map("qc_submissions")
+}
+
+model QcUploadPhoto {
+  submissionId String @map("submission_id")
+  techId       String @map("tech_id")
+  slot         Int
+  image        Bytes
+  createdAt    BigInt @map("created_at")
+
+  @@id([submissionId, techId, slot])
+  @@index([createdAt], map: "qc_upload_photos_created_at_idx")
+  @@map("qc_upload_photos")
+}
+
+model TrustApiKey {
+  id         String  @id
+  label      String
+  tokenHash  String  @unique @map("token_hash")
+  tokenHint  String  @map("token_hint")
+  createdAt  BigInt  @map("created_at")
+  lastUsedAt BigInt? @map("last_used_at")
+  revokedAt  BigInt? @map("revoked_at")
+
+  @@map("trust_api_keys")
+}
+
+model LocalMigration {
+  name String @id
+
+  @@map("local_migrations")
+}

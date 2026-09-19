@@ -9,5 +9,6 @@ if (existsSync(originPath)) {
   if (!/^https:\/\/[a-z0-9.-]+\.ts\.net$/.test(origin)) throw new Error('Invalid public origin');
   process.env.TQA_PUBLIC_ORIGIN = origin;
 }
+await import('./migrate.mjs');
 process.argv = [process.execPath, resolve(root, 'node_modules/vinext/dist/cli.js'), 'start', '--hostname', '127.0.0.1', '--port', '3000'];
 await import('../node_modules/vinext/dist/cli.js');
