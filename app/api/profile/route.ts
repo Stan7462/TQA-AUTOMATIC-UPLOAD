@@ -1,0 +1,18 @@
+import { env } from "@/lib/local-env";
+import { getTechSession } from "@/lib/tech-auth";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(request: Request) {
+  if (!env.DB) return Response.json({ error: "Unavailable" }, { status: 503 });
+  const techId = await getTechSession(request, env.DB);
+  if (!techId) return Response.json({ error: "Sign in with your Tech ID and PIN." }, { status: 401 });
+  const totals = await env.DB.prepare("SELECT COUNT(*) AS captured, COALESCE(SUM(CASE WHEN status = 'approved' AND trust_upload_status = 'uploaded' THEN 1 ELSE 0 END), 0) AS uploaded, COALESCE(SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END), 0) AS rejected FROM qc_submissions WHERE tech_id = ?")
+    .bind(techId).first<{ captured: number; uploaded: number; rejected: number }>();
+  const counts = { captured: totals?.captured ?? 0, uploaded: totals?.uploaded ?? 0, rejected: totals?.rejected ?? 0 };
+  if (new URL(request.url).searchParams.get("count") === "1") {
+    return Response.json({ techId, ...counts }, { headers: { "Cache-Control": "private, no-store" } });
+  }
+  const rows = await env.DB.prepare("SELECT id, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, submitted_at AS submittedAt, reviewed_at AS reviewedAt, review_note AS reviewNote FROM qc_submissions WHERE tech_id = ? AND status = 'rejected' ORDER BY reviewed_at DESC LIMIT 200").bind(techId).all<{ id: string; jobNumber: string; screenshotId: string; photoIds: string; submittedAt: number; reviewedAt: number | null; reviewNote: string | null }>();
+  return Response.json({ techId, ...counts, submissions: rows.results.map((row) => ({ ...row, photoIds: JSON.parse(row.photoIds) as string[] })) }, { headers: { "Cache-Control": "private, no-store" } });
+}

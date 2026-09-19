@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TQA Catalyst Uploader</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header><h1>TQA → Catalyst</h1><span>Approved QC uploader</span></header>
+    <section class="key-card">
+      <label for="key">TQA API key</label>
+      <div class="key-row"><input id="key" type="password" autocomplete="off" placeholder="Paste key once"><button id="save-key">Save</button></div>
+      <small id="key-status">No key saved</small>
+    </section>
+    <section class="run-card">
+      <div class="actions"><button id="refresh">Refresh queue</button><button id="start" class="primary">Start upload</button><button id="stop">Stop</button><button id="ack-review" hidden>Retry after cleanup</button><button id="confirm-reviewed" hidden>Confirm already uploaded</button></div>
+      <p id="status">Ready.</p>
+      <progress id="progress" value="0" max="1"></progress>
+      <small id="counts"></small>
+    </section>
+    <section><h2>Approved QCs ready to upload <span id="total">0</span></h2><div id="queue" class="queue"></div></section>
+    <details class="log-card" open>
+      <summary>Activity log <span id="log-count">0</span></summary>
+      <div class="log-actions"><button id="copy-log">Copy log</button><button id="clear-log">Clear log</button></div>
+      <div id="logs" class="logs" aria-live="polite"></div>
+    </details>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

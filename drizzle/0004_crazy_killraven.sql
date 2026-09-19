@@ -1,0 +1,1 @@
+ALTER TABLE `technicians` ADD `pin_ciphertext` text;

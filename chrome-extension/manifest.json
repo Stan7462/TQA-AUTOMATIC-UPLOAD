@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "TQA Catalyst Uploader",
+  "version": "0.1.0",
+  "description": "Uploads approved TQA QCs to the matching Catalyst observation.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "https://stanislavs-macbook-air.tailbf5c58.ts.net/*",
+    "https://catalystqms.comcast.net/*"
+  ],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "TQA Catalyst Uploader", "default_popup": "popup.html" },
+  "content_scripts": [{
+    "matches": ["https://catalystqms.comcast.net/TechOps/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}

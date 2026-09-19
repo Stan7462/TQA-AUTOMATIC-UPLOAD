@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1789590900060,
+      "tag": "0000_warm_rawhide_kid",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789593478235,
+      "tag": "0001_first_wolverine",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789625537600,
+      "tag": "0002_abandoned_amphibian",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789626216767,
+      "tag": "0003_freezing_vulture",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789654262167,
+      "tag": "0004_crazy_killraven",
+      "breakpoints": true
+    }
+  ]
+}
