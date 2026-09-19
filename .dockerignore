@@ -1,0 +1,13 @@
+.git
+.gitignore
+.DS_Store
+.next
+.vinext
+.wrangler
+.pnpm-store
+.sites-runtime
+.tqa-data
+dist
+node_modules
+npm-debug.log*
+*.tsbuildinfo
