@@ -1,7 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
 import QcSubmission from './qc-submission';
-import { ADMIN_TECH_ID } from '@/lib/tech-auth';
 export default function TechAccess() {
   const [techId, setTechId] = useState(''); const [entryId, setEntryId] = useState(''); const [pin, setPin] = useState('');
   const [adminSession, setAdminSession] = useState(false);
@@ -12,8 +11,8 @@ export default function TechAccess() {
     try {
       const response = await fetch('/api/profile?count=1', { cache: 'no-store', signal: controller.signal });
       if (response.ok) {
-        const data = await response.json() as { techId: string };
-        if (data.techId === ADMIN_TECH_ID) setAdminSession(true);
+        const data = await response.json() as { techId: string; isAdmin: boolean };
+        if (data.isAdmin) setAdminSession(true);
         else setTechId(data.techId);
       } else if (response.status !== 401) {
         setError('Could not check technician access. Check your connection and try again.');
@@ -30,10 +29,10 @@ export default function TechAccess() {
     event.preventDefault(); setBusy(true); setError('');
     try {
       const response = await fetch('/api/profile/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ techId: entryId, pin }) });
-      const data = await response.json() as { error?: string; techId?: string };
+      const data = await response.json() as { error?: string; techId?: string; isAdmin?: boolean };
       if (!response.ok) throw new Error(data.error || 'Could not sign in');
       setPin('');
-      if (data.techId === ADMIN_TECH_ID) { window.location.replace('/'); return; }
+      if (data.isAdmin) { window.location.replace('/'); return; }
       if (!data.techId) throw new Error('Could not confirm your Tech ID.');
       setTechId(data.techId);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not sign in'); }

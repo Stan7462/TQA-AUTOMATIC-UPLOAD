@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 process.chdir(root);
 await import("./migrate.mjs");
+await import("./bootstrap-admin.mjs");
 
 process.argv = [
   process.execPath,

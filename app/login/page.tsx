@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { ADMIN_TECH_ID } from '@/lib/tech-auth';
 
 export default function LoginPage() {
   const [techId, setTechId] = useState('');
@@ -19,10 +18,10 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ techId, pin }),
       });
-      const result = await response.json() as { techId?: string; error?: string };
+      const result = await response.json() as { techId?: string; isAdmin?: boolean; error?: string };
       if (!response.ok || !result.techId) throw new Error(result.error || 'Could not sign in.');
 
-      if (result.techId === ADMIN_TECH_ID) {
+      if (result.isAdmin) {
         const requested = new URLSearchParams(location.search).get('return_to');
         const destination = requested && (requested === '/' || requested === '/captures' || requested === '/settings' || /^\/records\/(?:all|approved|needs-review)$/.test(requested)) ? requested : '/';
         location.replace(destination);

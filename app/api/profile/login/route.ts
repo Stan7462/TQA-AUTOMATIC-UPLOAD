@@ -1,5 +1,5 @@
 import { env } from "@/lib/local-env";
-import { equalHex, hashPin, hashToken, normalizeTechId, randomHex, sameOrigin, techCookie } from "@/lib/tech-auth";
+import { ADMIN_TECH_ID, equalHex, hashPin, hashToken, normalizeTechId, randomHex, sameOrigin, techCookie } from "@/lib/tech-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -26,5 +26,5 @@ export async function POST(request: Request) {
     env.DB.prepare("INSERT INTO tech_sessions (token_hash, tech_id, expires_at, created_at) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM technicians WHERE tech_id = ? AND pin_hash = ? AND active = 1)").bind(await hashToken(token), techId, now + 12 * 60 * 60_000, now, techId, row.hash),
   ]);
   if (!saved[1].meta.changes) return invalid();
-  return Response.json({ techId }, { headers: { "Set-Cookie": techCookie(token, (request.headers.get("origin") || new URL(request.url).origin).startsWith("https:")), "Cache-Control": "no-store" } });
+  return Response.json({ techId, isAdmin: techId === ADMIN_TECH_ID }, { headers: { "Set-Cookie": techCookie(token, (request.headers.get("origin") || new URL(request.url).origin).startsWith("https:")), "Cache-Control": "no-store" } });
 }

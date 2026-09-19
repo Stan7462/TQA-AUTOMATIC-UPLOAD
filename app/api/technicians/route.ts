@@ -1,7 +1,7 @@
 import { env } from "@/lib/local-env";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { isOwner } from "@/app/access";
-import { hashPin, newPin, normalizeTechId, randomHex, sameOrigin } from "@/lib/tech-auth";
+import { ADMIN_TECH_ID, hashPin, newPin, normalizeTechId, randomHex, sameOrigin } from "@/lib/tech-auth";
 import { decryptPin, encryptPin } from "@/lib/pin-vault";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export async function GET() {
   if (!env.DB) return Response.json({ error: "Unavailable" }, { status: 503 });
   try {
     const result = await env.DB.prepare("SELECT t.tech_id AS techId, COALESCE(q.total, 0) AS qcCount, 1 AS hasPin, t.pin_ciphertext AS pinCiphertext, COALESCE(r.state, 'active') AS state FROM technicians t LEFT JOIN (SELECT tech_id, COUNT(*) AS total FROM qc_submissions GROUP BY tech_id) q ON q.tech_id = t.tech_id LEFT JOIN technician_removals r ON r.tech_id = t.tech_id WHERE t.active = 1 AND (r.state IS NULL OR r.state = 'deleting') ORDER BY t.tech_id").all<{ techId: string; qcCount: number; hasPin: number; pinCiphertext: string | null; state: string }>();
-    const technicians = await Promise.all(result.results.map(async ({ pinCiphertext, ...tech }) => ({ ...tech, pin: pinCiphertext ? await decryptPin(pinCiphertext, env.PIN_ENCRYPTION_KEY) : null })));
+    const technicians = await Promise.all(result.results.map(async ({ pinCiphertext, ...tech }) => ({ ...tech, isAdmin: tech.techId === ADMIN_TECH_ID, pin: pinCiphertext ? await decryptPin(pinCiphertext, env.PIN_ENCRYPTION_KEY) : null })));
     return Response.json({ technicians }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     console.error("Technician list failed", error);
@@ -26,6 +26,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as { techId?: unknown } | null;
   const techId = normalizeTechId(body?.techId);
   if (!techId) return Response.json({ error: "Enter a valid Tech ID." }, { status: 400 });
+  if (techId === ADMIN_TECH_ID && process.env.TQA_ADMIN_PIN) return Response.json({ error: "The admin PIN is managed by the deployment environment." }, { status: 409 });
   const removal = await env.DB.prepare("SELECT state FROM technician_removals WHERE tech_id = ?").bind(techId).first<{ state: string }>();
   if (removal?.state === "deleting") return Response.json({ error: "Finish removing this technician before re-adding them." }, { status: 409 });
   try {
