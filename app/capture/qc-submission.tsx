@@ -227,9 +227,9 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     void readQcDraft(techId).then((draft) => {
       if (!active) return;
       if (draft) {
-        draftRef.current = draft;
+        const savedJobNumber = draft.jobNumber.replace(/\D/g, "").slice(0, 6); draftRef.current = { ...draft, jobNumber: savedJobNumber };
         setSubmissionId(draft.submissionId);
-        setJobNumber(draft.jobNumber);
+        setJobNumber(savedJobNumber);
         setScreenshot(draft.screenshot);
         setPhotos(draft.photos);
         setDraftStatus("saved");
@@ -258,8 +258,8 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   }
 
   function changeJobNumber(value: string) {
-    setJobNumber(value);
-    draftRef.current = { ...draftRef.current!, jobNumber: value };
+    const digits = value.replace(/\D/g, "").slice(0, 6); setJobNumber(digits);
+    draftRef.current = { ...draftRef.current!, jobNumber: digits };
     setDraftStatus("saving");
     if (draftTimer.current !== null) window.clearTimeout(draftTimer.current);
     draftTimer.current = window.setTimeout(() => { draftTimer.current = null; void queueDraftSave(draftRef.current!); }, 300);
@@ -315,7 +315,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const month = today ? fiscalMonthKey(today) : null;
   const approvedQcs = progress?.techId === techId && progress.month === month ? progress.approved : null;
   const remainingQcs = approvedQcs === null ? null : Math.max(0, MONTHLY_QC_GOAL - approvedQcs);
-  const ready = validTechId && /^[A-Za-z0-9][A-Za-z0-9 _./#-]{0,63}$/.test(jobNumber.trim()) && !!screenshot && photos.length >= 2 && photos.length <= MAX_PHOTOS;
+  const validJobNumber = /^\d{1,6}$/.test(jobNumber); const ready = validTechId && validJobNumber && !!screenshot && photos.length >= 2 && photos.length <= MAX_PHOTOS;
 
   useEffect(() => {
     if (!validTechId || !month) { setProgress(null); setProgressError(""); return; }
@@ -412,7 +412,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   async function startCamera() {
     if (screenshotProcessing.current) return;
     setError("");
-    if (!validTechId || !jobNumber.trim() || !screenshot) { setError("Enter the job number and add the account screenshot first."); return; }
+    if (!validTechId || !validJobNumber || !screenshot) { setError("Enter a job number using 1 to 6 digits and add the account screenshot first."); return; }
     if (!navigator.mediaDevices?.getUserMedia) { setError("This browser cannot open the camera. Use a current browser on your phone."); return; }
     try {
       const media = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
@@ -515,7 +515,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       <div className="qc-deadline" role="status"><div className="qc-progress-ring" aria-hidden="true" style={{ background: `conic-gradient(#d7e9ff ${approvedQcs === null ? 0 : Math.min(100, approvedQcs / MONTHLY_QC_GOAL * 100)}%, #394b5a 0)` }}/><div className="qc-deadline-message"><strong>{remainingQcs === 0 ? "Monthly goal complete" : deadline ? deadline.daysLeft === 0 ? "Due today" : `${deadline.daysLeft} ${deadline.daysLeft === 1 ? "day" : "days"} left` : "Monthly QC deadline"}</strong><span>{!validTechId ? "Sign in again to see QCs remaining" : progressError ? "Approved QC progress is unavailable. Try again shortly." : remainingQcs === null ? "Checking approved QC progress…" : remainingQcs === 0 ? "0 approved QCs remaining" : `to finish ${remainingQcs} approved ${remainingQcs === 1 ? "QC" : "QCs"}`}</span></div><small>Fiscal month ends <b>{deadline ? deadline.date.toLocaleDateString(undefined, { month: "long", day: "numeric" }) : "on the 21st"}</b></small></div>
       {submitted ? <div className="qc-success" role="status"><Check size={34}/><h2>Sent for review</h2><p>Your QC was submitted for approval.</p><button className="button dark" onClick={() => setSubmitted(false)}>Start another QC</button></div> : <>
         <div className="qc-step-timeline">
-        <section className="qc-step qc-setup-step"><div className="qc-step-marker"><span>1</span></div><div className="qc-step-card"><div className="qc-step-heading"><h2>Job number</h2><p>Enter the number for this job.</p></div><div className="qc-job-field"><span aria-hidden="true">#</span><input className="qc-tech-id" aria-label="Job number" placeholder="Enter job number" autoComplete="off" value={jobNumber} maxLength={64} disabled={busy || taking || processingScreenshot} onChange={(event) => changeJobNumber(event.target.value)} onBlur={saveJobNumberNow} /></div></div></section>
+        <section className="qc-step qc-setup-step"><div className="qc-step-marker"><span>1</span></div><div className="qc-step-card"><div className="qc-step-heading"><h2>Job number</h2><p>Enter up to 6 digits for this job.</p></div><div className="qc-job-field"><span aria-hidden="true">#</span><input className="qc-tech-id" aria-label="Job number" placeholder="Enter job number" autoComplete="off" inputMode="numeric" pattern="[0-9]*" value={jobNumber} maxLength={6} disabled={busy || taking || processingScreenshot} onChange={(event) => changeJobNumber(event.target.value)} onBlur={saveJobNumberNow} /></div></div></section>
         <section className="qc-step qc-setup-step qc-screenshot-step"><div className="qc-step-marker"><span>2</span></div><div className="qc-step-card"><div className="qc-step-heading"><h2>Account screenshot</h2><p>Upload a screenshot of the account page.</p></div><label className="qc-file-picker qc-screenshot-button"><ImagePlus size={25}/><span>{processingScreenshot ? "Preparing…" : screenshot ? "Replace screenshot" : "Upload screenshot"}</span><input type="file" accept="image/*" aria-label="Account screenshot from phone" disabled={busy || taking || processingScreenshot} onChange={(event) => { void chooseScreenshot(event.target.files?.[0]); event.target.value = ""; }} /></label></div></section>
         <section className="qc-step qc-live-step">
           <div className="qc-step-marker"><span>3</span></div><div className="qc-step-card"><div className="qc-step-heading"><h2>Live QC photos</h2><p>Take the required live photos below.</p></div>
