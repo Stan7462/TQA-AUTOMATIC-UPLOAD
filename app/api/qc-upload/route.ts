@@ -35,8 +35,8 @@ export async function POST(request: Request) {
   const techId = normalizeTechId(body?.techId);
   const jobNumber = typeof body?.jobNumber === "string" ? body.jobNumber.trim() : "";
   const submissionId = body?.submissionId;
-  if (!techId || !/^[A-Za-z0-9][A-Za-z0-9 _./#-]{0,63}$/.test(jobNumber) || typeof submissionId !== "string" || !/^[0-9a-f-]{36}$/.test(submissionId)) {
-    return Response.json({ error: "Check the Tech ID and job number, then try again." }, { status: 400 });
+  if (!techId || !/^\d{1,6}$/.test(jobNumber) || typeof submissionId !== "string" || !/^[0-9a-f-]{36}$/.test(submissionId)) {
+    return Response.json({ error: "Enter a job number using 1 to 6 digits." }, { status: 400 });
   }
   const authenticatedTechId = await getTechSession(request, env.DB);
   if (authenticatedTechId !== techId) return Response.json({ error: "Sign in with this Tech ID and PIN before submitting." }, { status: 401 });
