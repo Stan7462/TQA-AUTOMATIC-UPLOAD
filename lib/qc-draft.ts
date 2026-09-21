@@ -5,6 +5,8 @@ export type QcDraft = {
   techId: string;
   fiscalMonth: string;
   submissionId: string;
+  redoSourceId: string | null;
+  redoChanged: boolean;
   jobNumber: string;
   screenshot: Blob | null;
   photos: Blob[];
@@ -52,9 +54,11 @@ export async function readQcDraft(techId: string): Promise<QcDraft | null> {
   if (draftMonth !== currentMonth) { await deleteQcDraft(techId); return null; }
   if (draft.techId !== techId || typeof draft.jobNumber !== "string" || draft.jobNumber.length > 64 ||
       typeof draft.submissionId !== "string" || !/^[0-9a-f-]{36}$/.test(draft.submissionId) ||
+      (draft.redoSourceId !== undefined && draft.redoSourceId !== null && (typeof draft.redoSourceId !== "string" || !/^[0-9a-f-]{36}$/.test(draft.redoSourceId))) ||
+      (draft.redoChanged !== undefined && typeof draft.redoChanged !== "boolean") ||
       (draft.screenshot !== null && !(draft.screenshot instanceof Blob)) ||
       !Array.isArray(draft.photos) || draft.photos.length > 7 || !draft.photos.every((photo) => photo instanceof Blob)) return null;
-  return { ...draft, fiscalMonth: currentMonth, location: normalizeQcLocation(draft.location) } as QcDraft;
+  return { ...draft, fiscalMonth: currentMonth, redoSourceId: draft.redoSourceId ?? null, redoChanged: draft.redoChanged ?? false, location: normalizeQcLocation(draft.location) } as QcDraft;
 }
 
 export async function writeQcDraft(draft: QcDraft): Promise<void> {

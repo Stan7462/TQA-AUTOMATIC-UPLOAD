@@ -1,6 +1,7 @@
 import { env } from "@/lib/local-env";
 import { getTechSession, normalizeTechId, sameOrigin } from "@/lib/tech-auth";
 import { normalizeQcLocation } from "@/lib/qc-location";
+import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,8 @@ type UploadBody = {
   techId?: unknown;
   jobNumber?: unknown;
   submissionId?: unknown;
+  redoSourceId?: unknown;
+  redoChanged?: unknown;
   slot?: unknown;
   image?: unknown;
   photoCount?: unknown;
@@ -37,9 +40,12 @@ export async function POST(request: Request) {
   const techId = normalizeTechId(body?.techId);
   const jobNumber = typeof body?.jobNumber === "string" ? body.jobNumber.trim() : "";
   const submissionId = body?.submissionId;
+  const redoSourceId = body?.redoSourceId == null ? null : body.redoSourceId;
   if (!techId || !/^\d{1,6}$/.test(jobNumber) || typeof submissionId !== "string" || !/^[0-9a-f-]{36}$/.test(submissionId)) {
     return Response.json({ error: "Enter a job number using 1 to 6 digits." }, { status: 400 });
   }
+  if (redoSourceId !== null && (typeof redoSourceId !== "string" || !/^[0-9a-f-]{36}$/.test(redoSourceId) || redoSourceId === submissionId)) return Response.json({ error: "This rejected QC cannot be redone." }, { status: 400 });
+  if (redoSourceId && body?.action === "finalize" && body.redoChanged !== true) return Response.json({ error: "Change the job number or at least one picture before resubmitting this QC." }, { status: 409 });
   const authenticatedTechId = await getTechSession(request, env.DB);
   if (authenticatedTechId !== techId) return Response.json({ error: "Sign in with this Tech ID and PIN before submitting." }, { status: 401 });
   const removal = await env.DB.prepare("SELECT state FROM technician_removals WHERE tech_id = ?").bind(techId).first();
@@ -72,6 +78,9 @@ export async function POST(request: Request) {
   }
   const photoCount = body.photoCount as number;
   const location = normalizeQcLocation(body.location) ?? { status: "unavailable" as const, capturedAt: Date.now() };
+  const currentMonth = fiscalMonthBounds(fiscalMonthKey());
+  const redoSource = redoSourceId ? await env.DB.prepare("SELECT id, screenshot_id AS screenshotId, photo_ids AS photoIds FROM qc_submissions WHERE id = ? AND tech_id = ? AND status = 'rejected' AND submitted_at >= ? AND submitted_at < ?").bind(redoSourceId, techId, currentMonth.start, currentMonth.end).first<{ id: string; screenshotId: string; photoIds: string }>() : null;
+  if (redoSourceId && !redoSource) return Response.json({ error: "This rejected QC is no longer available to redo. Return to Rejected QCs and refresh the list." }, { status: 409 });
   const rows = await env.DB.prepare("SELECT slot, image FROM qc_upload_photos WHERE submission_id = ? AND tech_id = ? ORDER BY slot")
     .bind(submissionId, techId).all<{ slot: number; image: Uint8Array }>();
   const images = Array.from({ length: photoCount + 1 }, (_, slot) => rows.results.find((row) => row.slot === slot)?.image);
@@ -89,15 +98,25 @@ export async function POST(request: Request) {
       });
       uploaded.push(key);
     }
-    const inserted = await env.DB.prepare("INSERT INTO qc_submissions (id, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at) SELECT ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM technician_removals WHERE tech_id = ?)")
-      .bind(submissionId, techId, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, location.status, location.status === "verified" ? location.latitude : null, location.status === "verified" ? location.longitude : null, location.status === "verified" ? location.accuracy : null, location.capturedAt, techId).run();
-    if (!inserted.meta.changes) throw new Error("removed-technician");
+    const savedId = submissionId;
+    if (redoSource) {
+      const updated = await env.DB.prepare("UPDATE qc_submissions SET id = ?, job_number = ?, screenshot_id = ?, photo_ids = ?, status = 'pending', submitted_at = ?, reviewed_at = NULL, review_note = NULL, trust_upload_status = 'ready', trust_uploaded_at = NULL, trust_external_reference = NULL, trust_upload_error = NULL, trust_upload_attempts = 0, trust_last_attempt_at = NULL, trust_uploaded_by_key_id = NULL, location_status = ?, location_latitude = ?, location_longitude = ?, location_accuracy = ?, location_captured_at = ? WHERE id = ? AND tech_id = ? AND status = 'rejected' AND submitted_at >= ? AND submitted_at < ?")
+        .bind(submissionId, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, location.status, location.status === "verified" ? location.latitude : null, location.status === "verified" ? location.longitude : null, location.status === "verified" ? location.accuracy : null, location.capturedAt, redoSource.id, techId, currentMonth.start, currentMonth.end).run();
+      if (!updated.meta.changes) throw new Error("redo-source-unavailable");
+      const oldPhotoIds = JSON.parse(redoSource.photoIds) as unknown;
+      const oldKeys = [redoSource.screenshotId, ...(Array.isArray(oldPhotoIds) ? oldPhotoIds.filter((id): id is string => typeof id === "string") : [])].map((id) => `captures/${id}`);
+      await Promise.allSettled(oldKeys.map((key) => env.BUCKET.delete(key)));
+    } else {
+      const inserted = await env.DB.prepare("INSERT INTO qc_submissions (id, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at) SELECT ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM technician_removals WHERE tech_id = ?)")
+        .bind(submissionId, techId, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, location.status, location.status === "verified" ? location.latitude : null, location.status === "verified" ? location.longitude : null, location.status === "verified" ? location.accuracy : null, location.capturedAt, techId).run();
+      if (!inserted.meta.changes) throw new Error("removed-technician");
+    }
     try { await env.DB.prepare("DELETE FROM qc_upload_photos WHERE submission_id = ? AND tech_id = ?").bind(submissionId, techId).run(); }
     catch (error) { console.error("QC staging cleanup failed", error); }
-    return Response.json({ id: submissionId, status: "pending" }, { status: 201, headers: { "Cache-Control": "no-store" } });
+    return Response.json({ id: savedId, status: "pending" }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("QC finalization failed", error);
     await Promise.allSettled(uploaded.map((key) => env.BUCKET.delete(key)));
-    return Response.json({ error: error instanceof Error && error.message === "removed-technician" ? "This Tech ID is no longer available. Contact your supervisor." : "Could not finish saving this QC. Tap Submit again to retry." }, { status: error instanceof Error && error.message === "removed-technician" ? 403 : 503 });
+    return Response.json({ error: error instanceof Error && error.message === "removed-technician" ? "This Tech ID is no longer available. Contact your supervisor." : error instanceof Error && error.message === "redo-source-unavailable" ? "This rejected QC is no longer available to redo. Return to Rejected QCs and refresh the list." : "Could not finish saving this QC. Tap Submit again to retry." }, { status: error instanceof Error && error.message === "removed-technician" ? 403 : error instanceof Error && error.message === "redo-source-unavailable" ? 409 : 503 });
   }
 }

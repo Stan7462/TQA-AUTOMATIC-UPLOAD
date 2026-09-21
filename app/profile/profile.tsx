@@ -41,8 +41,7 @@ export default function Profile(){
        if(!blob.size||!blob.type.startsWith('image/'))throw new Error('Invalid photo');
        return blob;
      }));
-     // A new ID sends the edited QC through normal review, preserving the rejected record.
-     await writeQcDraft({techId,fiscalMonth:fiscalMonthKey(),submissionId:crypto.randomUUID(),jobNumber:/^\d{1,6}$/.test(item.jobNumber)?item.jobNumber:'',screenshot:pictures[0],photos:pictures.slice(1),location:null,updatedAt:Date.now()});
+     await writeQcDraft({techId,fiscalMonth:fiscalMonthKey(),submissionId:crypto.randomUUID(),redoSourceId:item.id,redoChanged:false,jobNumber:/^\d{1,6}$/.test(item.jobNumber)?item.jobNumber:'',screenshot:pictures[0],photos:pictures.slice(1),location:null,updatedAt:Date.now()});
      location.assign('/capture');
    }catch{
      const message='Could not load all pictures or save this QC. Your unfinished QC is unchanged. Please try again.';
@@ -68,7 +67,7 @@ export default function Profile(){
  <dialog ref={redoDialog} className="qc-reset-dialog" aria-labelledby="redo-title" aria-describedby="redo-description" onCancel={event=>{event.preventDefault();if(!redoBusy)setRedoTarget(null);}}>
  <h2 id="redo-title">Redo job {redoTarget?.jobNumber}?</h2>
  <p id="redo-description">This replaces your unfinished draft with this job’s existing photos and job number. You can remove or replace pictures before submitting.</p>
- <small>Submitted QCs stay in your history.</small>
+ <small>After you submit, this QC moves from Rejected to Captured.</small>
  {redoError&&<p className="form-error" role="alert">{redoError}</p>}
  <div className="qc-reset-actions"><button type="button" autoFocus className="button light" disabled={redoBusy} onClick={()=>setRedoTarget(null)}>Cancel</button><button type="button" className="button dark" disabled={redoBusy} onClick={()=>{if(redoTarget)void prepareRedo(redoTarget,true);}}>{redoBusy?'Starting…':'Redo QC'}</button></div>
  </dialog>

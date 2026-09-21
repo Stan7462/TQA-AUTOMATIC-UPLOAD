@@ -235,7 +235,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const pinchCooldownUntil = useRef(0);
   const techId = signedInTechId;
   const draftRef = useRef<QcDraft | null>(null);
-  if (!draftRef.current) draftRef.current = { techId, fiscalMonth: fiscalMonthKey(), submissionId: crypto.randomUUID(), jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
+  if (!draftRef.current) draftRef.current = { techId, fiscalMonth: fiscalMonthKey(), submissionId: crypto.randomUUID(), redoSourceId: null, redoChanged: false, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
   const draftWrites = useRef<Promise<void>>(Promise.resolve());
   const draftTimer = useRef<number | null>(null);
   const draftRevision = useRef(0);
@@ -353,7 +353,8 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   function changeJobNumber(value: string) {
     const digits = value.replace(/\D/g, "").slice(0, 6);
     setJobNumber(digits);
-    draftRef.current = { ...draftRef.current!, jobNumber: digits };
+    const changed = digits !== draftRef.current!.jobNumber;
+    draftRef.current = { ...draftRef.current!, jobNumber: digits, redoChanged: draftRef.current!.redoChanged || (!!draftRef.current!.redoSourceId && changed) };
     setDraftStatus("saving");
     if (draftTimer.current !== null) window.clearTimeout(draftTimer.current);
     draftTimer.current = window.setTimeout(() => { draftTimer.current = null; void queueDraftSave(draftRef.current!); }, 300);
@@ -411,8 +412,9 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const approvedQcs = progress?.techId === techId && progress.month === month ? progress.approved : null;
   const remainingQcs = approvedQcs === null ? null : Math.max(0, MONTHLY_QC_GOAL - approvedQcs);
   const validJobNumber = /^\d{1,6}$/.test(jobNumber);
-  const submitHint = processingScreenshot ? "Reading your screenshot…" : !screenshot ? "Add your account screenshot." : !validJobNumber ? "Check or enter the job number." : taking ? "Finishing your photo…" : cameraOn ? "Close the camera to submit." : "";
-  const ready = validTechId && validJobNumber && !!screenshot && photos.length >= 2 && photos.length <= MAX_PHOTOS;
+  const redoNeedsChange = !!draftRef.current?.redoSourceId && !draftRef.current.redoChanged;
+  const submitHint = processingScreenshot ? "Reading your screenshot…" : !screenshot ? "Add your account screenshot." : !validJobNumber ? "Check or enter the job number." : taking ? "Finishing your photo…" : cameraOn ? "Close the camera to submit." : redoNeedsChange ? "Change the job number or at least one picture before resubmitting." : "";
+  const ready = validTechId && validJobNumber && !!screenshot && photos.length >= 2 && photos.length <= MAX_PHOTOS && !redoNeedsChange;
 
   useEffect(() => {
     if (!draftReady || !month || draftRef.current?.fiscalMonth === month) return;
@@ -421,7 +423,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     stream.current = null;
     if (video.current) video.current.srcObject = null;
     setCameraReady(false); setCameraOn(false);
-    const fresh: QcDraft = { techId, fiscalMonth: month, submissionId: crypto.randomUUID(), jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
+    const fresh: QcDraft = { techId, fiscalMonth: month, submissionId: crypto.randomUUID(), redoSourceId: null, redoChanged: false, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
     draftRef.current = fresh;
     setSubmissionId(fresh.submissionId); setJobNumber(""); setScreenshot(null); setPhotos([]); setLocation(null);
     setScreenshotReadingMessage(""); setSubmitted(false); setResetMessage("New fiscal month started. Your QC form was reset.");
@@ -483,7 +485,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       draftWrites.current = removal.catch(() => undefined);
       await removal;
       locationRequest.current = null;
-      draftRef.current = { techId, fiscalMonth: fiscalMonthKey(), submissionId: nextId, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
+      draftRef.current = { techId, fiscalMonth: fiscalMonthKey(), submissionId: nextId, redoSourceId: null, redoChanged: false, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
       setSubmissionId(nextId);
       setJobNumber("");
       setScreenshot(null);
@@ -577,7 +579,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       if (draftTimer.current !== null) { window.clearTimeout(draftTimer.current); draftTimer.current = null; }
       const existingJobNumber = draftRef.current!.jobNumber;
       const nextJobNumber = detectedJobNumber || existingJobNumber || "";
-      await queueDraftSave({ ...draftRef.current!, jobNumber: nextJobNumber, screenshot: image });
+      await queueDraftSave({ ...draftRef.current!, jobNumber: nextJobNumber, screenshot: image, redoChanged: draftRef.current!.redoChanged || !!draftRef.current!.redoSourceId });
       if (detectedJobNumber) setJobNumber(detectedJobNumber);
       setScreenshot(image);
       setScreenshotReading(100);
@@ -637,7 +639,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       setPhotos(nextPhotos);
       setCaptured({ blob: photo, number: photos.length + 1 });
       navigator.vibrate?.(35);
-      await queueDraftSave({ ...draftRef.current!, photos: nextPhotos });
+      await queueDraftSave({ ...draftRef.current!, photos: nextPhotos, redoChanged: draftRef.current!.redoChanged || !!draftRef.current!.redoSourceId });
       if (nextPhotos.length >= MAX_PHOTOS) window.setTimeout(stopCamera, 820);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "The photo could not be captured."); }
     finally { setTaking(false); }
@@ -647,7 +649,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     const nextPhotos = photos.filter((_, photoIndex) => photoIndex !== index);
     setPhotos(nextPhotos);
     if (draftTimer.current !== null) { window.clearTimeout(draftTimer.current); draftTimer.current = null; }
-    void queueDraftSave({ ...draftRef.current!, photos: nextPhotos });
+    void queueDraftSave({ ...draftRef.current!, photos: nextPhotos, redoChanged: draftRef.current!.redoChanged || !!draftRef.current!.redoSourceId });
   }
 
   async function submit() {
@@ -668,7 +670,8 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       setScreenshot(preparedScreenshot); setPhotos(preparedPhotos);
       const draftSaved = await queueDraftSave({ ...draftRef.current!, screenshot: preparedScreenshot, photos: preparedPhotos });
       if (!draftSaved) throw new Error("Could not save this unfinished QC on your phone. Keep this page open and try again.");
-      const details = { techId, jobNumber: jobNumber.trim(), submissionId };
+      const redoSourceId = draftRef.current!.redoSourceId;
+      const details = { techId, jobNumber: jobNumber.trim(), submissionId, redoSourceId, redoChanged: draftRef.current!.redoChanged };
       const submissionLocation = draftRef.current!.location ?? await captureQcLocation();
       for (let index = 0; index < prepared.length; index++) {
         setUploadLabel(`Uploading picture ${index + 1} of ${prepared.length}…`);
@@ -679,7 +682,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       setUploadProgress(95);
       await sendQcStep({ ...details, action: "finalize", photoCount: preparedPhotos.length, location: submissionLocation });
       setUploadProgress(100); setUploadLabel("Upload complete");
-      setQcCounts((counts) => counts ? { ...counts, captured: counts.captured + 1 } : counts);
+      setQcCounts((counts) => counts ? redoSourceId ? { ...counts, rejected: Math.max(0, counts.rejected - 1) } : { ...counts, captured: counts.captured + 1 } : counts);
       ++draftRevision.current;
       const removeDraft = draftWrites.current.then(() => deleteQcDraft(techId));
       draftWrites.current = removeDraft.catch(() => undefined);
@@ -687,7 +690,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       catch { setDraftStatus("failed"); }
       const nextId = crypto.randomUUID();
       locationRequest.current = null;
-      draftRef.current = { techId, fiscalMonth: fiscalMonthKey(), submissionId: nextId, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
+      draftRef.current = { techId, fiscalMonth: fiscalMonthKey(), submissionId: nextId, redoSourceId: null, redoChanged: false, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
       setScreenshotReadingMessage(""); setSubmitted(true); setJobNumber(""); setScreenshot(null); setPhotos([]); setLocation(null); setLocationChecking(false); setSubmissionId(nextId);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Could not submit this QC.";
