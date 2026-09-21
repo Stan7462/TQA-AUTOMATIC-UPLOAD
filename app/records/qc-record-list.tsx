@@ -1,8 +1,8 @@
 "use client";
+/* eslint-disable @next/next/no-html-link-for-pages -- vinext's client Link router currently throws in production; native links keep navigation reliable. */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDownToLine, ChevronRight } from "lucide-react";
-import Link from "next/link";
 import QcFilterBar from "@/app/qc-filter-bar";
 import { useQcFilters } from "@/lib/use-qc-filters";
 import AdminShell from "@/app/admin-shell";
@@ -108,7 +108,7 @@ export default function QcRecordList({ view, historyMode = false }: { view: Reco
   return <AdminShell active={historyMode ? "history" : "records"}>
     <section className="intro"><div><h1>{selectedId ? "QC details" : historyMode ? "QC History" : "QC records"}</h1><p>{selectedId ? "All pictures and review information for this job." : historyMode ? "View previous QCs month by month. Archived QCs cannot be changed." : "Current fiscal month QCs, ending on the 21st."}</p></div></section>
     {view === "approved" && !historyMode && <section className="qc-export-panel" aria-label="Export approved QCs"><div><h2>Export for Catalyst</h2><p>Download the current fiscal month as a ZIP. Each approved QC has its own job-number folder with the account screenshot and live photos as JPG files.</p></div><div className="qc-export-controls"><label>Fiscal month ends<input type="month" min="2000-01" max="2100-12" value={exportMonth} onChange={(event) => setExportMonth(event.target.value)} /></label><button type="button" className="button dark" disabled={loading || exportBusy || selectedExportCount === 0} onClick={() => void downloadApprovedQcs()}><ArrowDownToLine size={18}/>{exportBusy ? "Preparing ZIP…" : `Download ${selectedExportCount} approved ${selectedExportCount === 1 ? "QC" : "QCs"}`}</button></div>{exportError && <p className="form-error" role="alert">{exportError}</p>}</section>}
-    <div className="admin-page-content qc-record-page">{selectedId && <Link className="back-link" href="/">← Back to all data</Link>}
+    <div className="admin-page-content qc-record-page">{selectedId && <a className="back-link" href="/">← Back to all data</a>}
     <div className="qc-record-content">
       {!selectedId && <QcFilterBar value={filters} onChange={setFilters} techIds={items.map(item => item.techId)} currentMonthOnly={!historyMode} monthRequired={historyMode}/>}
       <div className="qc-record-toolbar"><span>{loading ? "Loading…" : `${shown} ${shown === 1 ? "QC" : "QCs"}`}</span></div>

@@ -1,7 +1,7 @@
 "use client";
+/* eslint-disable @next/next/no-html-link-for-pages -- vinext's client Link router currently throws in production; native links keep navigation reliable. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, MapPin, X } from "lucide-react";
-import Link from "next/link";
 import AdminShell from "@/app/admin-shell";
 import QcFilterBar from "@/app/qc-filter-bar";
 import { useQcFilters } from "@/lib/use-qc-filters";
@@ -51,8 +51,8 @@ export default function QcInbox(){
  const visible=items.filter(q=>selected?q.id===selected:(!filters.tech||q.techId===filters.tech)&&(filters.status==='all'||(filters.status==='uploaded'?q.status==='approved'&&q.trustUploadStatus==='uploaded':q.status===filters.status))&&`${q.techId} ${q.jobNumber}`.toLowerCase().includes(filters.search.trim().toLowerCase()));
  const groups=Object.entries(Object.groupBy(visible,q=>q.techId)).sort(([a],[b])=>a.localeCompare(b,undefined,{numeric:true}));
  const monthBounds=fiscalMonthBounds(statsMonth);
- return <AdminShell active="approvals"><section className="intro"><div><h1>QC approvals</h1><p>Check the pictures, then approve or leave a rejection note.</p></div>{selected&&<Link className="button light" href="/">Back to all data</Link>}</section>
- <div className="admin-page-content qc-inbox">{selected?<p className="qc-notice">Reviewing one job. <Link href="/captures?queue=pending">Return to approval queue</Link></p>:<QcFilterBar value={filters} onChange={setFilters} techIds={[...stats.map(s=>s.techId),...items.map(q=>q.techId)]} currentMonthOnly/>}
+ return <AdminShell active="approvals"><section className="intro"><div><h1>QC approvals</h1><p>Check the pictures, then approve or leave a rejection note.</p></div>{selected&&<a className="button light" href="/">Back to all data</a>}</section>
+ <div className="admin-page-content qc-inbox">{selected?<p className="qc-notice">Reviewing one job. <a href="/captures?queue=pending">Return to approval queue</a></p>:<QcFilterBar value={filters} onChange={setFilters} techIds={[...stats.map(s=>s.techId),...items.map(q=>q.techId)]} currentMonthOnly/>}
  <div className="qc-inbox-content"><section className="qc-review-panel" aria-label="QC approval queue">
  {notice&&<p className="qc-notice" role="status">{notice}</p>}{error&&<p className="form-error" role="alert">{error}</p>}
  {loading||!ready?<p className="qc-empty">Loading QCs…</p>:!visible.length?<div className="qc-empty">{selected?'This QC is no longer available.':'No QCs match these filters.'}</div>:<div className="qc-submission-list">{groups.map(([techId,group])=><section className="qc-tech-group" key={techId}><h2>Tech {techId} <small>{group?.length} {group?.length === 1 ? "QC" : "QCs"}</small></h2>{group?.map(item=><article id={`qc-${item.id}`} className={item.status==='pending'?'qc-submission-card':'qc-approved-row'} key={item.id}>
