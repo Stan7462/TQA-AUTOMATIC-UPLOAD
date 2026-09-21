@@ -1,12 +1,28 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function LoginPage() {
   const [techId, setTechId] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const requested = new URLSearchParams(location.search).get('return_to');
+    const adminDestination = requested && (requested === '/' || requested === '/captures' || requested === '/settings' || requested === '/history' || /^\/records\/(?:all|approved|needs-review)$/.test(requested)) ? requested : '/';
+    void fetch('/api/profile?count=1', { cache: 'no-store', signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) return;
+        const result = await response.json() as { isAdmin?: boolean };
+        location.replace(result.isAdmin ? adminDestination : '/capture');
+      })
+      .catch(() => undefined)
+      .finally(() => setCheckingSession(false));
+    return () => controller.abort();
+  }, []);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -35,5 +51,6 @@ export default function LoginPage() {
     }
   }
 
+  if (checkingSession) return <main className="management-page login-dark"><div className="tech-access-loading"><p>Checking your sign in…</p></div></main>;
   return <main className="management-page login-dark"><div className="management-head"><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>Sign in</h1><p>Enter the Tech ID and five-digit PIN you were given.</p></div><form className="management-card profile-login" onSubmit={submit}><label>Tech ID<input type="text" autoComplete="username" value={techId} onChange={(event) => setTechId(event.target.value.toUpperCase())} maxLength={32} required/></label><label>5-digit PIN<input type="password" inputMode="numeric" autoComplete="current-password" value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, ''))} maxLength={5} pattern="[0-9]{5}" required/></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="button dark" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button></form></main>;
 }

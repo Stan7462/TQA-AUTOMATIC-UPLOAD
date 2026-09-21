@@ -11,9 +11,16 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "TQA Automatic Upload",
   description: "Review extraction results and approve technician QC submissions with an account screenshot and live photos.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "TQA Upload",
+    statusBarStyle: "black-translucent",
+  },
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
+    apple: "/apple-touch-icon.png",
   },
 };
 

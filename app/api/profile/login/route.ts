@@ -1,5 +1,5 @@
 import { env } from "@/lib/local-env";
-import { ADMIN_TECH_ID, equalHex, hashPin, hashToken, normalizeTechId, randomHex, sameOrigin, techCookie } from "@/lib/tech-auth";
+import { ADMIN_SESSION_LIFETIME_SECONDS, ADMIN_TECH_ID, equalHex, hashPin, hashToken, normalizeTechId, randomHex, sameOrigin, TECH_SESSION_LIFETIME_SECONDS, techCookie } from "@/lib/tech-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -21,10 +21,11 @@ export async function POST(request: Request) {
   const candidate = await hashPin(pin, row.salt);
   if (!equalHex(candidate, row.hash)) return invalid();
   const token = randomHex(32);
+  const sessionLifetime = techId === ADMIN_TECH_ID ? ADMIN_SESSION_LIFETIME_SECONDS : TECH_SESSION_LIFETIME_SECONDS;
   const saved = await env.DB.batch([
     env.DB.prepare("UPDATE technicians SET failed_attempts = 0, locked_until = 0 WHERE tech_id = ? AND pin_hash = ? AND active = 1").bind(techId, row.hash),
-    env.DB.prepare("INSERT INTO tech_sessions (token_hash, tech_id, expires_at, created_at) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM technicians WHERE tech_id = ? AND pin_hash = ? AND active = 1)").bind(await hashToken(token), techId, now + 12 * 60 * 60_000, now, techId, row.hash),
+    env.DB.prepare("INSERT INTO tech_sessions (token_hash, tech_id, expires_at, created_at) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM technicians WHERE tech_id = ? AND pin_hash = ? AND active = 1)").bind(await hashToken(token), techId, now + sessionLifetime * 1000, now, techId, row.hash),
   ]);
   if (!saved[1].meta.changes) return invalid();
-  return Response.json({ techId, isAdmin: techId === ADMIN_TECH_ID }, { headers: { "Set-Cookie": techCookie(token, (request.headers.get("origin") || new URL(request.url).origin).startsWith("https:")), "Cache-Control": "no-store" } });
+  return Response.json({ techId, isAdmin: techId === ADMIN_TECH_ID }, { headers: { "Set-Cookie": techCookie(token, (request.headers.get("origin") || new URL(request.url).origin).startsWith("https:"), sessionLifetime), "Cache-Control": "no-store" } });
 }

@@ -1,7 +1,8 @@
 export const TECH_COOKIE = "tqa_tech_session";
 const configuredAdminTechId = process.env.TQA_ADMIN_TECH_ID?.trim().toUpperCase();
 export const ADMIN_TECH_ID = configuredAdminTechId && /^[A-Z0-9_-]{3,32}$/.test(configuredAdminTechId) ? configuredAdminTechId : "1111";
-export const SESSION_LIFETIME_SECONDS = 60 * 60 * 12;
+export const ADMIN_SESSION_LIFETIME_SECONDS = 60 * 60 * 12;
+export const TECH_SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 30;
 // workerd rejects PBKDF2 calls above 100,000 iterations.
 const PIN_HASH_ITERATIONS = 100_000;
 
@@ -73,8 +74,8 @@ export async function getTechSessionFromCookie(cookieHeader: string | null, db: 
   return result?.tech_id ?? null;
 }
 
-export function techCookie(token: string, secure: boolean): string {
-  return TECH_COOKIE + "=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + SESSION_LIFETIME_SECONDS + (secure ? "; Secure" : "");
+export function techCookie(token: string, secure: boolean, lifetimeSeconds = TECH_SESSION_LIFETIME_SECONDS): string {
+  return TECH_COOKIE + "=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + lifetimeSeconds + (secure ? "; Secure" : "");
 }
 
 export function clearTechCookie(secure: boolean): string {
