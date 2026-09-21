@@ -1,5 +1,5 @@
 import { readFileSync, copyFileSync, existsSync, mkdirSync, unlinkSync, chmodSync } from 'node:fs';
-import { resolve, join, basename } from 'node:path';
+import { resolve, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createCipheriv, randomBytes, pbkdf2Sync, timingSafeEqual } from 'node:crypto';
 

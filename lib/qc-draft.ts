@@ -1,7 +1,9 @@
 import { normalizeQcLocation, type QcLocation } from "@/lib/qc-location";
+import { fiscalMonthKey } from "@/lib/fiscal-month";
 
 export type QcDraft = {
   techId: string;
+  fiscalMonth: string;
   submissionId: string;
   jobNumber: string;
   screenshot: Blob | null;
@@ -45,11 +47,14 @@ export async function readQcDraft(techId: string): Promise<QcDraft | null> {
   });
   if (!value || typeof value !== "object") return null;
   const draft = value as Partial<QcDraft>;
+  const currentMonth = fiscalMonthKey();
+  const draftMonth = typeof draft.fiscalMonth === "string" ? draft.fiscalMonth : typeof draft.updatedAt === "number" ? fiscalMonthKey(new Date(draft.updatedAt)) : "";
+  if (draftMonth !== currentMonth) { await deleteQcDraft(techId); return null; }
   if (draft.techId !== techId || typeof draft.jobNumber !== "string" || draft.jobNumber.length > 64 ||
       typeof draft.submissionId !== "string" || !/^[0-9a-f-]{36}$/.test(draft.submissionId) ||
       (draft.screenshot !== null && !(draft.screenshot instanceof Blob)) ||
       !Array.isArray(draft.photos) || draft.photos.length > 7 || !draft.photos.every((photo) => photo instanceof Blob)) return null;
-  return { ...draft, location: normalizeQcLocation(draft.location) } as QcDraft;
+  return { ...draft, fiscalMonth: currentMonth, location: normalizeQcLocation(draft.location) } as QcDraft;
 }
 
 export async function writeQcDraft(draft: QcDraft): Promise<void> {

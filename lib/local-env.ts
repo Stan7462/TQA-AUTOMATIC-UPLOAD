@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, readFileSync, writeFileSync, existsSync, renameSync, unlinkSync, statSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
+import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 
 export const DATA_DIR = resolve(process.env.TQA_DATA_DIR || ".tqa-data");
@@ -78,7 +78,8 @@ export const BUCKET = {
       throw error;
     }
   },
-  async put(key: string, bytes: Uint8Array, _options?: unknown) {
+  async put(key: string, bytes: Uint8Array, options?: unknown) {
+    void options;
     const path = capturePath(key);
     const temp = path + "." + randomBytes(8).toString("hex") + ".tmp";
     writeFileSync(temp, bytes, { mode: 0o600 });

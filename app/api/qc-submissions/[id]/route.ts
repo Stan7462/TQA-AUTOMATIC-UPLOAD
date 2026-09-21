@@ -2,6 +2,7 @@ import { env } from "@/lib/local-env";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { isOwner } from "@/app/access";
 import { sameOrigin } from "@/lib/tech-auth";
+import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +20,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (status === "rejected" && (typeof reviewNote !== "string" || !reviewNote.trim() || reviewNote.trim().length > 1000)) return Response.json({ error: "Add a rejection note (up to 1,000 characters)." }, { status: 400 });
   try {
     const reviewedAt = Date.now();
-    const result = await env.DB.prepare("UPDATE qc_submissions SET status = ?, reviewed_at = ?, review_note = ? WHERE id = ?").bind(status, reviewedAt, status === "rejected" ? (reviewNote as string).trim() : null, id).run();
-    if (!result.meta.changes) return Response.json({ error: "QC not found" }, { status: 404 });
+    const range = fiscalMonthBounds(fiscalMonthKey());
+    const result = await env.DB.prepare("UPDATE qc_submissions SET status = ?, reviewed_at = ?, review_note = ? WHERE id = ? AND submitted_at >= ? AND submitted_at < ?").bind(status, reviewedAt, status === "rejected" ? (reviewNote as string).trim() : null, id, range.start, range.end).run();
+    if (!result.meta.changes) return Response.json({ error: "This QC is in view-only history." }, { status: 409 });
     return Response.json({ id, status, reviewedAt }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("QC decision failed", error);

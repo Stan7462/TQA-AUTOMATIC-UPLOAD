@@ -26,6 +26,7 @@ export default function LoginPage() {
         const destination = requested && (requested === '/' || requested === '/captures' || requested === '/settings' || /^\/records\/(?:all|approved|needs-review)$/.test(requested)) ? requested : '/';
         location.replace(destination);
       } else {
+        sessionStorage.setItem('tqa-permission-setup', '1');
         location.replace('/capture');
       }
     } catch (cause) {

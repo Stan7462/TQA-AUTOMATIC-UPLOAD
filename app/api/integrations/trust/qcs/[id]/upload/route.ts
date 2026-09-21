@@ -1,5 +1,6 @@
 import { env } from "@/lib/local-env";
 import { qcIdPattern, requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, type TrustQcRow } from "@/lib/trust-api";
+import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +23,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (body.status === "failed" && (typeof errorMessage !== "string" || !errorMessage.trim() || errorMessage.trim().length > 500)) return trustError(400, "INVALID_ERROR", "errorMessage must be 1 to 500 characters.");
   if (body.status === "uploaded" && errorMessage !== undefined || body.status === "failed" && reference !== undefined) return trustError(400, "INVALID_BODY", "Unexpected field for upload status.");
   try {
-    const current = await env.DB.prepare("SELECT status, trust_upload_status AS trustUploadStatus FROM qc_submissions WHERE id = ?").bind(id).first<{ status: string; trustUploadStatus: string }>();
+    const range = fiscalMonthBounds(fiscalMonthKey());
+    const current = await env.DB.prepare("SELECT status, trust_upload_status AS trustUploadStatus, submitted_at AS submittedAt FROM qc_submissions WHERE id = ?").bind(id).first<{ status: string; trustUploadStatus: string; submittedAt: number }>();
     if (!current) return trustError(404, "NOT_FOUND", "QC not found.");
+    if (current.submittedAt < range.start || current.submittedAt >= range.end) return trustError(409, "PREVIOUS_PERIOD", "This QC belongs to a previous fiscal month.");
     if (current.status !== "approved") return trustError(409, "QC_NOT_APPROVED", "Only approved QCs can be uploaded to Trust.");
     if (current.trustUploadStatus === "uploaded") {
       if (body.status !== "uploaded") return trustError(409, "ALREADY_UPLOADED", "QC is already marked uploaded.");

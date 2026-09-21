@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 // Refresh when returning to a page, and every 30 seconds while visible.
 export function useAutoRefresh(refresh: (signal?: AbortSignal) => void | Promise<void>, enabled = true) {
   const latest = useRef(refresh);
-  latest.current = refresh;
+  useEffect(() => { latest.current = refresh; }, [refresh]);
   useEffect(() => {
     if (!enabled) return;
     let running = false;

@@ -1,10 +1,29 @@
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import QcSubmission from './qc-submission';
+
+async function requestTechnicianPermissions() {
+  if (navigator.mediaDevices?.getUserMedia) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' } } });
+      stream.getTracks().forEach(track => track.stop());
+    } catch { /* Continue so location can still be requested. */ }
+  }
+  if (navigator.geolocation) {
+    await new Promise<void>(resolve => navigator.geolocation.getCurrentPosition(
+      () => resolve(),
+      () => resolve(),
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 0 },
+    ));
+  }
+}
+
 export default function TechAccess() {
   const [techId, setTechId] = useState(''); const [entryId, setEntryId] = useState(''); const [pin, setPin] = useState('');
   const [adminSession, setAdminSession] = useState(false);
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const [permissionSetup, setPermissionSetup] = useState(false);
   async function check() {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 12_000);
@@ -13,7 +32,7 @@ export default function TechAccess() {
       if (response.ok) {
         const data = await response.json() as { techId: string; isAdmin: boolean };
         if (data.isAdmin) setAdminSession(true);
-        else setTechId(data.techId);
+        else { setPermissionSetup(sessionStorage.getItem('tqa-permission-setup') === '1'); setTechId(data.techId); }
       } else if (response.status !== 401) {
         setError('Could not check technician access. Check your connection and try again.');
       }
@@ -25,6 +44,13 @@ export default function TechAccess() {
     }
   }
   useEffect(() => { void check(); }, []);
+  useEffect(() => {
+    if (!techId || !permissionSetup) return;
+    sessionStorage.removeItem('tqa-permission-setup');
+    let active = true;
+    void requestTechnicianPermissions().finally(() => { if (active) setPermissionSetup(false); });
+    return () => { active = false; };
+  }, [techId, permissionSetup]);
   async function signIn(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setError('');
     try {
@@ -34,11 +60,14 @@ export default function TechAccess() {
       setPin('');
       if (data.isAdmin) { window.location.replace('/'); return; }
       if (!data.techId) throw new Error('Could not confirm your Tech ID.');
+      sessionStorage.setItem('tqa-permission-setup', '1');
+      setPermissionSetup(true);
       setTechId(data.techId);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not sign in'); }
     finally { setBusy(false); }
   }
   if (loading) return <main className="management-page login-dark"><div className="tech-access-loading"><p>Checking technician access…</p></div></main>;
+  if (techId && permissionSetup) return <main className="management-page login-dark"><div className="permission-setup-card" role="status"><span className="kicker">SIGNED IN AS TECH {techId}</span><h1>One quick setup</h1><p>Allow camera access first, then location access.</p><div className="permission-setup-pulse" aria-hidden="true"/></div></main>;
   if (techId) return <QcSubmission signedInTechId={techId} />;
-  return <main className="management-page profile-page login-dark"><div className="management-head tech-access-header"><div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>Sign in</h1><p>Enter your Tech ID and PIN to continue.</p>{adminSession && <p>Admin session active. <a href="/">Back to admin</a></p>}</div></div><form className="management-card profile-login" onSubmit={signIn}><label>Tech ID<input value={entryId} maxLength={32} autoComplete="username" onChange={event => setEntryId(event.target.value.toUpperCase())} required /></label><label>5-digit PIN<input value={pin} maxLength={5} inputMode="numeric" type="password" autoComplete="current-password" onChange={event => setPin(event.target.value.replace(/\D/g, ''))} required /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="button dark" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button></form></main>;
+  return <main className="management-page profile-page login-dark"><div className="management-head tech-access-header"><div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>Sign in</h1><p>Enter your Tech ID and PIN to continue.</p>{adminSession && <p>Admin session active. <Link href="/">Back to admin</Link></p>}</div></div><form className="management-card profile-login" onSubmit={signIn}><label>Tech ID<input value={entryId} maxLength={32} autoComplete="username" onChange={event => setEntryId(event.target.value.toUpperCase())} required /></label><label>5-digit PIN<input value={pin} maxLength={5} inputMode="numeric" type="password" autoComplete="current-password" onChange={event => setPin(event.target.value.replace(/\D/g, ''))} required /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="button dark" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button></form></main>;
 }

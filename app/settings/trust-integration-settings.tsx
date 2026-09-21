@@ -16,6 +16,7 @@ export default function TrustIntegrationSettings() {
   const [docsLoading, setDocsLoading] = useState(false);
   const [docsError, setDocsError] = useState("");
   const [copied, setCopied] = useState<"key" | "documentation" | "">("");
+  const [confirmingKey, setConfirmingKey] = useState<ApiKey | null>(null);
 
   async function load() {
     const response = await fetch("/api/integrations/trust/keys", { cache: "no-store" });
@@ -39,7 +40,6 @@ export default function TrustIntegrationSettings() {
   }
 
   async function revokeKey(id: string) {
-    if (!window.confirm("Revoke this extension key? The extension will stop accessing TQA until given a new key.")) return;
     setBusy(true); setError(""); setNewToken("");
     try {
       const response = await fetch(`/api/integrations/trust/keys/${id}`, { method: "DELETE" });
@@ -47,7 +47,7 @@ export default function TrustIntegrationSettings() {
       if (!response.ok) throw new Error(result.error?.message || "Could not revoke extension key.");
       await load();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not revoke extension key."); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setConfirmingKey(null); }
   }
 
   async function loadDocumentation(): Promise<string> {
@@ -91,7 +91,8 @@ export default function TrustIntegrationSettings() {
     <h3>API keys</h3>
     <form onSubmit={(event) => void createKey(event)}><input aria-label="Extension key label" value={label} maxLength={80} onChange={(event) => setLabel(event.target.value)} required/><button className="button dark" disabled={busy}>Create API key</button></form>
     {newToken && <div className="issued-pin trust-new-token" role="status"><strong>Copy this key now. It will only be shown once.</strong><code>{newToken}</code><button type="button" className="button light" onClick={() => void copyText(newToken, "key")}>{copied === "key" ? <Check size={16}/> : <Copy size={16}/>}{copied === "key" ? "Copied" : "Copy key"}</button></div>}
-    {keys.length > 0 && <div className="qc-tech-rows">{keys.map((key) => <div className="qc-tech-manage-row" key={key.id}><div><strong>{key.label}</strong><small>Key ending {key.tokenHint} · Created {new Date(key.createdAt).toLocaleDateString()}{key.lastUsedAt ? ` · Last used ${new Date(key.lastUsedAt).toLocaleString()}` : " · Never used"}</small></div><button type="button" className="button light qc-remove-button" disabled={busy} onClick={() => void revokeKey(key.id)}><Trash2 size={16}/>Revoke</button></div>)}</div>}
+    {keys.length > 0 && <div className="qc-tech-rows">{keys.map((key) => <div className="qc-tech-manage-row" key={key.id}><div><strong>{key.label}</strong><small>Key ending {key.tokenHint} · Created {new Date(key.createdAt).toLocaleDateString()}{key.lastUsedAt ? ` · Last used ${new Date(key.lastUsedAt).toLocaleString()}` : " · Never used"}</small></div><button type="button" className="button light qc-remove-button" disabled={busy} onClick={() => setConfirmingKey(key)}><Trash2 size={16}/>Revoke</button></div>)}</div>}
+    {confirmingKey && <div className="qc-confirm-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setConfirmingKey(null); }}><div className="qc-reset-dialog" role="dialog" aria-modal="true" aria-labelledby="api-revoke-title" aria-describedby="api-revoke-description"><div className="qc-reset-icon" aria-hidden="true"><Trash2 size={24}/></div><h2 id="api-revoke-title">Revoke API key?</h2><p id="api-revoke-description">The Catalyst extension will stop working until it receives a new key.</p><small>{confirmingKey.label} · ending {confirmingKey.tokenHint}</small><div className="qc-reset-actions"><button type="button" className="button light" disabled={busy} onClick={() => setConfirmingKey(null)}>Cancel</button><button type="button" className="button dark" disabled={busy} onClick={() => void revokeKey(confirmingKey.id)}>{busy ? "Revoking…" : "Revoke key"}</button></div></div></div>}
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="trust-documentation"><div><div className="settings-section-title"><BookOpen size={21}/><h3>API documentation</h3></div><p>Full endpoint reference for the agent building your Catalyst extension. No private API key is included.</p></div><div className="trust-documentation-actions"><button type="button" className="button light" onClick={() => void toggleDocumentation()} disabled={docsLoading}><BookOpen size={16}/>{docsLoading ? "Loading…" : docsOpen ? "Hide documentation" : "View documentation"}</button><button type="button" className="button light" onClick={() => void copyDocumentation()} disabled={docsLoading}><Copy size={16}/>{copied === "documentation" ? "Copied" : "Copy all documentation"}</button></div>{docsError && <p className="form-error" role="alert">{docsError}</p>}{docsOpen && <pre className="trust-documentation-text" tabIndex={0} aria-label="Complete Catalyst extension API documentation">{documentation}</pre>}</div>
   </section>;

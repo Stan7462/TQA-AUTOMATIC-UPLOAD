@@ -15,6 +15,7 @@ FROM node:24-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
     TQA_DATA_DIR=/data \
+    TZ=America/Chicago \
     HOST=0.0.0.0 \
     PORT=3000
 

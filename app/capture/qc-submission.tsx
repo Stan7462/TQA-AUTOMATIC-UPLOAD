@@ -235,7 +235,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const pinchCooldownUntil = useRef(0);
   const techId = signedInTechId;
   const draftRef = useRef<QcDraft | null>(null);
-  if (!draftRef.current) draftRef.current = { techId, submissionId: crypto.randomUUID(), jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
+  if (!draftRef.current) draftRef.current = { techId, fiscalMonth: fiscalMonthKey(), submissionId: crypto.randomUUID(), jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
   const draftWrites = useRef<Promise<void>>(Promise.resolve());
   const draftTimer = useRef<number | null>(null);
   const draftRevision = useRef(0);
@@ -388,7 +388,8 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       const current = new AbortController();
       controller = current;
       try {
-        const response = await fetch("/api/profile?count=1", { cache: "no-store", signal: current.signal });
+        const currentMonth = fiscalMonthBounds(fiscalMonthKey());
+        const response = await fetch(`/api/profile?count=1&start=${currentMonth.start}&end=${currentMonth.end}`, { cache: "no-store", signal: current.signal });
         if (!response.ok) throw new Error("Could not load QC counts.");
         const result = await response.json() as { techId: string } & QcCounts;
         if (!current.signal.aborted && result.techId === techId) setQcCounts({ captured: result.captured, uploaded: result.uploaded, rejected: result.rejected });
@@ -412,6 +413,20 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const validJobNumber = /^\d{1,6}$/.test(jobNumber);
   const submitHint = processingScreenshot ? "Reading your screenshot…" : !screenshot ? "Add your account screenshot." : !validJobNumber ? "Check or enter the job number." : taking ? "Finishing your photo…" : cameraOn ? "Close the camera to submit." : "";
   const ready = validTechId && validJobNumber && !!screenshot && photos.length >= 2 && photos.length <= MAX_PHOTOS;
+
+  useEffect(() => {
+    if (!draftReady || !month || draftRef.current?.fiscalMonth === month) return;
+    pinch.current = null;
+    stream.current?.getTracks().forEach((track) => track.stop());
+    stream.current = null;
+    if (video.current) video.current.srcObject = null;
+    setCameraReady(false); setCameraOn(false);
+    const fresh: QcDraft = { techId, fiscalMonth: month, submissionId: crypto.randomUUID(), jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
+    draftRef.current = fresh;
+    setSubmissionId(fresh.submissionId); setJobNumber(""); setScreenshot(null); setPhotos([]); setLocation(null);
+    setScreenshotReadingMessage(""); setSubmitted(false); setResetMessage("New fiscal month started. Your QC form was reset.");
+    draftWrites.current = draftWrites.current.then(() => deleteQcDraft(techId));
+  }, [draftReady, month, techId]);
 
   useEffect(() => {
     if (!validTechId || !month) { setProgress(null); setProgressError(""); return; }
@@ -468,7 +483,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       draftWrites.current = removal.catch(() => undefined);
       await removal;
       locationRequest.current = null;
-      draftRef.current = { techId, submissionId: nextId, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
+      draftRef.current = { techId, fiscalMonth: fiscalMonthKey(), submissionId: nextId, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
       setSubmissionId(nextId);
       setJobNumber("");
       setScreenshot(null);
@@ -672,7 +687,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       catch { setDraftStatus("failed"); }
       const nextId = crypto.randomUUID();
       locationRequest.current = null;
-      draftRef.current = { techId, submissionId: nextId, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
+      draftRef.current = { techId, fiscalMonth: fiscalMonthKey(), submissionId: nextId, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
       setScreenshotReadingMessage(""); setSubmitted(true); setJobNumber(""); setScreenshot(null); setPhotos([]); setLocation(null); setLocationChecking(false); setSubmissionId(nextId);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Could not submit this QC.";

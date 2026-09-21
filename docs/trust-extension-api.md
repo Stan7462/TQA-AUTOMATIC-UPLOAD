@@ -2,14 +2,14 @@
 
 Version: 1 (2026-09-18)
 
-Base URL: `https://YOUR-TQA-HOST.example`
+Base URL: `{{TQA_BASE_URL}}`
 
-This document is the contract for a separate browser extension that uploads approved TQA QCs into Trust. The API runs on the owner's Mac. Trust login and Trust page automation belong to the extension; this API does not log into Trust or send files to Trust itself.
+This document is the contract for a separate browser extension that uploads approved TQA QCs into Trust. The API runs on the TQA server. Trust login and Trust page automation belong to the extension; this API does not log into Trust or send files to Trust itself.
 
 ## Required extension workflow
 
 1. The owner signs into Trust in the browser, opens the extension, and supplies a TQA API key generated in **TQA → Settings → Trust extension API**. Treat the key as a secret. The TQA admin Tech ID/PIN is never used by the extension.
-2. On opening, call `GET /api/integrations/trust/qcs` and display the `qcs` list. Only approved QCs with `uploadStatus` `ready` or `failed` appear by default. Follow `nextCursor` for more pages.
+2. On opening, call `GET /api/integrations/trust/qcs` and display the `qcs` list. Only approved QCs from the current fiscal month (22nd through the following 21st) with `uploadStatus` `ready` or `failed` appear by default. The queue starts fresh every 22nd. Follow `nextCursor` for more pages.
 3. On **Start**, process QCs one at a time. Before each QC, call `GET /api/integrations/trust/qcs/{id}` to recheck its status. Fetch every photo with the same bearer key, then upload the screenshot and live photos to the correct Trust job. Show progress in the extension (e.g., 2 of 6 photos and 3 of 10 QCs). The server does not track percentage.
 4. Confirm that Trust saved **all** required photos for that QC. Only then call `PATCH /api/integrations/trust/qcs/{id}/upload` with `{"status":"uploaded"}`. If Trust returns a job or upload ID, include it as `externalReference`.
 5. Remove that QC from the visible extension queue after the API confirms `uploadStatus: "uploaded"`. Refresh the list to reconcile. If Trust upload fails, report `failed` with a short error; it remains available for retry.
@@ -25,7 +25,7 @@ All `/api/integrations/trust/qcs...` and `/api/integrations/trust/photos...` end
 Authorization: Bearer tqa_trust_<64 lowercase hex characters>
 ```
 
-The API key is created and revoked from the TQA admin Settings page. It is shown **once** on creation, stored as a SHA-256 hash on the server, and can be revoked. A key permits reading approved QC metadata and images and reporting Trust upload results. It does not permit approving/rejecting QCs, managing technicians, or creating keys. Use HTTPS. Never put the key in a URL, log, Trust page DOM, or content-script message visible to the page. Keep network calls and key storage in the extension background service worker. For Chrome Manifest V3, grant host permission for `https://YOUR-TQA-HOST.example/*`; fetch from the background context, and use a content script only for interaction with Trust.
+The API key is created and revoked from the TQA admin Settings page. It is shown **once** on creation, stored as a SHA-256 hash on the server, and can be revoked. A key permits reading approved QC metadata and images and reporting Trust upload results. It does not permit approving/rejecting QCs, managing technicians, or creating keys. Use HTTPS. Never put the key in a URL, log, Trust page DOM, or content-script message visible to the page. Keep network calls and key storage in the extension background service worker. For Chrome Manifest V3, grant host permission for `{{TQA_BASE_URL}}/*`; fetch from the background context, and use a content script only for interaction with Trust.
 
 Image `url` values are **protected API URLs**, not public links. Fetch each with `Authorization`, read the JPEG bytes as a `Blob`, then make a `File` for the Trust file input or upload flow. An ordinary `<img src="...">` request will not include the bearer key.
 
@@ -48,7 +48,7 @@ GET /api/integrations/trust/qcs?uploadStatus=uploadable&limit=50
 Authorization: Bearer <key>
 ```
 
-`uploadStatus` is optional: `uploadable` (default, `ready` + `failed`), `uploaded`, or `all`. `limit` defaults to 50 and accepts 1–100. To paginate, pass the exact `nextCursor` as the `cursor` query parameter until it is `null`. Results are sorted by approval time, then QC ID, oldest first. `total` counts matching approved QCs across all pages at the time of the request. The queue may change while paging; deduplicate by QC ID.
+`uploadStatus` is optional: `uploadable` (default, `ready` + `failed`), `uploaded`, or `all`. Every option is limited to the current fiscal month. `limit` defaults to 50 and accepts 1–100. To paginate, pass the exact `nextCursor` as the `cursor` query parameter until it is `null`. Results are sorted by approval time, then QC ID, oldest first. `total` counts matching approved QCs across all pages at the time of the request. The queue may change while paging; deduplicate by QC ID.
 
 ```json
 {
@@ -66,8 +66,8 @@ Authorization: Bearer <key>
       "lastUploadError": null,
       "uploadAttempts": 0,
       "photos": [
-        { "id": "0000000000001-00000000-0000-4000-8000-000000000002.jpg", "kind": "account_screenshot", "order": 0, "contentType": "image/jpeg", "url": "https://YOUR-TQA-HOST.example/api/integrations/trust/photos/0000000000001-00000000-0000-4000-8000-000000000002.jpg" },
-        { "id": "0000000000002-00000000-0000-4000-8000-000000000003.jpg", "kind": "live_photo", "order": 1, "contentType": "image/jpeg", "url": "https://YOUR-TQA-HOST.example/api/integrations/trust/photos/0000000000002-00000000-0000-4000-8000-000000000003.jpg" }
+        { "id": "0000000000001-00000000-0000-4000-8000-000000000002.jpg", "kind": "account_screenshot", "order": 0, "contentType": "image/jpeg", "url": "{{TQA_BASE_URL}}/api/integrations/trust/photos/0000000000001-00000000-0000-4000-8000-000000000002.jpg" },
+        { "id": "0000000000002-00000000-0000-4000-8000-000000000003.jpg", "kind": "live_photo", "order": 1, "contentType": "image/jpeg", "url": "{{TQA_BASE_URL}}/api/integrations/trust/photos/0000000000002-00000000-0000-4000-8000-000000000003.jpg" }
       ]
     }
   ],
@@ -140,6 +140,8 @@ The Settings page provides these controls; use it rather than making raw admin A
 
 ## Errors and retry policy
 
+`409 PREVIOUS_PERIOD` means the QC belongs to an earlier fiscal month and is now view-only history. Remove it from the extension queue without retrying.
+
 Integration API errors use the shape:
 
 ```json
@@ -156,7 +158,7 @@ Integration API errors use the shape:
 | `415` | `UNSUPPORTED_MEDIA_TYPE` | Send `Content-Type: application/json`. |
 | `503` | `UNAVAILABLE` | Retry with exponential backoff; keep local progress. |
 
-For timeouts, connection loss, and other 5xx errors, retry with backoff. Do not mark a QC Uploaded locally until the API confirms it. If the upload to Trust itself has an uncertain outcome, inspect Trust before retrying to avoid duplicate photos. The owner's Mac and Tailscale Funnel must be online for the API to be reachable.
+For timeouts, connection loss, and other 5xx errors, retry with backoff. Do not mark a QC Uploaded locally until the API confirms it. If the upload to Trust itself has an uncertain outcome, inspect Trust before retrying to avoid duplicate photos. The TQA server must be online for the API to be reachable.
 
 ## Acceptance checks for the extension agent
 

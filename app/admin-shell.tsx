@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import AdminNav from "@/app/admin-nav";
 
-type AdminPage = "records" | "approvals" | "settings";
+type AdminPage = "records" | "approvals" | "history" | "settings";
 
 export default function AdminShell({ active, children }: { active: AdminPage; children: ReactNode }) {
   return <div className="app admin-dark">

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, LockKeyhole, RotateCcw } from "lucide-react";
 import { readQcDraft, writeQcDraft } from "@/lib/qc-draft";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
+import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 type View='rejected'|'captured'|'uploaded';
 type Submission={id:string;jobNumber:string;screenshotId:string;photoIds:string[];submittedAt:number;reviewNote:string|null;status:string;trustUploadStatus:string};
 const titles={rejected:'My rejected QCs',captured:'My captured QCs',uploaded:'Uploaded to Catalyst'};
@@ -41,7 +42,7 @@ export default function Profile(){
        return blob;
      }));
      // A new ID sends the edited QC through normal review, preserving the rejected record.
-     await writeQcDraft({techId,submissionId:crypto.randomUUID(),jobNumber:/^\d{1,6}$/.test(item.jobNumber)?item.jobNumber:'',screenshot:pictures[0],photos:pictures.slice(1),location:null,updatedAt:Date.now()});
+     await writeQcDraft({techId,fiscalMonth:fiscalMonthKey(),submissionId:crypto.randomUUID(),jobNumber:/^\d{1,6}$/.test(item.jobNumber)?item.jobNumber:'',screenshot:pictures[0],photos:pictures.slice(1),location:null,updatedAt:Date.now()});
      location.assign('/capture');
    }catch{
      const message='Could not load all pictures or save this QC. Your unfinished QC is unchanged. Please try again.';
@@ -51,7 +52,8 @@ export default function Profile(){
  const load=useCallback(async(signal?:AbortSignal)=>{
   try{
    const selected=new URLSearchParams(location.search).get('view');const next:View=selected==='captured'||selected==='uploaded'?selected:'rejected';setView(next);
-   const response=await fetch(`/api/profile?view=${next}`,{cache:'no-store',signal});
+   const range=fiscalMonthBounds(fiscalMonthKey());
+   const response=await fetch(`/api/profile?view=${next}&start=${range.start}&end=${range.end}`,{cache:'no-store',signal});
    if(response.status===401){setSignedIn(false);return;}
    if(!response.ok)throw Error('Could not load your QCs. Please try again.');
    const result=await response.json() as {techId:string;captured:number;rejected:number;uploaded:number;submissions:Submission[]};

@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, writeFileSync, chmodSync, copyFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const data = join(root,'.tqa-data');

@@ -3,6 +3,7 @@ import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { isOwner } from "@/app/access";
 import { ADMIN_TECH_ID, hashPin, newPin, normalizeTechId, randomHex, sameOrigin } from "@/lib/tech-auth";
 import { decryptPin, encryptPin } from "@/lib/pin-vault";
+import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,8 @@ export async function GET() {
   if (!isOwner(await getChatGPTUser())) return Response.json({ error: "Forbidden" }, { status: 403 });
   if (!env.DB) return Response.json({ error: "Unavailable" }, { status: 503 });
   try {
-    const result = await env.DB.prepare("SELECT t.tech_id AS techId, COALESCE(q.total, 0) AS qcCount, 1 AS hasPin, t.pin_ciphertext AS pinCiphertext, COALESCE(r.state, 'active') AS state FROM technicians t LEFT JOIN (SELECT tech_id, COUNT(*) AS total FROM qc_submissions GROUP BY tech_id) q ON q.tech_id = t.tech_id LEFT JOIN technician_removals r ON r.tech_id = t.tech_id WHERE t.active = 1 AND (r.state IS NULL OR r.state = 'deleting') ORDER BY t.tech_id").all<{ techId: string; qcCount: number; hasPin: number; pinCiphertext: string | null; state: string }>();
+    const { start, end } = fiscalMonthBounds(fiscalMonthKey());
+    const result = await env.DB.prepare("SELECT t.tech_id AS techId, COALESCE(q.total, 0) AS qcCount, 1 AS hasPin, t.pin_ciphertext AS pinCiphertext, COALESCE(r.state, 'active') AS state FROM technicians t LEFT JOIN (SELECT tech_id, COUNT(*) AS total FROM qc_submissions WHERE submitted_at >= ? AND submitted_at < ? GROUP BY tech_id) q ON q.tech_id = t.tech_id LEFT JOIN technician_removals r ON r.tech_id = t.tech_id WHERE t.active = 1 AND (r.state IS NULL OR r.state = 'deleting') ORDER BY t.tech_id").bind(start, end).all<{ techId: string; qcCount: number; hasPin: number; pinCiphertext: string | null; state: string }>();
     const technicians = await Promise.all(result.results.map(async ({ pinCiphertext, ...tech }) => ({ ...tech, isAdmin: tech.techId === ADMIN_TECH_ID, pin: pinCiphertext ? await decryptPin(pinCiphertext, env.PIN_ENCRYPTION_KEY) : null })));
     return Response.json({ technicians }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {

@@ -1,6 +1,6 @@
-# TQA Automatic Upload — laptop host
+# TQA Automatic Upload
 
-The Mac version runs at `http://127.0.0.1:3000` and saves QC records in `.tqa-data/tqa.sqlite` and photos in `.tqa-data/captures/`. A Tailscale Funnel public HTTPS address can send technician traffic to this local port. The laptop must stay on, connected to the internet, and signed in for uploads to work.
+Production runs in Coolify at `https://qc.leadtechx.com` and keeps the SQLite database and captured photos in the persistent `/data` volume. A local preview can run at `http://127.0.0.1:3000` with its own data under `.tqa-data/`.
 
 Share the same public root URL with admins and technicians. It opens one sign-in form for Tech ID and the private 5-digit PIN issued in Settings. The admin Tech ID opens the review workspace; all other active Tech IDs open `/capture` for QC submission. Administrative pages and photos require the admin Tech ID session. Technicians submit a job number, one saved account screenshot, and 3–7 live camera photos. The upload API also checks their PIN session and Tech ID. The technician profile shows rejected QCs and review notes. A browser page cannot prove a camera image came from a live scene against a modified client.
 
@@ -12,11 +12,11 @@ An unfinished QC is saved in the technician's browser storage after each screens
 
 The six QCs, 27 photos, Tech 7462 account, and five blocked Tech IDs from the earlier Sites deployment were imported into the laptop. The old Sites version is kept intact as a fallback. Any new QC submitted to the old URL after the migration snapshot must be imported separately before retiring it.
 
-## Start and update
+## Local start and update
 
 The user LaunchAgent `com.tqa.automatic-upload` starts the production server at login. Check it with `launchctl print gui/$(id -u)/com.tqa.automatic-upload`. After code changes, run `./.tqa-data/node ./node_modules/vinext/dist/cli.js build`, then `launchctl kickstart -k gui/$(id -u)/com.tqa.automatic-upload`. Startup runs `prisma migrate deploy` before opening the web server.
 
-`TQA_PUBLIC_ORIGIN` is loaded from `.tqa-data/public-origin.txt`, which should contain exactly the Funnel HTTPS origin (for example, `https://mac.tailnet.ts.net`). Set it when Tailscale provides the hostname, then restart the LaunchAgent. This keeps upload and sign-in origin checks working through Funnel.
+For laptop hosting, `TQA_PUBLIC_ORIGIN` can be loaded from `.tqa-data/public-origin.txt`. For Coolify, set it to `https://qc.leadtechx.com` in the application environment. This keeps upload, sign-in, and API photo URLs on the public HTTPS origin.
 
 Do not publish the local data directory or PINs. Back up `.tqa-data`, including the SQLite database, photos, and secrets, with Time Machine or an equivalent local backup. The PIN encryption key in the secrets file is required to display existing PINs in Settings.
 

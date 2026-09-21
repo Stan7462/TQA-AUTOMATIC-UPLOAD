@@ -9,10 +9,23 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    "dist/**",
     "out/**",
     "build/**",
+    "public/ocr/**",
+    "vendor/**",
     "next-env.d.ts",
   ]),
+  {
+    rules: {
+      // These client pages intentionally bootstrap async data and browser-only
+      // state after hydration. The rule flags those valid loading effects.
+      "react-hooks/set-state-in-effect": "off",
+      // QC images use authenticated routes and temporary blob URLs, which are
+      // intentionally rendered without the Next image optimizer.
+      "@next/next/no-img-element": "off",
+    },
+  },
   {
     files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],
     rules: {
