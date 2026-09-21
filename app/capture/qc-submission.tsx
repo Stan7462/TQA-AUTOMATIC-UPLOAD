@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, Check, ChevronRight, FileText, FileWarning, ImagePlus, Info, LogOut, Send, Trash2, X } from "lucide-react";
+import { Camera, Check, ChevronRight, FileText, FileWarning, ImagePlus, LogOut, RotateCcw, Send, Trash2, X } from "lucide-react";
+import { sixDigitJobNumber } from "@/lib/job-number-ocr";
 import { fiscalDeadline, fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 import { deleteQcDraft, readQcDraft, writeQcDraft, type QcDraft } from "@/lib/qc-draft";
 
@@ -124,6 +125,39 @@ async function screenshotAsJpeg(file: File): Promise<Blob> {
   return compactJpeg(canvas);
 }
 
+async function recognizeJobNumber(file: File, onProgress: (progress: number) => void): Promise<string | null> {
+  let worker: import("tesseract.js").Worker | undefined;
+  let ended = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const scan = async () => {
+    const { createWorker } = await import("tesseract.js");
+    if (ended) return null;
+    worker = await createWorker("eng", 1, {
+      workerPath: "/ocr/worker.min.js",
+      corePath: "/ocr",
+      langPath: "/ocr",
+      // The caller handles recognition failures and preserves manual entry.
+      errorHandler: () => {},
+      logger: (message) => {
+        if (!ended && message.status === "recognizing text") onProgress(Math.max(1, Math.min(99, Math.round(message.progress * 100))));
+      },
+    });
+    if (ended) { await worker.terminate(); return null; }
+    const result = await worker.recognize(file);
+    return sixDigitJobNumber(result.data.text, result.data.confidence);
+  };
+  try {
+    return await Promise.race([
+      scan(),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Job-number scan timed out.")), 30_000); }),
+    ]);
+  } finally {
+    ended = true;
+    clearTimeout(timer);
+    if (worker) await worker.terminate();
+  }
+}
+
 class UploadFailure extends Error {
   constructor(message: string, readonly retryable: boolean) { super(message); }
 }
@@ -198,6 +232,12 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const draftTimer = useRef<number | null>(null);
   const draftRevision = useRef(0);
   const screenshotProcessing = useRef(false);
+  const clearingDraft = useRef(false);
+  const resetDialog = useRef<HTMLDialogElement>(null);
+  const resetCancel = useRef<HTMLButtonElement>(null);
+  const [resetConfirmation, setResetConfirmation] = useState(false);
+  const [resetMessage, setResetMessage] = useState("");
+  const [resetError, setResetError] = useState("");
   const [jobNumber, setJobNumber] = useState("");
   const [submissionId, setSubmissionId] = useState(draftRef.current.submissionId);
   const [screenshot, setScreenshot] = useState<Blob | null>(null);
@@ -209,6 +249,8 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const [cameraZoom, setCameraZoom] = useState(1);
   const [taking, setTaking] = useState(false);
   const [processingScreenshot, setProcessingScreenshot] = useState(false);
+  const [screenshotReading, setScreenshotReading] = useState(0);
+  const [screenshotReadingMessage, setScreenshotReadingMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState("");
@@ -227,7 +269,8 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     void readQcDraft(techId).then((draft) => {
       if (!active) return;
       if (draft) {
-        const savedJobNumber = draft.jobNumber.replace(/\D/g, "").slice(0, 6); draftRef.current = { ...draft, jobNumber: savedJobNumber };
+        const savedJobNumber = draft.jobNumber.replace(/\D/g, "").slice(0, 6);
+        draftRef.current = { ...draft, jobNumber: savedJobNumber };
         setSubmissionId(draft.submissionId);
         setJobNumber(savedJobNumber);
         setScreenshot(draft.screenshot);
@@ -240,6 +283,19 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     });
     return () => { active = false; if (draftTimer.current !== null) window.clearTimeout(draftTimer.current); };
   }, [techId]);
+
+  useEffect(() => {
+    if (!resetConfirmation || !resetDialog.current) return;
+    const dialog = resetDialog.current;
+    const previousOverflow = document.body.style.overflow;
+    dialog.showModal();
+    resetCancel.current?.focus();
+    document.body.style.overflow = "hidden";
+    return () => {
+      dialog.close();
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [resetConfirmation]);
 
   function queueDraftSave(next: QcDraft): Promise<boolean> {
     const snapshot = { ...next, updatedAt: Date.now() };
@@ -258,7 +314,8 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   }
 
   function changeJobNumber(value: string) {
-    const digits = value.replace(/\D/g, "").slice(0, 6); setJobNumber(digits);
+    const digits = value.replace(/\D/g, "").slice(0, 6);
+    setJobNumber(digits);
     draftRef.current = { ...draftRef.current!, jobNumber: digits };
     setDraftStatus("saving");
     if (draftTimer.current !== null) window.clearTimeout(draftTimer.current);
@@ -315,7 +372,9 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const month = today ? fiscalMonthKey(today) : null;
   const approvedQcs = progress?.techId === techId && progress.month === month ? progress.approved : null;
   const remainingQcs = approvedQcs === null ? null : Math.max(0, MONTHLY_QC_GOAL - approvedQcs);
-  const validJobNumber = /^\d{1,6}$/.test(jobNumber); const ready = validTechId && validJobNumber && !!screenshot && photos.length >= 2 && photos.length <= MAX_PHOTOS;
+  const validJobNumber = /^\d{1,6}$/.test(jobNumber);
+  const submitHint = processingScreenshot ? "Reading your screenshot…" : !screenshot ? "Add your account screenshot." : !validJobNumber ? "Check or enter the job number." : photos.length < 2 ? `Take ${2 - photos.length} more live ${photos.length === 1 ? "photo" : "photos"}.` : taking ? "Finishing your photo…" : cameraOn ? "Close the camera to submit." : "";
+  const ready = validTechId && validJobNumber && !!screenshot && photos.length >= 2 && photos.length <= MAX_PHOTOS;
 
   useEffect(() => {
     if (!validTechId || !month) { setProgress(null); setProgressError(""); return; }
@@ -352,6 +411,53 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     setCameraReady(false);
     setCameraOn(false);
   }
+  async function startNewQc() {
+    if (!draftReady || busy || taking || screenshotProcessing.current || logoutBusy || clearingDraft.current) return;
+    if (!resetConfirmation) return;
+    clearingDraft.current = true;
+    setBusy(true);
+    setResetError("");
+    setResetMessage("");
+    stopCamera();
+    try {
+      const nextId = crypto.randomUUID();
+      if (draftTimer.current !== null) {
+        window.clearTimeout(draftTimer.current);
+        draftTimer.current = null;
+      }
+      // Delete after queued saves so an older write cannot restore this draft.
+      ++draftRevision.current;
+      const removal = draftWrites.current.then(() => deleteQcDraft(techId));
+      draftWrites.current = removal.catch(() => undefined);
+      await removal;
+      draftRef.current = { techId, submissionId: nextId, jobNumber: "", screenshot: null, photos: [], updatedAt: Date.now() };
+      setSubmissionId(nextId);
+      setJobNumber("");
+      setScreenshot(null);
+      setPhotos([]);
+      setSubmitted(false);
+      setScreenshotReading(0);
+      setScreenshotReadingMessage("");
+      setUploadProgress(null);
+      setUploadLabel("");
+      setError("");
+      setLogoutError("");
+      setCameraZoom(1);
+      setCaptured(null);
+      setFlash(0);
+      pinchCooldownUntil.current = 0;
+      setDraftStatus("idle");
+      setResetMessage("Ready for a new QC. Upload the next job’s screenshot.");
+      setResetConfirmation(false);
+    } catch {
+      setDraftStatus("failed");
+      setResetError("Could not clear the saved draft. Your pictures are still here; please try again.");
+    } finally {
+      clearingDraft.current = false;
+      setBusy(false);
+    }
+  }
+
   async function logOut() {
     if (busy || taking || processingScreenshot || logoutBusy) return;
     setLogoutBusy(true);
@@ -396,16 +502,45 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     if (!file || screenshotProcessing.current) return;
     const previousStatus = draftStatus;
     screenshotProcessing.current = true;
+    setResetMessage("");
+    setResetError("");
     setProcessingScreenshot(true);
+    setScreenshotReading(0);
+    setScreenshotReadingMessage("Reading the job number from this screenshot…");
     setDraftStatus("saving");
     setError("");
     try {
+      // Decode/validate the screenshot first; OCR still reads the original file.
       const image = await screenshotAsJpeg(file);
+      let detectedJobNumber: string | null = null;
+      let recognitionFailed = false;
+      try {
+        detectedJobNumber = await recognizeJobNumber(file, setScreenshotReading);
+      } catch {
+        recognitionFailed = true;
+      }
       if (draftTimer.current !== null) { window.clearTimeout(draftTimer.current); draftTimer.current = null; }
-      await queueDraftSave({ ...draftRef.current!, screenshot: image });
+      const existingJobNumber = draftRef.current!.jobNumber;
+      const nextJobNumber = existingJobNumber || detectedJobNumber || "";
+      await queueDraftSave({ ...draftRef.current!, jobNumber: nextJobNumber, screenshot: image });
+      if (!existingJobNumber && detectedJobNumber) setJobNumber(detectedJobNumber);
       setScreenshot(image);
+      setScreenshotReading(100);
+      setScreenshotReadingMessage(detectedJobNumber
+        ? existingJobNumber && existingJobNumber !== detectedJobNumber
+          ? `Found job ${detectedJobNumber}. Your existing job number was kept; please verify it.`
+          : existingJobNumber
+            ? `Job number ${detectedJobNumber} matches the screenshot.`
+            : `Job number ${detectedJobNumber} was filled in. Please verify it.`
+        : recognitionFailed
+          ? "Screenshot saved. The job number could not be read; enter it manually."
+          : "Screenshot saved. No clear six-digit job number was found; enter it manually.");
     }
-    catch (cause) { setDraftStatus(previousStatus); setError(cause instanceof Error ? cause.message : "Could not open the screenshot."); }
+    catch (cause) {
+      setDraftStatus(previousStatus);
+      setScreenshotReadingMessage("");
+      setError(cause instanceof Error ? cause.message : "Could not open the screenshot.");
+    }
     finally { screenshotProcessing.current = false; setProcessingScreenshot(false); }
   }
 
@@ -495,7 +630,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       catch { setDraftStatus("failed"); }
       const nextId = crypto.randomUUID();
       draftRef.current = { techId, submissionId: nextId, jobNumber: "", screenshot: null, photos: [], updatedAt: Date.now() };
-      setSubmitted(true); setJobNumber(""); setScreenshot(null); setPhotos([]); setSubmissionId(nextId);
+      setScreenshotReadingMessage(""); setSubmitted(true); setJobNumber(""); setScreenshot(null); setPhotos([]); setSubmissionId(nextId);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Could not submit this QC.";
       setError(cause instanceof UploadFailure && cause.retryable ? `${message} Your unfinished QC is saved on this phone. Check your connection and tap Submit QC for approval again.` : message);
@@ -507,20 +642,34 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
 
   return <main className={`capture-shell qc-dark-shell qc-reference${cameraOn ? " qc-camera-active" : ""}`}>
     <div className="camera-app qc-form">
-      <header className="camera-header qc-reference-header"><div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>New QC submission</h1></div><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => void logOut()}><LogOut size={17}/>{logoutBusy ? "Logging out…" : "Log out"}</button><p>Signed in as Tech {techId}. Enter the job number, add the job screenshot, then take the required live photos.</p></header>
-      <a className="profile-link qc-rejected-link" href="/profile"><FileWarning size={22}/><span>My rejected QCs{qcCounts !== null && qcCounts.rejected > 0 && <span className="rejected-count" aria-label={`${qcCounts.rejected} rejected QCs`}>{qcCounts.rejected}</span>}</span><ChevronRight size={20}/></a>
-      <section className="qc-tech-counts" aria-label="My QC totals"><div><span>Captured QCs</span><strong>{qcCounts?.captured ?? "—"}</strong><small>Submitted for review</small></div><div><span>Uploaded to Catalyst</span><strong>{qcCounts?.uploaded ?? "—"}</strong><small>Successfully completed</small></div></section>
+      <header className="camera-header qc-reference-header"><div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>New QC submission</h1></div><div className="qc-header-actions"><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => { setResetError(""); setResetConfirmation(true); }}><RotateCcw size={17}/>Start new QC</button><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => void logOut()}><LogOut size={17}/>{logoutBusy ? "Logging out…" : "Log out"}</button></div><p>Signed in as Tech {techId}. Upload the job screenshot, check the job number, then take the required live photos.</p></header>
+      <dialog ref={resetDialog} className="qc-reset-dialog" aria-labelledby="qc-reset-title" aria-describedby="qc-reset-description" onCancel={(event) => { event.preventDefault(); if (!clearingDraft.current) setResetConfirmation(false); }}>
+        <div className="qc-reset-icon" aria-hidden="true"><RotateCcw size={24}/></div>
+        <h2 id="qc-reset-title">Start a new QC?</h2>
+        <p id="qc-reset-description">Your current photos, screenshot and job number will be cleared.</p>
+        <small>Submitted QCs stay in your history.</small>
+        {resetError && <p className="form-error" role="alert">{resetError}</p>}
+        <div className="qc-reset-actions">
+          <button ref={resetCancel} type="button" className="button light" disabled={busy} onClick={() => setResetConfirmation(false)}>Cancel</button>
+          <button type="button" className="button dark" disabled={busy} onClick={() => void startNewQc()}>{busy ? "Clearing…" : "Start new QC"}</button>
+        </div>
+      </dialog>
+      {resetMessage && <p className="qc-reset-status" role="status">{resetMessage}</p>}
+      <section className="qc-tech-summary" aria-label="My QC totals">
+        <a className="qc-summary-card qc-summary-rejected" href="/profile?view=rejected"><FileWarning size={19}/><span>My rejected QCs</span><strong>{qcCounts?.rejected ?? "—"}</strong><ChevronRight size={17}/></a>
+        <a className="qc-summary-card" href="/profile?view=captured"><span>Captured QCs</span><strong>{qcCounts?.captured ?? "—"}</strong></a>
+        <a className="qc-summary-card" href="/profile?view=uploaded"><span>Uploaded to Catalyst</span><strong>{qcCounts?.uploaded ?? "—"}</strong></a>
+      </section>
       {logoutError && <p className="form-error" role="alert">{logoutError}</p>}
-      {!submitted && <div className={`qc-draft-message${draftStatus === "failed" ? " failed" : ""}`} role="status"><Info size={20}/><span>{draftStatus === "failed" ? "This phone could not save your unfinished QC. Keep this page open until you submit." : draftStatus === "saving" ? "Saving your unfinished QC on this phone…" : draftStatus === "saved" ? "Progress saved on this phone. Reopen this link in the same browser to continue." : "Your progress will be saved on this phone as you work."}</span></div>}
-      <div className="qc-deadline" role="status"><div className="qc-progress-ring" aria-hidden="true" style={{ background: `conic-gradient(#d7e9ff ${approvedQcs === null ? 0 : Math.min(100, approvedQcs / MONTHLY_QC_GOAL * 100)}%, #394b5a 0)` }}/><div className="qc-deadline-message"><strong>{remainingQcs === 0 ? "Monthly goal complete" : deadline ? deadline.daysLeft === 0 ? "Due today" : `${deadline.daysLeft} ${deadline.daysLeft === 1 ? "day" : "days"} left` : "Monthly QC deadline"}</strong><span>{!validTechId ? "Sign in again to see QCs remaining" : progressError ? "Approved QC progress is unavailable. Try again shortly." : remainingQcs === null ? "Checking approved QC progress…" : remainingQcs === 0 ? "0 approved QCs remaining" : `to finish ${remainingQcs} approved ${remainingQcs === 1 ? "QC" : "QCs"}`}</span></div><small>Fiscal month ends <b>{deadline ? deadline.date.toLocaleDateString(undefined, { month: "long", day: "numeric" }) : "on the 21st"}</b></small></div>
+      <div className="qc-deadline" role="status"><div className="qc-progress-ring" aria-hidden="true" style={{ background: `conic-gradient(#d7e9ff ${approvedQcs === null ? 0 : Math.min(100, approvedQcs / MONTHLY_QC_GOAL * 100)}%, #394b5a 0)` }}/><div className="qc-deadline-message"><strong>{remainingQcs === 0 ? "Monthly goal complete" : deadline ? deadline.daysLeft === 0 ? "Due today" : `${deadline.daysLeft} ${deadline.daysLeft === 1 ? "day" : "days"} left` : "Monthly QC deadline"}</strong><span>{!validTechId ? "Sign in again to see QCs remaining" : progressError ? "Approved QC progress is unavailable. Try again shortly." : remainingQcs === null ? "Checking approved QC progress…" : remainingQcs === 0 ? `${approvedQcs} of 5 approved · 0 remaining` : `${approvedQcs} of 5 approved · ${remainingQcs} remaining`}</span></div><small>Due <b>{deadline ? deadline.date.toLocaleDateString(undefined, { month: "long", day: "numeric" }) : "on the 21st"}</b></small></div>
       {submitted ? <div className="qc-success" role="status"><Check size={34}/><h2>Sent for review</h2><p>Your QC was submitted for approval.</p><button className="button dark" onClick={() => setSubmitted(false)}>Start another QC</button></div> : <>
         <div className="qc-step-timeline">
-        <section className="qc-step qc-setup-step"><div className="qc-step-marker"><span>1</span></div><div className="qc-step-card"><div className="qc-step-heading"><h2>Job number</h2><p>Enter up to 6 digits for this job.</p></div><div className="qc-job-field"><span aria-hidden="true">#</span><input className="qc-tech-id" aria-label="Job number" placeholder="Enter job number" autoComplete="off" inputMode="numeric" pattern="[0-9]*" value={jobNumber} maxLength={6} disabled={busy || taking || processingScreenshot} onChange={(event) => changeJobNumber(event.target.value)} onBlur={saveJobNumberNow} /></div></div></section>
-        <section className="qc-step qc-setup-step qc-screenshot-step"><div className="qc-step-marker"><span>2</span></div><div className="qc-step-card"><div className="qc-step-heading"><h2>Account screenshot</h2><p>Upload a screenshot of the account page.</p></div><label className="qc-file-picker qc-screenshot-button"><ImagePlus size={25}/><span>{processingScreenshot ? "Preparing…" : screenshot ? "Replace screenshot" : "Upload screenshot"}</span><input type="file" accept="image/*" aria-label="Account screenshot from phone" disabled={busy || taking || processingScreenshot} onChange={(event) => { void chooseScreenshot(event.target.files?.[0]); event.target.value = ""; }} /></label></div></section>
+        <section className="qc-step qc-setup-step qc-screenshot-step"><div className="qc-step-marker"><span>1</span></div><div className="qc-step-card"><div className="qc-step-heading"><h2>Account screenshot</h2><p>Upload a clear screenshot to read the job number automatically.</p></div><label className="qc-file-picker qc-screenshot-button"><ImagePlus size={25}/><span>{processingScreenshot ? screenshotReading > 0 ? `Reading job number ${screenshotReading}%` : "Starting job-number scan…" : screenshot ? "Replace screenshot" : "Upload screenshot"}</span><input type="file" accept="image/*" aria-label="Account screenshot from phone" disabled={busy || taking || processingScreenshot} onChange={(event) => { void chooseScreenshot(event.target.files?.[0]); event.target.value = ""; }} /></label>{screenshotReadingMessage && <p className={`qc-ocr-status${processingScreenshot ? " is-reading" : ""}`} role="status">{screenshotReadingMessage}</p>}</div></section>
+        <section className="qc-step qc-setup-step"><div className="qc-step-marker"><span>2</span></div><div className="qc-step-card"><div className="qc-step-heading"><h2>Job number</h2><p>Check the number read from your screenshot, or enter up to 6 digits.</p></div><div className="qc-job-field"><span aria-hidden="true">#</span><input className="qc-tech-id" aria-label="Job number" placeholder="Enter job number" autoComplete="off" inputMode="numeric" pattern="[0-9]*" value={jobNumber} maxLength={6} disabled={busy || taking || processingScreenshot} onChange={(event) => changeJobNumber(event.target.value)} onBlur={saveJobNumberNow} /></div></div></section>
         <section className="qc-step qc-live-step">
           <div className="qc-step-marker"><span>3</span></div><div className="qc-step-card"><div className="qc-step-heading"><h2>Live QC photos</h2><p>Take the required live photos below.</p></div>
           <button type="button" className="viewfinder qc-viewfinder is-off qc-camera-entry" onClick={() => void startCamera()} disabled={busy || processingScreenshot || photos.length >= MAX_PHOTOS} aria-label={photos.length >= MAX_PHOTOS ? "Maximum of seven live photos reached" : "Open live camera"}><span className="camera-placeholder"><Camera size={32}/><span>{photos.length >= MAX_PHOTOS ? "7 photos ready. Remove one to retake." : "Tap to take live photos"}</span></span></button>
-          {(screenshot || photos.length > 0) && <div className="qc-photo-grid qc-photo-gallery">{screenshot && <div className="qc-photo qc-screenshot-photo"><ImagePreview blob={screenshot} alt="Account screenshot"/><span>Account</span></div>}{photos.map((photo, index) => <div className="qc-photo" key={index}><ImagePreview blob={photo} alt={`Live QC photo ${index + 1}`}/><button type="button" className="qc-remove-photo" aria-label={`Remove photo ${index + 1}`} disabled={busy || taking || processingScreenshot} onClick={() => removePhoto(index)}><Trash2 size={16}/></button><span>{index + 1}</span></div>)}</div>}
+          {(screenshot || photos.length > 0) && <div className="qc-photo-grid qc-photo-gallery" data-photo-gallery>{screenshot && <div className="qc-photo qc-screenshot-photo"><ImagePreview blob={screenshot} alt="Account screenshot"/><span>Account</span></div>}{photos.map((photo, index) => <div className="qc-photo" key={index}><ImagePreview blob={photo} alt={`Live QC photo ${index + 1}`}/><button type="button" className="qc-remove-photo" aria-label={`Remove photo ${index + 1}`} disabled={busy || taking || processingScreenshot} onClick={() => removePhoto(index)}><Trash2 size={16}/></button><span>{index + 1}</span></div>)}</div>}
           </div></section>
         </div>
         <div className={`qc-fullscreen-camera${cameraOn ? " active" : ""}`} role={cameraOn ? "dialog" : undefined} aria-modal={cameraOn ? "true" : undefined} aria-label="Live QC camera" aria-hidden={!cameraOn} onTouchStart={(event) => beginPinch(event.touches)} onTouchMove={(event) => movePinch(event.touches)} onTouchEnd={(event) => { if (pinch.current) pinchCooldownUntil.current = Date.now() + 350; if (event.touches.length < 2) pinch.current = null; }} onTouchCancel={() => { pinch.current = null; }}>
@@ -535,7 +684,8 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
           </div>
         </div>
         {error && <p className="form-error" role="alert">{error}</p>}
-        <button className="button dark qc-submit" onClick={submit} disabled={!ready || busy || taking || processingScreenshot || cameraOn}><Send size={18}/>{busy ? "Submitting…" : "Submit QC for approval"}</button>
+        {submitHint && <p id="qc-submit-hint" className="qc-submit-hint" role="status">{submitHint}</p>}
+        <button aria-describedby={submitHint ? "qc-submit-hint" : undefined} className="button dark qc-submit" onClick={submit} disabled={!ready || busy || taking || processingScreenshot || cameraOn}><Send size={18}/>{busy ? "Submitting…" : "Submit QC for approval"}</button>
         {uploadProgress !== null && <div className="qc-upload-progress" role="status"><div><strong>{uploadLabel}</strong><span>{uploadProgress}%</span></div><progress max={100} value={uploadProgress} aria-label="QC picture upload progress" /></div>}
         <p className="camera-note camera-note-desktop">The account screenshot is the only saved image selected from your phone. QC photos use the live camera. Each picture is reduced to 30 KB or less. An unfinished QC stays in this browser until you submit it.</p>
         <QcRequirements />

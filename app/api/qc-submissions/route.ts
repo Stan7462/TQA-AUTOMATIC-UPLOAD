@@ -95,6 +95,11 @@ export async function GET(request: Request) {
   try {
     const conditions: string[] = [];
     const bindings: Array<string | number> = [];
+    const selectedId = url.searchParams.get("qc");
+    if (selectedId) {
+      if (!/^[0-9a-f-]{36}$/.test(selectedId)) return Response.json({ error: "Invalid QC" }, { status: 400 });
+      conditions.push("id = ?"); bindings.push(selectedId);
+    }
     if (status !== "all") { conditions.push("status = ?"); bindings.push(status); }
     if (hasRange) { conditions.push("submitted_at >= ? AND submitted_at < ?"); bindings.push(start, end); }
     if (match) { conditions.push("(submitted_at < ? OR (submitted_at = ? AND id < ?))"); bindings.push(Number(match[1]), Number(match[1]), match[2]); }

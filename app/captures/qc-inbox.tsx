@@ -1,78 +1,73 @@
 "use client";
-
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Inbox, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, X } from "lucide-react";
 import AdminShell from "@/app/admin-shell";
+import QcFilterBar from "@/app/qc-filter-bar";
+import { useQcFilters } from "@/lib/use-qc-filters";
+import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
-
-type Status = "pending" | "approved" | "rejected";
-type Submission = { id: string; techId: string; jobNumber: string; screenshotId: string; photoIds: string[]; status: Status; submittedAt: number; reviewedAt: number | null; reviewNote: string | null; trustUploadStatus: "ready" | "failed" | "uploaded" };
-type Stat = { techId: string; submitted: number; approved: number; rejected: number; pending: number };
-const filters: Array<{ value: "all" | Status; label: string }> = [{ value: "pending", label: "Needs approval" }, { value: "approved", label: "Approved" }, { value: "rejected", label: "Rejected" }, { value: "all", label: "All QCs" }];
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
-
-function PhotoGallery({ item, compact = false }: { item: Submission; compact?: boolean }) {
-  const photos = [{ id: item.screenshotId, label: "Account screenshot" }, ...item.photoIds.map((id, index) => ({ id, label: `QC photo ${index + 1}` }))];
-  return <div className={compact ? "qc-unified-gallery compact" : "qc-unified-gallery"} aria-label={`Photos for job ${item.jobNumber || "unknown"}`}>
-    {photos.map((photo) => <button key={photo.id} type="button" aria-label={`Enlarge ${photo.label.toLowerCase()} for job ${item.jobNumber || "unknown"}`} title={`Enlarge ${photo.label.toLowerCase()}`}><img src={`/api/captures/${photo.id}`} alt="" loading="lazy"/><span>{compact ? photo.label === "Account screenshot" ? "Account" : photo.label.replace("QC ", "") : photo.label}</span></button>)}
-  </div>;
-}
-
-export default function QcInbox() {
-  const [filter, setFilter] = useState<"all" | Status>("pending");
-  const [month, setMonth] = useState(fiscalMonthKey);
-  const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [stats, setStats] = useState<Stat[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [decisionBusy, setDecisionBusy] = useState<string | null>(null);
-  const [notes, setNotes] = useState<Record<string, string>>({});
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  useEffect(() => { const status = new URLSearchParams(window.location.search).get("status"); if (status === "pending" || status === "approved" || status === "rejected") setFilter(status); }, []);
-  const bounds = fiscalMonthBounds(month);
-  const fiscalLabel = new Date(bounds.end - 1).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
-  const load = useCallback(async (signal?: AbortSignal) => {
-    const { start, end } = fiscalMonthBounds(month);
-    const range = `start=${start}&end=${end}`;
-    let cursor: string | null = null;
-    const found: Submission[] = [];
-    do {
-      const response: Response = await fetch(`/api/qc-submissions?status=${filter}&pageSize=100&${range}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { cache: "no-store", signal });
-      const result = await response.json() as { error?: string; submissions?: Submission[]; nextCursor?: string | null };
-      if (!response.ok) throw new Error(result.error || "Could not load QCs.");
-      found.push(...(result.submissions ?? [])); cursor = result.nextCursor ?? null;
-    } while (cursor && !signal?.aborted);
-    const response = await fetch(`/api/qc-stats?${range}`, { cache: "no-store", signal });
-    const result = await response.json() as { error?: string; technicians?: Stat[] };
-    if (!response.ok) throw new Error(result.error || "Could not load technician totals.");
-    if (!signal?.aborted) { setSubmissions(found); setStats(result.technicians ?? []); }
-  }, [filter, month]);
-  useEffect(() => { const controller = new AbortController(); setLoading(true); setError(""); setSubmissions([]); void load(controller.signal).catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not load QCs."); }).finally(() => { if (!controller.signal.aborted) setLoading(false); }); return () => controller.abort(); }, [load]);
-  const groups = useMemo(() => Object.entries(Object.groupBy(submissions, (item) => item.techId)).sort((a, b) => collator.compare(a[0], b[0])), [submissions]);
-  const orderedStats = useMemo(() => [...stats].sort((a, b) => collator.compare(a.techId, b.techId)), [stats]);
-
-  async function decide(id: string, status: "approved" | "rejected") {
-    setDecisionBusy(id); setError(""); setNotice("");
-    try {
-      const response = await fetch(`/api/qc-submissions/${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, reviewNote: notes[id] ?? "" }) });
-      const result = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(result.error || "Could not save the decision.");
-      await load(); setNotice(`QC ${status}.`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save the decision."); }
-    finally { setDecisionBusy(null); }
-  }
-
-  return <AdminShell active="approvals">
-    <section className="intro"><div><small className="kicker">REVIEW WORKSPACE</small><h1>QC approvals</h1><p>Review every photo together, then approve or reject with a note.</p></div></section>
-    <div className="admin-page-content qc-inbox">
-    <div className="qc-inbox-content">
-      <section className="qc-review-panel" aria-labelledby="qc-review-panel-title"><div className="qc-review-panel-head"><h2 id="qc-review-panel-title">QC approval queue</h2><p>Review submissions and record your decisions.</p></div>
-      <div className="qc-filters" role="group" aria-label="Filter QC submissions">{filters.map((entry) => <button key={entry.value} className={filter === entry.value ? "active" : ""} onClick={() => setFilter(entry.value)}>{entry.label}</button>)}</div>
-      {notice && <p className="qc-notice" role="status">{notice}</p>}{error && <p className="form-error" role="alert">{error}</p>}
-      {loading ? <div className="qc-empty">Loading submissions…</div> : submissions.length === 0 ? <div className="qc-empty"><Inbox size={34}/><h2>No QCs in this view</h2></div> : <div className="qc-submission-list">{groups.map(([techId, items]) => <section className="qc-tech-group" key={techId}><h2>Tech {techId} <small>{items?.length ?? 0} QCs</small></h2>{items?.map((item) => item.status === "approved" ? <article className="qc-approved-row" key={item.id}><div className="qc-approved-meta"><strong>Job {item.jobNumber || "—"}</strong><span>{new Date(item.submittedAt).toLocaleDateString()} · {item.photoIds.length + 1} images</span><span className="qc-status approved">Approved</span><span className={`qc-trust-status ${item.trustUploadStatus}`}>Trust: {item.trustUploadStatus === "uploaded" ? "Uploaded" : item.trustUploadStatus === "failed" ? "Retry needed" : "Ready"}</span></div><PhotoGallery item={item} compact/></article> : <article className="qc-submission-card" key={item.id}><div className="qc-submission-head"><div><span className="kicker">JOB {item.jobNumber || "—"}</span><h2>QC submission</h2><p>Submitted {new Date(item.submittedAt).toLocaleString()} · {item.photoIds.length} live photos</p></div><span className={`qc-status ${item.status}`}>{item.status === "pending" ? "Needs approval" : "Rejected"}</span></div><PhotoGallery item={item}/>{item.reviewNote && <div className="profile-note"><strong>Review note</strong><p>{item.reviewNote}</p></div>}{item.status === "pending" && <div className="qc-review-actions"><button className="button dark" disabled={decisionBusy === item.id} onClick={() => void decide(item.id, "approved")}><Check size={18}/> Approve</button><div className="qc-reject"><textarea aria-label={`Rejection note for job ${item.jobNumber}`} placeholder="Why did this QC fail?" maxLength={1000} value={notes[item.id] ?? ""} onChange={(event) => setNotes((current) => ({ ...current, [item.id]: event.target.value }))}/><button className="button light" disabled={decisionBusy === item.id || !notes[item.id]?.trim()} onClick={() => void decide(item.id, "rejected")}><X size={18}/> Reject with note</button></div></div>}</article>)}</section>)}</div>}
-      </section>
-      <aside className="qc-dashboard" aria-label="Technician QC totals"><div className="qc-dashboard-head"><div><h2>QCs by technician</h2><p>Five approved QCs required per fiscal month.</p></div><label>Fiscal month ends <input type="month" value={month} onChange={(event) => setMonth(event.target.value || fiscalMonthKey())}/></label></div><p className="fiscal-period-label">{new Date(bounds.start).toLocaleDateString(undefined, { month: "short", day: "numeric" })} – {fiscalLabel}</p>{orderedStats.length ? <div className="qc-stats-list">{orderedStats.map((stat) => <div className="qc-stat-row" key={stat.techId}><strong>Tech {stat.techId}</strong><div className="qc-stat-counts"><span className={stat.approved >= 5 ? "goal-met" : "goal-short"}>{stat.approved} approved</span><span className="qc-rejected-count">{stat.rejected} rejected</span></div></div>)}</div> : <p className="qc-stats-empty">No technician activity for this fiscal month.</p>}</aside>
-    </div>
-    </div>
-  </AdminShell>;
+type Submission={id:string;techId:string;jobNumber:string;screenshotId:string;photoIds:string[];status:string;submittedAt:number;reviewNote:string|null;trustUploadStatus:string};
+type Stat={techId:string;approved:number;rejected:number;pending:number};
+const reasons = [
+  'Job has been reviewed by another evaluator',
+  'Missing tags',
+  'All TAP ports need to be used or terminated',
+  'Photo is unclear',
+  'All old/black connectors need to be replaced',
+  'Missing required photo/photos',
+  'Improper grounding attachment/bonding',
+];
+export default function QcInbox(){
+ const {filters,setFilters,ready}=useQcFilters('tqa-approval-filters','pending');
+ const [items,setItems]=useState<Submission[]>([]),[stats,setStats]=useState<Stat[]>([]);
+ const [loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [decisionBusy,setDecisionBusy]=useState<string|null>(null),[notes,setNotes]=useState<Record<string,string>>({});
+ const [selected,setSelected]=useState(''),[underGoal,setUnderGoal]=useState(false);
+ const generation=useRef(0);
+ const statsMonth=filters.month||fiscalMonthKey();
+ useEffect(()=>{setSelected(new URLSearchParams(location.search).get('qc')||'');},[]);
+ const load=useCallback(async(signal?:AbortSignal)=>{
+  const version=++generation.current;
+  try{
+   const id=new URLSearchParams(location.search).get('qc');
+   let cursor:string|null=null;const found:Submission[]=[];
+   do{const response: Response=await fetch(`/api/qc-submissions?status=all&pageSize=100${id?'&qc='+encodeURIComponent(id):''}${cursor?'&cursor='+encodeURIComponent(cursor):''}`,{cache:'no-store',signal});const data=await response.json() as {error?:string;submissions:Submission[];nextCursor:string|null};if(!response.ok)throw Error(data.error||'Could not load QCs.');found.push(...data.submissions);cursor=data.nextCursor;}while(cursor&&!signal?.aborted);
+   const {start,end}=fiscalMonthBounds(statsMonth);
+   const response: Response=await fetch(`/api/qc-stats?start=${start}&end=${end}`,{cache:'no-store',signal});const data=await response.json() as {error?:string;technicians:Stat[]};if(!response.ok)throw Error(data.error||'Could not load totals.');
+   if(!signal?.aborted&&generation.current===version){setItems(found);setStats(data.technicians);setError('');}
+  }catch(cause){if(!signal?.aborted&&generation.current===version)setError(cause instanceof Error?cause.message:'Could not load QCs.');}
+  finally{if(!signal?.aborted&&generation.current===version)setLoading(false);}
+ },[statsMonth]);
+ useEffect(()=>{if(!ready)return;const controller=new AbortController();void load(controller.signal);return ()=>controller.abort();},[ready,load]);
+ useAutoRefresh(load,ready&&!decisionBusy);
+ async function decide(id:string,status:'approved'|'rejected'){
+  if(decisionBusy)return;
+  setDecisionBusy(id);setNotice('');setError('');++generation.current;
+  try{const response: Response=await fetch(`/api/qc-submissions/${id}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status,reviewNote:notes[id]||''})});const result=await response.json() as {error?:string};if(!response.ok)throw Error(result.error||'Could not save decision.');await load();setNotice(`Job ${items.find(q=>q.id===id)?.jobNumber || ''} ${status}.`);}
+  catch(cause){setError(cause instanceof Error?cause.message:'Could not save decision.');}finally{setDecisionBusy(null);}
+ }
+ const range=filters.month?fiscalMonthBounds(filters.month):null;
+ const visible=items.filter(q=>selected?q.id===selected:(!range||(q.submittedAt>=range.start&&q.submittedAt<range.end))&&(!filters.tech||q.techId===filters.tech)&&(filters.status==='all'||(filters.status==='uploaded'?q.status==='approved'&&q.trustUploadStatus==='uploaded':q.status===filters.status))&&`${q.techId} ${q.jobNumber}`.toLowerCase().includes(filters.search.trim().toLowerCase()));
+ const groups=Object.entries(Object.groupBy(visible,q=>q.techId)).sort(([a],[b])=>a.localeCompare(b,undefined,{numeric:true}));
+ const monthBounds=fiscalMonthBounds(statsMonth);
+ return <AdminShell active="approvals"><section className="intro"><div><h1>QC approvals</h1><p>Check the pictures, then approve or leave a rejection note.</p></div>{selected&&<a className="button light" href="/">Back to all data</a>}</section>
+ <div className="admin-page-content qc-inbox">{selected?<p className="qc-notice">Reviewing one job. <a href="/captures">Return to approval queue</a></p>:<QcFilterBar value={filters} onChange={setFilters} techIds={[...stats.map(s=>s.techId),...items.map(q=>q.techId)]}/>}
+ <div className="qc-inbox-content"><section className="qc-review-panel" aria-label="QC approval queue">
+ {notice&&<p className="qc-notice" role="status">{notice}</p>}{error&&<p className="form-error" role="alert">{error}</p>}
+ {loading||!ready?<p className="qc-empty">Loading QCs…</p>:!visible.length?<div className="qc-empty">{selected?'This QC is no longer available.':'No QCs match these filters.'}</div>:<div className="qc-submission-list">{groups.map(([techId,group])=><section className="qc-tech-group" key={techId}><h2>Tech {techId} <small>{group?.length} {group?.length === 1 ? "QC" : "QCs"}</small></h2>{group?.map(item=><article id={`qc-${item.id}`} className={item.status==='pending'?'qc-submission-card':'qc-approved-row'} key={item.id}>
+ <div className="qc-approved-meta"><strong>Job {item.jobNumber}</strong><span>{new Date(item.submittedAt).toLocaleString()}</span><span className={`qc-status ${item.status}`}>{item.status==='pending'?'Needs review':item.status==='approved'?'Approved':'Rejected'}</span>{item.status==='approved'&&<small>{item.trustUploadStatus==='uploaded'?'Uploaded to Catalyst':item.trustUploadStatus==='failed'?'Catalyst upload needs retry':'Ready for Catalyst'}</small>}</div>
+ <div className={`qc-unified-gallery${item.status!=='pending'?' compact':''}`} data-photo-gallery>{[{id:item.screenshotId,label:'Account screenshot'},...item.photoIds.map((id,i)=>({id,label:`QC photo ${i+1}`}))].map(p=><button type="button" key={p.id} aria-label={`Enlarge ${p.label} for job ${item.jobNumber}`}><img src={`/api/captures/${p.id}`} alt={p.label} loading="lazy"/><span>{p.label}</span></button>)}</div>
+ {item.reviewNote&&<div className="profile-note"><strong>Review note</strong><p>{item.reviewNote}</p></div>}
+ {item.status==='pending'&&<div className="qc-decision-panel"><button className="button dark" disabled={!!decisionBusy} onClick={()=>void decide(item.id,'approved')}><Check size={18}/>Approve QC</button><label>Rejection note<textarea aria-label={`Rejection note for job ${item.jobNumber}`} placeholder="Explain what needs fixing" value={notes[item.id]||''} maxLength={1000} onChange={e=>setNotes(current=>({...current,[item.id]:e.target.value}))}/></label><label className="qc-reason-picker">Add a reason<select aria-label={`Add rejection reason for job ${item.jobNumber}`} value="" disabled={!!decisionBusy} onChange={e=>{
+  const reason=e.target.value;
+  if(!reason)return;
+  setNotes(current=>{
+    const existing=(current[item.id]||'').trim();
+    if(existing.split(';').map(part=>part.trim()).includes(reason))return current;
+    return {...current,[item.id]:[existing,reason].filter(Boolean).join('; ').slice(0,1000)};
+  });
+}}><option value="">Choose a reason…</option>{reasons.map(reason=><option key={reason} value={reason}>{reason}</option>)}</select></label><button className="button light" disabled={!!decisionBusy||!notes[item.id]?.trim()} onClick={()=>void decide(item.id,'rejected')}><X size={18}/>Reject with note</button></div>}
+ </article>)}</section>)}</div>}</section>
+ <aside className="qc-dashboard" aria-label="Technician monthly progress"><h2>Monthly progress</h2><label className="qc-month-select">Month ending on the 21st<input type="month" value={statsMonth} onChange={e=>setFilters({...filters,month:e.target.value||fiscalMonthKey()})}/></label><p className="fiscal-period-label">{new Date(monthBounds.start).toLocaleDateString()} – {new Date(monthBounds.end-1).toLocaleDateString()}</p><label className="qc-goal-toggle"><input type="checkbox" checked={underGoal} onChange={e=>setUnderGoal(e.target.checked)}/>Under monthly goal</label><div className="qc-stats-list">{stats.filter(s=>!underGoal||s.approved<5).map(s=><div className="qc-stat-row" key={s.techId}><button className="qc-tech-filter" onClick={()=>{setFilters({...filters,tech:s.techId});if(selected){history.replaceState(null,'','/captures');setSelected('');void load();}}}>Tech {s.techId}</button><div className="qc-stat-counts"><span className={s.approved>=5?'goal-met':'goal-short'}>{s.approved} / 5 approved</span><small>{Math.max(0,5-s.approved)} remaining · {s.rejected} rejected</small></div></div>)}</div>{underGoal&&!stats.some(s=>s.approved<5)&&<p>All technicians have met the goal.</p>}</aside>
+ </div></div></AdminShell>;
 }

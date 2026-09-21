@@ -12,7 +12,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!isOwner(await getChatGPTUser())) {
     const techId = await getTechSession(request, env.DB);
     if (!techId) return new Response("Forbidden", { status: 403 });
-    const row = await env.DB.prepare("SELECT id FROM qc_submissions WHERE tech_id = ? AND status = 'rejected' AND (screenshot_id = ? OR EXISTS (SELECT 1 FROM json_each(photo_ids) WHERE value = ?)) LIMIT 1").bind(techId, id, id).first();
+    const row = await env.DB.prepare("SELECT id FROM qc_submissions WHERE tech_id = ? AND (screenshot_id = ? OR EXISTS (SELECT 1 FROM json_each(photo_ids) WHERE value = ?)) LIMIT 1").bind(techId, id, id).first();
     if (!row) return new Response("Forbidden", { status: 403 });
   }
   try {

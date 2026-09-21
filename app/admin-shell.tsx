@@ -9,7 +9,6 @@ export default function AdminShell({ active, children }: { active: AdminPage; ch
     <main className="workspace">
       <header className="topbar">
         <div className="top-title"><small>TQA AUTOMATIC UPLOAD</small><strong>Review workspace</strong></div>
-        <div className="top-actions"><a className="top-link" href="/capture">Technician page</a></div>
       </header>
       <div className="workspace-nav"><AdminNav active={active}/></div>
       {children}

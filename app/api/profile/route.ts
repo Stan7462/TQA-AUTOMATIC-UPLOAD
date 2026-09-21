@@ -13,6 +13,9 @@ export async function GET(request: Request) {
   if (new URL(request.url).searchParams.get("count") === "1") {
     return Response.json({ techId, isAdmin: techId === ADMIN_TECH_ID, ...counts }, { headers: { "Cache-Control": "private, no-store" } });
   }
-  const rows = await env.DB.prepare("SELECT id, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, submitted_at AS submittedAt, reviewed_at AS reviewedAt, review_note AS reviewNote FROM qc_submissions WHERE tech_id = ? AND status = 'rejected' ORDER BY reviewed_at DESC LIMIT 200").bind(techId).all<{ id: string; jobNumber: string; screenshotId: string; photoIds: string; submittedAt: number; reviewedAt: number | null; reviewNote: string | null }>();
-  return Response.json({ techId, isAdmin: techId === ADMIN_TECH_ID, ...counts, submissions: rows.results.map((row) => ({ ...row, photoIds: JSON.parse(row.photoIds) as string[] })) }, { headers: { "Cache-Control": "private, no-store" } });
+  const requestedView = new URL(request.url).searchParams.get("view");
+  const view = requestedView === "captured" || requestedView === "uploaded" ? requestedView : "rejected";
+  const condition = view === "uploaded" ? "AND status = 'approved' AND trust_upload_status = 'uploaded'" : view === "rejected" ? "AND status = 'rejected'" : "";
+  const rows = await env.DB.prepare(`SELECT id, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, submitted_at AS submittedAt, reviewed_at AS reviewedAt, review_note AS reviewNote, status, trust_upload_status AS trustUploadStatus FROM qc_submissions WHERE tech_id = ? ${condition} ORDER BY submitted_at DESC LIMIT 200`).bind(techId).all<{ id: string; jobNumber: string; screenshotId: string; photoIds: string; submittedAt: number; reviewedAt: number | null; reviewNote: string | null; status: string; trustUploadStatus: string }>();
+  return Response.json({ techId, isAdmin: techId === ADMIN_TECH_ID, view, ...counts, submissions: rows.results.map((row) => ({ ...row, photoIds: JSON.parse(row.photoIds) as string[] })) }, { headers: { "Cache-Control": "private, no-store" } });
 }

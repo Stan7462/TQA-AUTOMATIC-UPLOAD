@@ -1,3 +1,3 @@
 import RecordsPage from "../records-page";
 export const dynamic = "force-dynamic";
-export default function Page() { return <RecordsPage view="needs-review"/>; }
+export default async function Page() { return await RecordsPage({ view: "needs-review" }); }

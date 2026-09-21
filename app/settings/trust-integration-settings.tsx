@@ -7,7 +7,7 @@ type ApiKey = { id: string; label: string; tokenHint: string; createdAt: number;
 
 export default function TrustIntegrationSettings() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
-  const [label, setLabel] = useState("Trust browser extension");
+  const [label, setLabel] = useState("Catalyst browser extension");
   const [newToken, setNewToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -87,12 +87,12 @@ export default function TrustIntegrationSettings() {
   }
 
   return <section id="api-settings" className="qc-pin-panel settings-panel trust-settings"><div className="settings-section-title"><KeyRound size={21}/><h2>API settings</h2></div>
-    <p>Create a private key for the browser extension. It can read approved QCs and photos and report their Trust upload result. Keep the key inside the extension; you can revoke it here.</p>
+    <p>Create a private key for the browser extension. It can read approved QCs and photos and report their Catalyst upload result. Keep the key inside the extension; you can revoke it here.</p>
     <h3>API keys</h3>
     <form onSubmit={(event) => void createKey(event)}><input aria-label="Extension key label" value={label} maxLength={80} onChange={(event) => setLabel(event.target.value)} required/><button className="button dark" disabled={busy}>Create API key</button></form>
     {newToken && <div className="issued-pin trust-new-token" role="status"><strong>Copy this key now. It will only be shown once.</strong><code>{newToken}</code><button type="button" className="button light" onClick={() => void copyText(newToken, "key")}>{copied === "key" ? <Check size={16}/> : <Copy size={16}/>}{copied === "key" ? "Copied" : "Copy key"}</button></div>}
     {keys.length > 0 && <div className="qc-tech-rows">{keys.map((key) => <div className="qc-tech-manage-row" key={key.id}><div><strong>{key.label}</strong><small>Key ending {key.tokenHint} · Created {new Date(key.createdAt).toLocaleDateString()}{key.lastUsedAt ? ` · Last used ${new Date(key.lastUsedAt).toLocaleString()}` : " · Never used"}</small></div><button type="button" className="button light qc-remove-button" disabled={busy} onClick={() => void revokeKey(key.id)}><Trash2 size={16}/>Revoke</button></div>)}</div>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    <div className="trust-documentation"><div><div className="settings-section-title"><BookOpen size={21}/><h3>API documentation</h3></div><p>Full endpoint reference for the agent building your Trust extension. No private API key is included.</p></div><div className="trust-documentation-actions"><button type="button" className="button light" onClick={() => void toggleDocumentation()} disabled={docsLoading}><BookOpen size={16}/>{docsLoading ? "Loading…" : docsOpen ? "Hide documentation" : "View documentation"}</button><button type="button" className="button light" onClick={() => void copyDocumentation()} disabled={docsLoading}><Copy size={16}/>{copied === "documentation" ? "Copied" : "Copy all documentation"}</button></div>{docsError && <p className="form-error" role="alert">{docsError}</p>}{docsOpen && <pre className="trust-documentation-text" tabIndex={0} aria-label="Complete Trust extension API documentation">{documentation}</pre>}</div>
+    <div className="trust-documentation"><div><div className="settings-section-title"><BookOpen size={21}/><h3>API documentation</h3></div><p>Full endpoint reference for the agent building your Catalyst extension. No private API key is included.</p></div><div className="trust-documentation-actions"><button type="button" className="button light" onClick={() => void toggleDocumentation()} disabled={docsLoading}><BookOpen size={16}/>{docsLoading ? "Loading…" : docsOpen ? "Hide documentation" : "View documentation"}</button><button type="button" className="button light" onClick={() => void copyDocumentation()} disabled={docsLoading}><Copy size={16}/>{copied === "documentation" ? "Copied" : "Copy all documentation"}</button></div>{docsError && <p className="form-error" role="alert">{docsError}</p>}{docsOpen && <pre className="trust-documentation-text" tabIndex={0} aria-label="Complete Catalyst extension API documentation">{documentation}</pre>}</div>
   </section>;
 }
