@@ -6,8 +6,13 @@ Screenshots are not sent to an external OCR service.
 - `worker.min.js`: tesseract.js 7.0.0 (Apache-2.0).
 - `tesseract-core-*-lstm.wasm.js`: tesseract.js-core 7.0.0 (Apache-2.0).
   Includes standard, SIMD and relaxed SIMD builds for browser compatibility.
-- `eng.traineddata.gz`: @tesseract.js-data/eng 1.0.0,
+- `eng.traineddata`: @tesseract.js-data/eng 1.0.0,
   `4.0.0_best_int` English LSTM data (Apache-2.0).
+
+The language file contains gzip-compressed bytes but intentionally has no `.gz`
+suffix. Vinext's production static server reserves that suffix for compression
+sidecars and otherwise returns 404. The reader uses `gzip: false` to request the
+`.traineddata` URL; Tesseract detects the gzip header and decompresses it itself.
 
 The worker and core versions must match the installed tesseract.js version.
 The scan uses the original screenshot; only the compressed copy is saved to

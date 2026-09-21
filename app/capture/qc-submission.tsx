@@ -129,6 +129,8 @@ async function recognizeJobNumber(file: File, onProgress: (progress: number) => 
   let worker: import("tesseract.js").Worker | undefined;
   let ended = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let rejectWorkerError: (error: Error) => void = () => {};
+  const workerFailure = new Promise<never>((_, reject) => { rejectWorkerError = reject; });
   const scan = async () => {
     const { createWorker } = await import("tesseract.js");
     if (ended) return null;
@@ -136,8 +138,12 @@ async function recognizeJobNumber(file: File, onProgress: (progress: number) => 
       workerPath: "/ocr/worker.min.js",
       corePath: "/ocr",
       langPath: "/ocr",
-      // The caller handles recognition failures and preserves manual entry.
-      errorHandler: () => {},
+      // Vinext reserves .gz URLs for HTTP compression sidecars. The .traineddata
+      // file retains gzip bytes; Tesseract detects and decompresses their header.
+      gzip: false,
+      // Initialization errors do not always reject createWorker in Tesseract.
+      // Surface them immediately instead of waiting for our timeout.
+      errorHandler: (cause) => rejectWorkerError(new Error(String(cause))),
       logger: (message) => {
         if (!ended && message.status === "recognizing text") onProgress(Math.max(1, Math.min(99, Math.round(message.progress * 100))));
       },
@@ -149,6 +155,7 @@ async function recognizeJobNumber(file: File, onProgress: (progress: number) => 
   try {
     return await Promise.race([
       scan(),
+      workerFailure,
       new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Job-number scan timed out.")), 30_000); }),
     ]);
   } finally {
