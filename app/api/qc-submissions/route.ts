@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   if (!authenticatedTechId || authenticatedTechId !== techId) return Response.json({ error: "Sign in with this Tech ID and PIN before submitting." }, { status: 401 });
   const removal = await env.DB.prepare("SELECT state FROM technician_removals WHERE tech_id = ?").bind(techId).first();
   if (removal) return Response.json({ error: "This Tech ID is no longer available. Contact your supervisor." }, { status: 403 });
-  if (!/^[A-Za-z0-9][A-Za-z0-9 _./#-]{0,63}$/.test(jobNumber)) return Response.json({ error: "Enter a valid job number." }, { status: 400 });
+  if (!/^\d{1,6}$/.test(jobNumber)) return Response.json({ error: "Enter a job number using 1 to 6 digits." }, { status: 400 });
   if (!/^[0-9a-f-]{36}$/.test(requestedId)) return Response.json({ error: "Invalid submission ID." }, { status: 400 });
   if ((screenshot instanceof File && screenshot.size > MAX_IMAGE_BYTES) || photos.some((photo) => photo instanceof File && photo.size > MAX_IMAGE_BYTES)) return Response.json({ error: "Each picture must be 30 KB or smaller." }, { status: 413 });
   if (!validJpeg(screenshot)) return Response.json({ error: "Choose one valid account screenshot." }, { status: 400 });
