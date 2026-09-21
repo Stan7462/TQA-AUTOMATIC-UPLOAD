@@ -1,5 +1,6 @@
 import { env } from "@/lib/local-env";
 import { getTechSession, normalizeTechId, sameOrigin } from "@/lib/tech-auth";
+import { normalizeQcLocation } from "@/lib/qc-location";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,7 @@ type UploadBody = {
   slot?: unknown;
   image?: unknown;
   photoCount?: unknown;
+  location?: unknown;
 };
 
 function validJpeg(bytes: Uint8Array): boolean {
@@ -69,6 +71,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Take at least 2 live QC photos. Check the QC requirements for your job." }, { status: 400 });
   }
   const photoCount = body.photoCount as number;
+  const location = normalizeQcLocation(body.location) ?? { status: "unavailable" as const, capturedAt: Date.now() };
   const rows = await env.DB.prepare("SELECT slot, image FROM qc_upload_photos WHERE submission_id = ? AND tech_id = ? ORDER BY slot")
     .bind(submissionId, techId).all<{ slot: number; image: Uint8Array }>();
   const images = Array.from({ length: photoCount + 1 }, (_, slot) => rows.results.find((row) => row.slot === slot)?.image);
@@ -86,8 +89,8 @@ export async function POST(request: Request) {
       });
       uploaded.push(key);
     }
-    const inserted = await env.DB.prepare("INSERT INTO qc_submissions (id, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at) SELECT ?, ?, ?, ?, ?, 'pending', ? WHERE NOT EXISTS (SELECT 1 FROM technician_removals WHERE tech_id = ?)")
-      .bind(submissionId, techId, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, techId).run();
+    const inserted = await env.DB.prepare("INSERT INTO qc_submissions (id, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at) SELECT ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM technician_removals WHERE tech_id = ?)")
+      .bind(submissionId, techId, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, location.status, location.status === "verified" ? location.latitude : null, location.status === "verified" ? location.longitude : null, location.status === "verified" ? location.accuracy : null, location.capturedAt, techId).run();
     if (!inserted.meta.changes) throw new Error("removed-technician");
     try { await env.DB.prepare("DELETE FROM qc_upload_photos WHERE submission_id = ? AND tech_id = ?").bind(submissionId, techId).run(); }
     catch (error) { console.error("QC staging cleanup failed", error); }

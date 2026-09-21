@@ -1,9 +1,12 @@
+import { normalizeQcLocation, type QcLocation } from "@/lib/qc-location";
+
 export type QcDraft = {
   techId: string;
   submissionId: string;
   jobNumber: string;
   screenshot: Blob | null;
   photos: Blob[];
+  location: QcLocation | null;
   updatedAt: number;
 };
 
@@ -46,7 +49,7 @@ export async function readQcDraft(techId: string): Promise<QcDraft | null> {
       typeof draft.submissionId !== "string" || !/^[0-9a-f-]{36}$/.test(draft.submissionId) ||
       (draft.screenshot !== null && !(draft.screenshot instanceof Blob)) ||
       !Array.isArray(draft.photos) || draft.photos.length > 7 || !draft.photos.every((photo) => photo instanceof Blob)) return null;
-  return draft as QcDraft;
+  return { ...draft, location: normalizeQcLocation(draft.location) } as QcDraft;
 }
 
 export async function writeQcDraft(draft: QcDraft): Promise<void> {

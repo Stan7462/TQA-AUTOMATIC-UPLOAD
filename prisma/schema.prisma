@@ -51,6 +51,11 @@ model QcSubmission {
   trustUploadAttempts    Int     @default(0) @map("trust_upload_attempts")
   trustLastAttemptAt     BigInt? @map("trust_last_attempt_at")
   trustUploadedByKeyId   String? @map("trust_uploaded_by_key_id")
+  locationStatus         String? @map("location_status")
+  locationLatitude       Float?  @map("location_latitude")
+  locationLongitude      Float?  @map("location_longitude")
+  locationAccuracy       Float?  @map("location_accuracy")
+  locationCapturedAt     BigInt? @map("location_captured_at")
 
   @@index([status, submittedAt], map: "idx_qc_submissions_status_submitted")
   @@index([techId, submittedAt], map: "idx_qc_submissions_tech_submitted")

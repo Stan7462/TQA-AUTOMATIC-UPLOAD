@@ -54,10 +54,31 @@ function inspectExistingDatabase() {
   }
 }
 
+function reconcileRuntimeMigration(runtimeName, prismaName, columns) {
+  if (!existsSync(databasePath)) return;
+  const database = new DatabaseSync(databasePath);
+  let shouldResolve = false;
+  try {
+    const tables = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+    if (!tables.has("local_migrations") || !tables.has("_prisma_migrations") || !tables.has("qc_submissions")) return;
+    const runtimeApplied = database.prepare("SELECT 1 FROM local_migrations WHERE name = ?").get(runtimeName);
+    const prismaApplied = database.prepare("SELECT 1 FROM _prisma_migrations WHERE migration_name = ? AND finished_at IS NOT NULL").get(prismaName);
+    const available = new Set(database.prepare('PRAGMA table_info("qc_submissions")').all().map((row) => row.name));
+    shouldResolve = Boolean(runtimeApplied && !prismaApplied && columns.every((column) => available.has(column)));
+  } finally {
+    database.close();
+  }
+  if (shouldResolve) {
+    console.log(`Recording already-applied runtime migration as Prisma migration ${prismaName}.`);
+    runPrisma("migrate", "resolve", "--applied", prismaName);
+  }
+}
+
 mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
 const existing = inspectExistingDatabase();
 if (existing.hasSchema && !existing.hasPrismaHistory) {
   console.log(`Adopting existing SQLite schema as Prisma baseline ${baseline}.`);
   runPrisma("migrate", "resolve", "--applied", baseline);
 }
+reconcileRuntimeMigration("0007_qc_location.sql", "20260921000000_qc_location", ["location_status", "location_latitude", "location_longitude", "location_accuracy", "location_captured_at"]);
 runPrisma("migrate", "deploy");

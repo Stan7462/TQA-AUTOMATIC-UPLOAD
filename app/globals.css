@@ -579,3 +579,14 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .profile-redo-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:12px}
 .profile-dark .profile-redo-actions .button{min-height:44px;padding:10px 14px;border:1px solid #4c6575;border-radius:11px;background:#263b49;color:#dceafb;font-size:14px}
 .profile-redo-actions small{font-size:12px;color:#b5c4d0}
+
+/* QC location is captured once with the first live photo. */
+.qc-location-capture{display:flex;align-items:center;gap:6px;width:max-content;max-width:100%;margin:12px 0 0;padding:6px 10px;border-radius:999px;background:#263b48;color:#bfd2df;font-size:12px;font-weight:650}
+.qc-location-capture.verified{background:#203f38;color:#b6ead7}
+.qc-location-capture.unavailable{background:#3c3530;color:#e6c9ac}
+.qc-location-capture button{padding:0;border:0;background:transparent;color:inherit;font:inherit;font-weight:800;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.qc-location-capture button:disabled{opacity:.55;cursor:default}
+.qc-location-link,.qc-location-missing{display:inline-flex!important;align-items:center;gap:5px;padding:6px 9px;border-radius:999px;font-size:12px!important;font-weight:700;text-decoration:none}
+.qc-location-link{background:#21483e;color:#a6ecd3!important}
+.qc-location-link:hover{text-decoration:underline;text-underline-offset:3px}
+.qc-location-missing{background:#30404b;color:#b5c4d0!important}

@@ -2,6 +2,7 @@ import { env } from "@/lib/local-env";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { isOwner } from "@/app/access";
 import { getTechSession, normalizeTechId, sameOrigin } from "@/lib/tech-auth";
+import { normalizeQcLocation } from "@/lib/qc-location";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,9 @@ export async function POST(request: Request) {
   const requestedId = String(form.get("submissionId") ?? "");
   const screenshot = form.get("screenshot");
   const photos = form.getAll("photos");
+  let rawLocation: unknown = null;
+  try { rawLocation = JSON.parse(String(form.get("location") ?? "null")); } catch { /* Use unavailable below. */ }
+  const location = normalizeQcLocation(rawLocation);
   if (!techId) return Response.json({ error: "Enter a valid Tech ID." }, { status: 400 });
   const authenticatedTechId = await getTechSession(request, env.DB);
   if (!authenticatedTechId || authenticatedTechId !== techId) return Response.json({ error: "Sign in with this Tech ID and PIN before submitting." }, { status: 401 });
@@ -67,8 +71,8 @@ export async function POST(request: Request) {
       uploaded.push(key);
     }
     const inserted = await env.DB.prepare(
-      "INSERT INTO qc_submissions (id, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at) SELECT ?, ?, ?, ?, ?, 'pending', ? WHERE NOT EXISTS (SELECT 1 FROM technician_removals WHERE tech_id = ?)"
-    ).bind(submissionId, techId, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, techId).run();
+      "INSERT INTO qc_submissions (id, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at) SELECT ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM technician_removals WHERE tech_id = ?)"
+    ).bind(submissionId, techId, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, location?.status ?? "unavailable", location?.status === "verified" ? location.latitude : null, location?.status === "verified" ? location.longitude : null, location?.status === "verified" ? location.accuracy : null, location?.capturedAt ?? now, techId).run();
     if (!inserted.meta.changes) throw new Error("removed-technician");
     return Response.json({ id: submissionId, status: "pending" }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
@@ -104,7 +108,7 @@ export async function GET(request: Request) {
     if (hasRange) { conditions.push("submitted_at >= ? AND submitted_at < ?"); bindings.push(start, end); }
     if (match) { conditions.push("(submitted_at < ? OR (submitted_at = ? AND id < ?))"); bindings.push(Number(match[1]), Number(match[1]), match[2]); }
     const where = conditions.length ? " WHERE " + conditions.join(" AND ") : "";
-    const query = env.DB.prepare("SELECT id, tech_id AS techId, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, status, submitted_at AS submittedAt, reviewed_at AS reviewedAt, review_note AS reviewNote, trust_upload_status AS trustUploadStatus, trust_uploaded_at AS trustUploadedAt, trust_external_reference AS trustExternalReference, trust_upload_error AS trustUploadError FROM qc_submissions" + where + " ORDER BY submitted_at DESC, id DESC LIMIT ?").bind(...bindings, pageSize + 1);
+    const query = env.DB.prepare("SELECT id, tech_id AS techId, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, status, submitted_at AS submittedAt, reviewed_at AS reviewedAt, review_note AS reviewNote, trust_upload_status AS trustUploadStatus, trust_uploaded_at AS trustUploadedAt, trust_external_reference AS trustExternalReference, trust_upload_error AS trustUploadError, location_status AS locationStatus, location_latitude AS locationLatitude, location_longitude AS locationLongitude, location_accuracy AS locationAccuracy, location_captured_at AS locationCapturedAt FROM qc_submissions" + where + " ORDER BY submitted_at DESC, id DESC LIMIT ?").bind(...bindings, pageSize + 1);
     const [result, totals] = await Promise.all([
       query.all(),
       env.DB.prepare("SELECT status, trust_upload_status AS trustUploadStatus, COUNT(*) AS total FROM qc_submissions" + (hasRange ? " WHERE submitted_at >= ? AND submitted_at < ?" : "") + " GROUP BY status, trust_upload_status").bind(...(hasRange ? [start, end] : [])).all<{ status: string; trustUploadStatus: string; total: number }>(),

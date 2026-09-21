@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, Check, ChevronRight, FileText, FileWarning, ImagePlus, LogOut, RotateCcw, Send, Trash2, X } from "lucide-react";
+import { Camera, Check, ChevronRight, FileText, FileWarning, ImagePlus, LogOut, MapPin, RotateCcw, Send, Trash2, X } from "lucide-react";
 import { sixDigitJobNumber } from "@/lib/job-number-ocr";
 import { fiscalDeadline, fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 import { deleteQcDraft, readQcDraft, writeQcDraft, type QcDraft } from "@/lib/qc-draft";
+import type { QcLocation } from "@/lib/qc-location";
 
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 30 * 1024;
@@ -14,24 +15,24 @@ const MAX_CAMERA_ZOOM = 5;
 type QcCounts = { captured: number; uploaded: number; rejected: number };
 
 function drawCaptureTimestamp(context: CanvasRenderingContext2D, width: number, height: number, takenAt: Date) {
-  const date = `${takenAt.getFullYear()}-${String(takenAt.getMonth() + 1).padStart(2, "0")}-${String(takenAt.getDate()).padStart(2, "0")}`;
-  const minutesFromUtc = -takenAt.getTimezoneOffset();
-  const offset = `UTC${minutesFromUtc < 0 ? "-" : "+"}${String(Math.floor(Math.abs(minutesFromUtc) / 60)).padStart(2, "0")}:${String(Math.abs(minutesFromUtc) % 60).padStart(2, "0")}`;
-  const time = `${String(takenAt.getHours()).padStart(2, "0")}:${String(takenAt.getMinutes()).padStart(2, "0")}:${String(takenAt.getSeconds()).padStart(2, "0")} ${offset}`;
-  const fontSize = Math.min(40, Math.max(20, Math.round(width * 0.035)));
-  const padding = Math.round(fontSize * 0.45);
-  const lineHeight = Math.round(fontSize * 1.25);
+  const date = `${takenAt.getMonth() + 1}/${takenAt.getDate()}/${String(takenAt.getFullYear()).slice(-2)}`;
+  const time = takenAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const stamp = `${date}  ·  ${time}`;
+  const fontSize = Math.min(28, Math.max(15, Math.round(width * 0.024)));
+  const paddingX = Math.round(fontSize * 0.65);
+  const paddingY = Math.round(fontSize * 0.42);
   const margin = Math.max(8, Math.round(width * 0.018));
-  context.font = `700 ${fontSize}px system-ui, sans-serif`;
-  const boxWidth = Math.min(width - margin * 2, Math.ceil(Math.max(context.measureText(date).width, context.measureText(time).width) + padding * 2));
-  const boxHeight = lineHeight * 2 + padding * 2;
+  context.font = `600 ${fontSize}px system-ui, sans-serif`;
+  const boxWidth = Math.min(width - margin * 2, Math.ceil(context.measureText(stamp).width + paddingX * 2));
+  const boxHeight = Math.ceil(fontSize + paddingY * 2);
   const top = height - margin - boxHeight;
-  context.fillStyle = "rgba(8, 25, 38, 0.82)";
-  context.fillRect(margin, top, boxWidth, boxHeight);
+  context.fillStyle = "rgba(8, 25, 38, 0.72)";
+  context.beginPath();
+  context.roundRect(margin, top, boxWidth, boxHeight, Math.round(boxHeight / 2));
+  context.fill();
   context.fillStyle = "#fff";
-  context.textBaseline = "top";
-  context.fillText(date, margin + padding, top + padding, boxWidth - padding * 2);
-  context.fillText(time, margin + padding, top + padding + lineHeight, boxWidth - padding * 2);
+  context.textBaseline = "middle";
+  context.fillText(stamp, margin + paddingX, top + boxHeight / 2, boxWidth - paddingX * 2);
 }
 
 async function compactJpeg(source: HTMLCanvasElement, maxDimension = 1600): Promise<Blob> {
@@ -176,7 +177,7 @@ async function imageBase64(image: Blob): Promise<string> {
   return btoa(binary);
 }
 
-async function sendQcStep(body: Record<string, string | number>): Promise<void> {
+async function sendQcStep(body: Record<string, unknown>): Promise<void> {
   for (let attempt = 0; attempt < 3; attempt++) {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 45_000);
@@ -234,12 +235,13 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const pinchCooldownUntil = useRef(0);
   const techId = signedInTechId;
   const draftRef = useRef<QcDraft | null>(null);
-  if (!draftRef.current) draftRef.current = { techId, submissionId: crypto.randomUUID(), jobNumber: "", screenshot: null, photos: [], updatedAt: Date.now() };
+  if (!draftRef.current) draftRef.current = { techId, submissionId: crypto.randomUUID(), jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
   const draftWrites = useRef<Promise<void>>(Promise.resolve());
   const draftTimer = useRef<number | null>(null);
   const draftRevision = useRef(0);
   const screenshotProcessing = useRef(false);
   const clearingDraft = useRef(false);
+  const locationRequest = useRef<Promise<QcLocation> | null>(null);
   const resetDialog = useRef<HTMLDialogElement>(null);
   const resetCancel = useRef<HTMLButtonElement>(null);
   const [resetConfirmation, setResetConfirmation] = useState(false);
@@ -249,6 +251,8 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const [submissionId, setSubmissionId] = useState(draftRef.current.submissionId);
   const [screenshot, setScreenshot] = useState<Blob | null>(null);
   const [photos, setPhotos] = useState<Blob[]>([]);
+  const [location, setLocation] = useState<QcLocation | null>(null);
+  const [locationChecking, setLocationChecking] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [draftStatus, setDraftStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [cameraOn, setCameraOn] = useState(false);
@@ -282,6 +286,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         setJobNumber(savedJobNumber);
         setScreenshot(draft.screenshot);
         setPhotos(draft.photos);
+        setLocation(draft.location);
         setDraftStatus("saved");
       }
       setDraftReady(true);
@@ -318,6 +323,31 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     });
     draftWrites.current = pending.then(() => undefined);
     return pending;
+  }
+
+  function captureQcLocation(force = false): Promise<QcLocation> {
+    if (!force && draftRef.current!.location) return Promise.resolve(draftRef.current!.location);
+    if (locationRequest.current) return locationRequest.current;
+    if (force) {
+      draftRef.current = { ...draftRef.current!, location: null };
+      setLocation(null);
+    }
+    setLocationChecking(true);
+    const capturedAt = Date.now();
+    const request = new Promise<QcLocation>((resolve) => {
+      if (!navigator.geolocation) { resolve({ status: "unavailable", capturedAt }); return; }
+      const success = (position: GeolocationPosition) => resolve({ status: "verified", latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy, capturedAt });
+      navigator.geolocation.getCurrentPosition(success, (error) => {
+        if (error.code === error.PERMISSION_DENIED) { resolve({ status: "unavailable", capturedAt }); return; }
+        navigator.geolocation.getCurrentPosition(success, () => resolve({ status: "unavailable", capturedAt }), { enableHighAccuracy: false, timeout: 6_000, maximumAge: 5 * 60_000 });
+      }, { enableHighAccuracy: true, timeout: 8_000, maximumAge: 60_000 });
+    });
+    locationRequest.current = request;
+    void request.then(async (result) => {
+      setLocation(result);
+      await queueDraftSave({ ...draftRef.current!, location: result });
+    }).finally(() => { locationRequest.current = null; setLocationChecking(false); });
+    return request;
   }
 
   function changeJobNumber(value: string) {
@@ -380,7 +410,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const approvedQcs = progress?.techId === techId && progress.month === month ? progress.approved : null;
   const remainingQcs = approvedQcs === null ? null : Math.max(0, MONTHLY_QC_GOAL - approvedQcs);
   const validJobNumber = /^\d{1,6}$/.test(jobNumber);
-  const submitHint = processingScreenshot ? "Reading your screenshot…" : !screenshot ? "Add your account screenshot." : !validJobNumber ? "Check or enter the job number." : photos.length < 2 ? `Take ${2 - photos.length} more live ${photos.length === 1 ? "photo" : "photos"}.` : taking ? "Finishing your photo…" : cameraOn ? "Close the camera to submit." : "";
+  const submitHint = processingScreenshot ? "Reading your screenshot…" : !screenshot ? "Add your account screenshot." : !validJobNumber ? "Check or enter the job number." : taking ? "Finishing your photo…" : cameraOn ? "Close the camera to submit." : "";
   const ready = validTechId && validJobNumber && !!screenshot && photos.length >= 2 && photos.length <= MAX_PHOTOS;
 
   useEffect(() => {
@@ -437,11 +467,14 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       const removal = draftWrites.current.then(() => deleteQcDraft(techId));
       draftWrites.current = removal.catch(() => undefined);
       await removal;
-      draftRef.current = { techId, submissionId: nextId, jobNumber: "", screenshot: null, photos: [], updatedAt: Date.now() };
+      locationRequest.current = null;
+      draftRef.current = { techId, submissionId: nextId, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
       setSubmissionId(nextId);
       setJobNumber("");
       setScreenshot(null);
       setPhotos([]);
+      setLocation(null);
+      setLocationChecking(false);
       setSubmitted(false);
       setScreenshotReading(0);
       setScreenshotReadingMessage("");
@@ -528,14 +561,14 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       }
       if (draftTimer.current !== null) { window.clearTimeout(draftTimer.current); draftTimer.current = null; }
       const existingJobNumber = draftRef.current!.jobNumber;
-      const nextJobNumber = existingJobNumber || detectedJobNumber || "";
+      const nextJobNumber = detectedJobNumber || existingJobNumber || "";
       await queueDraftSave({ ...draftRef.current!, jobNumber: nextJobNumber, screenshot: image });
-      if (!existingJobNumber && detectedJobNumber) setJobNumber(detectedJobNumber);
+      if (detectedJobNumber) setJobNumber(detectedJobNumber);
       setScreenshot(image);
       setScreenshotReading(100);
       setScreenshotReadingMessage(detectedJobNumber
         ? existingJobNumber && existingJobNumber !== detectedJobNumber
-          ? `Found job ${detectedJobNumber}. Your existing job number was kept; please verify it.`
+          ? `Job number updated to ${detectedJobNumber}. Please verify it.`
           : existingJobNumber
             ? `Job number ${detectedJobNumber} matches the screenshot.`
             : `Job number ${detectedJobNumber} was filled in. Please verify it.`
@@ -567,6 +600,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
 
   async function takePhoto() {
     if (Date.now() < pinchCooldownUntil.current || !video.current?.videoWidth || !stream.current || taking || screenshotProcessing.current || photos.length >= MAX_PHOTOS) return;
+    if (!draftRef.current!.location && !locationRequest.current) void captureQcLocation();
     setTaking(true); setError(""); setCaptured(null); setFlash((current) => current + 1);
     try {
       const width = video.current.videoWidth;
@@ -620,6 +654,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       const draftSaved = await queueDraftSave({ ...draftRef.current!, screenshot: preparedScreenshot, photos: preparedPhotos });
       if (!draftSaved) throw new Error("Could not save this unfinished QC on your phone. Keep this page open and try again.");
       const details = { techId, jobNumber: jobNumber.trim(), submissionId };
+      const submissionLocation = draftRef.current!.location ?? await captureQcLocation();
       for (let index = 0; index < prepared.length; index++) {
         setUploadLabel(`Uploading picture ${index + 1} of ${prepared.length}…`);
         await sendQcStep({ ...details, action: "photo", slot: index, image: await imageBase64(prepared[index]) });
@@ -627,7 +662,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       }
       setUploadLabel("Saving QC for review…");
       setUploadProgress(95);
-      await sendQcStep({ ...details, action: "finalize", photoCount: preparedPhotos.length });
+      await sendQcStep({ ...details, action: "finalize", photoCount: preparedPhotos.length, location: submissionLocation });
       setUploadProgress(100); setUploadLabel("Upload complete");
       setQcCounts((counts) => counts ? { ...counts, captured: counts.captured + 1 } : counts);
       ++draftRevision.current;
@@ -636,8 +671,9 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       try { await removeDraft; setDraftStatus("idle"); }
       catch { setDraftStatus("failed"); }
       const nextId = crypto.randomUUID();
-      draftRef.current = { techId, submissionId: nextId, jobNumber: "", screenshot: null, photos: [], updatedAt: Date.now() };
-      setScreenshotReadingMessage(""); setSubmitted(true); setJobNumber(""); setScreenshot(null); setPhotos([]); setSubmissionId(nextId);
+      locationRequest.current = null;
+      draftRef.current = { techId, submissionId: nextId, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
+      setScreenshotReadingMessage(""); setSubmitted(true); setJobNumber(""); setScreenshot(null); setPhotos([]); setLocation(null); setLocationChecking(false); setSubmissionId(nextId);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Could not submit this QC.";
       setError(cause instanceof UploadFailure && cause.retryable ? `${message} Your unfinished QC is saved on this phone. Check your connection and tap Submit QC for approval again.` : message);
@@ -677,6 +713,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
           <div className="qc-step-marker"><span>3</span></div><div className="qc-step-card"><div className="qc-step-heading"><h2>Live QC photos</h2><p>Take the required live photos below.</p></div>
           <button type="button" className="viewfinder qc-viewfinder is-off qc-camera-entry" onClick={() => void startCamera()} disabled={busy || processingScreenshot || photos.length >= MAX_PHOTOS} aria-label={photos.length >= MAX_PHOTOS ? "Maximum of seven live photos reached" : "Open live camera"}><span className="camera-placeholder"><Camera size={32}/><span>{photos.length >= MAX_PHOTOS ? "7 photos ready. Remove one to retake." : "Tap to take live photos"}</span></span></button>
           {(screenshot || photos.length > 0) && <div className="qc-photo-grid qc-photo-gallery" data-photo-gallery>{screenshot && <div className="qc-photo qc-screenshot-photo"><ImagePreview blob={screenshot} alt="Account screenshot"/><span>Account</span></div>}{photos.map((photo, index) => <div className="qc-photo" key={index}><ImagePreview blob={photo} alt={`Live QC photo ${index + 1}`}/><button type="button" className="qc-remove-photo" aria-label={`Remove photo ${index + 1}`} disabled={busy || taking || processingScreenshot} onClick={() => removePhoto(index)}><Trash2 size={16}/></button><span>{index + 1}</span></div>)}</div>}
+          {(photos.length > 0 || locationChecking) && <div className={`qc-location-capture ${location?.status ?? "checking"}`} role="status"><MapPin size={15}/><span>{locationChecking ? "Checking location…" : location?.status === "verified" ? `Location captured · ±${Math.round(location.accuracy)} m` : "Location unavailable"}</span>{location?.status === "unavailable" && !locationChecking && <button type="button" disabled={busy || taking} onClick={() => void captureQcLocation(true)}>Retry</button>}</div>}
           </div></section>
         </div>
         <div className={`qc-fullscreen-camera${cameraOn ? " active" : ""}`} role={cameraOn ? "dialog" : undefined} aria-modal={cameraOn ? "true" : undefined} aria-label="Live QC camera" aria-hidden={!cameraOn} onTouchStart={(event) => beginPinch(event.touches)} onTouchMove={(event) => movePinch(event.touches)} onTouchEnd={(event) => { if (pinch.current) pinchCooldownUntil.current = Date.now() + 350; if (event.touches.length < 2) pinch.current = null; }} onTouchCancel={() => { pinch.current = null; }}>

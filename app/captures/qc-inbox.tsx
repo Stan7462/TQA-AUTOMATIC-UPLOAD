@@ -1,12 +1,12 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, MapPin, X } from "lucide-react";
 import AdminShell from "@/app/admin-shell";
 import QcFilterBar from "@/app/qc-filter-bar";
 import { useQcFilters } from "@/lib/use-qc-filters";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
-type Submission={id:string;techId:string;jobNumber:string;screenshotId:string;photoIds:string[];status:string;submittedAt:number;reviewNote:string|null;trustUploadStatus:string};
+type Submission={id:string;techId:string;jobNumber:string;screenshotId:string;photoIds:string[];status:string;submittedAt:number;reviewNote:string|null;trustUploadStatus:string;locationStatus:string|null;locationLatitude:number|null;locationLongitude:number|null;locationAccuracy:number|null;locationCapturedAt:number|null};
 type Stat={techId:string;approved:number;rejected:number;pending:number};
 const reasons = [
   'Job has been reviewed by another evaluator',
@@ -55,7 +55,7 @@ export default function QcInbox(){
  <div className="qc-inbox-content"><section className="qc-review-panel" aria-label="QC approval queue">
  {notice&&<p className="qc-notice" role="status">{notice}</p>}{error&&<p className="form-error" role="alert">{error}</p>}
  {loading||!ready?<p className="qc-empty">Loading QCs…</p>:!visible.length?<div className="qc-empty">{selected?'This QC is no longer available.':'No QCs match these filters.'}</div>:<div className="qc-submission-list">{groups.map(([techId,group])=><section className="qc-tech-group" key={techId}><h2>Tech {techId} <small>{group?.length} {group?.length === 1 ? "QC" : "QCs"}</small></h2>{group?.map(item=><article id={`qc-${item.id}`} className={item.status==='pending'?'qc-submission-card':'qc-approved-row'} key={item.id}>
- <div className="qc-approved-meta"><strong>Job {item.jobNumber}</strong><span>{new Date(item.submittedAt).toLocaleString()}</span><span className={`qc-status ${item.status}`}>{item.status==='pending'?'Needs review':item.status==='approved'?'Approved':'Rejected'}</span>{item.status==='approved'&&<small>{item.trustUploadStatus==='uploaded'?'Uploaded to Catalyst':item.trustUploadStatus==='failed'?'Catalyst upload needs retry':'Ready for Catalyst'}</small>}</div>
+ <div className="qc-approved-meta"><strong>Job {item.jobNumber}</strong><span>{new Date(item.submittedAt).toLocaleString()}</span><span className={`qc-status ${item.status}`}>{item.status==='pending'?'Needs review':item.status==='approved'?'Approved':'Rejected'}</span>{item.status==='approved'&&<small>{item.trustUploadStatus==='uploaded'?'Uploaded to Catalyst':item.trustUploadStatus==='failed'?'Catalyst upload needs retry':'Ready for Catalyst'}</small>}{item.locationStatus==='verified'&&item.locationLatitude!==null&&item.locationLongitude!==null?<a className="qc-location-link" href={`https://www.google.com/maps?q=${item.locationLatitude},${item.locationLongitude}`} target="_blank" rel="noreferrer"><MapPin size={14}/>Location verified{item.locationAccuracy!==null?` · ±${Math.round(item.locationAccuracy)} m`:''}</a>:<span className="qc-location-missing"><MapPin size={14}/>{item.locationStatus==='unavailable'?'Location unavailable':'Location not recorded'}</span>}</div>
  <div className={`qc-unified-gallery${item.status!=='pending'?' compact':''}`} data-photo-gallery>{[{id:item.screenshotId,label:'Account screenshot'},...item.photoIds.map((id,i)=>({id,label:`QC photo ${i+1}`}))].map(p=><button type="button" key={p.id} aria-label={`Enlarge ${p.label} for job ${item.jobNumber}`}><img src={`/api/captures/${p.id}`} alt={p.label} loading="lazy"/><span>{p.label}</span></button>)}</div>
  {item.reviewNote&&<div className="profile-note"><strong>Review note</strong><p>{item.reviewNote}</p></div>}
  {item.status==='pending'&&<div className="qc-decision-panel"><button className="button dark" disabled={!!decisionBusy} onClick={()=>void decide(item.id,'approved')}><Check size={18}/>Approve QC</button><label>Rejection note<textarea aria-label={`Rejection note for job ${item.jobNumber}`} placeholder="Explain what needs fixing" value={notes[item.id]||''} maxLength={1000} onChange={e=>setNotes(current=>({...current,[item.id]:e.target.value}))}/></label><label className="qc-reason-picker">Add a reason<select aria-label={`Add rejection reason for job ${item.jobNumber}`} value="" disabled={!!decisionBusy} onChange={e=>{
