@@ -5,6 +5,7 @@ let stopRequested = false;
 const successWaiters = new Map();
 const storageReady = chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 let logChain = Promise.resolve();
+const BETWEEN_QC_DELAY_MS = 20_000;
 
 function logEvent(level, step, message) {
   const entry = { at: new Date().toISOString(), level, step, message: safeError(message) };
@@ -86,6 +87,19 @@ async function report(id, status, value) {
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function waitBeforeNextQc(jobNumber) {
+  await setRun({
+    stage: "waiting",
+    message: `Job ${jobNumber} uploaded successfully. Waiting 20 seconds before the next QC.`
+  });
+  const waitUntil = Date.now() + BETWEEN_QC_DELAY_MS;
+  while (!stopRequested && Date.now() < waitUntil) {
+    await delay(Math.min(500, waitUntil - Date.now()));
+  }
+  if (!stopRequested) {
+    await logEvent("info", "waiting", "20-second wait finished. Starting the next QC.");
+  }
+}
 function withTimeout(promise, ms, message) {
   let timer;
   return Promise.race([
@@ -164,7 +178,7 @@ async function photoBase64(url) {
 async function processOne(qcSummary, tabId, index, total) {
   let photoCount = 0;
   const qc = await detail(qcSummary.id);
-  if (qc.reviewStatus !== "approved" || !["ready", "failed"].includes(qc.uploadStatus)) return;
+  if (qc.reviewStatus !== "approved" || !["ready", "failed"].includes(qc.uploadStatus)) return null;
   const photos = orderedPhotos(qc);
   await setRun({ currentQcId: qc.id, jobId: null, jobNumber: qc.jobNumber, techId: qc.techId, index: index + 1, total,
     photoIndex: 0, photoTotal: photos.length, stage: "finding job", message: `Finding job ${qc.jobNumber}` });
@@ -176,7 +190,7 @@ async function processOne(qcSummary, tabId, index, total) {
       const reason = matches.length === 0 ? "No exact job number and Tech ID match in Catalyst." : "Multiple exact job number and Tech ID matches in Catalyst.";
       await report(qc.id, "failed", reason);
       await setRun({ stage: "skipped", message: `${reason} Job ${qc.jobNumber} needs review.` });
-      return;
+      return null;
     }
     const jobId = matches[0].jobId;
     await setRun({ stage: "opening observation", jobId, message: `Opening Catalyst job ID ${jobId}` });
@@ -201,6 +215,7 @@ async function processOne(qcSummary, tabId, index, total) {
     const uploaded = await report(qc.id, "uploaded", jobId);
     if (uploaded.uploadStatus !== "uploaded") throw new Error("TQA did not confirm uploaded status.");
     await setRun({ stage: "uploaded", message: `Job ${qc.jobNumber}: ${successMessage}` });
+    return qc.jobNumber;
   } catch (error) {
     const reason = safeError(error);
     if (photoCount > 0 || /uploading|quality checks|completing|reporting/i.test((await stored()).run?.stage || "")) {
@@ -209,6 +224,7 @@ async function processOne(qcSummary, tabId, index, total) {
     }
     try { await report(qc.id, "failed", reason); } catch { /* preserve original error */ }
     await setRun({ stage: "failed", message: `Job ${qc.jobNumber}: ${reason}` });
+    return null;
   }
 }
 
@@ -223,8 +239,11 @@ async function runQueue() {
     await setRun({ tabId });
     for (let i = 0; i < queue.length; i++) {
       if (stopRequested) break;
-      await processOne(queue[i], tabId, i, queue.length);
+      const uploadedJobNumber = await processOne(queue[i], tabId, i, queue.length);
       if ((await stored()).run?.status === "needs_review") return;
+      if (uploadedJobNumber && i < queue.length - 1 && !stopRequested) {
+        await waitBeforeNextQc(uploadedJobNumber);
+      }
     }
     await loadQueue();
     await setRun({ status: stopRequested ? "stopped" : "done", stage: "done", message: stopRequested ? "Stopped." : "Queue finished." });
