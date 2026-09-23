@@ -25,24 +25,40 @@ type StoredQcDraft = Omit<QcDraft, "screenshot" | "photos" | "recoveryWarning"> 
 const DATABASE_NAME = "tqa-unfinished-qcs";
 const DATABASE_VERSION = 2;
 const STORE_NAME = "drafts";
+const STORAGE_TIMEOUT_MS = 5_000;
 
 function openDraftDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (!window.indexedDB) { reject(new Error("Local storage is unavailable.")); return; }
     const request = window.indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+    let finished = false;
+    const timer = window.setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      reject(new Error("Local storage did not respond in time."));
+    }, STORAGE_TIMEOUT_MS);
+    const fail = (error: Error) => {
+      if (finished) return;
+      finished = true;
+      window.clearTimeout(timer);
+      reject(error);
+    };
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: "techId" });
     };
     request.onsuccess = () => {
+      if (finished) { request.result.close(); return; }
       if (!request.result.objectStoreNames.contains(STORE_NAME)) {
         request.result.close();
-        reject(new Error("The unfinished QC storage needs to be reset."));
+        fail(new Error("The unfinished QC storage needs to be reset."));
         return;
       }
+      finished = true;
+      window.clearTimeout(timer);
       resolve(request.result);
     };
-    request.onerror = () => reject(request.error ?? new Error("Could not open local storage."));
-    request.onblocked = () => reject(new Error("Local storage is busy. Close other tabs and try again."));
+    request.onerror = () => fail(request.error ?? new Error("Could not open local storage."));
+    request.onblocked = () => fail(new Error("Local storage is busy. Close other tabs and try again."));
   });
 }
 
@@ -53,9 +69,14 @@ async function runDraftTransaction<T>(mode: IDBTransactionMode, action: (store: 
     try { transaction = db.transaction(STORE_NAME, mode); }
     catch (cause) { db.close(); reject(cause); return; }
     let result: T;
-    transaction.oncomplete = () => { db.close(); resolve(result); };
-    transaction.onerror = () => { db.close(); reject(transaction.error ?? new Error("Could not save the unfinished QC.")); };
-    transaction.onabort = () => { db.close(); reject(transaction.error ?? new Error("Could not save the unfinished QC.")); };
+    const timer = window.setTimeout(() => {
+      reject(new Error("Local storage did not respond in time."));
+      try { transaction.abort(); } catch { /* Transaction may already be complete. */ }
+      db.close();
+    }, STORAGE_TIMEOUT_MS);
+    transaction.oncomplete = () => { window.clearTimeout(timer); db.close(); resolve(result); };
+    transaction.onerror = () => { window.clearTimeout(timer); db.close(); reject(transaction.error ?? new Error("Could not save the unfinished QC.")); };
+    transaction.onabort = () => { window.clearTimeout(timer); db.close(); reject(transaction.error ?? new Error("Could not save the unfinished QC.")); };
     action(transaction.objectStore(STORE_NAME), (value) => { result = value; });
   });
 }
@@ -125,7 +146,14 @@ export async function readQcDraft(techId: string): Promise<QcDraft | null> {
   };
 
   // Migrate readable version 1 drafts immediately to the iOS-safe byte format.
-  if (draft.formatVersion !== 2 || lostScreenshot || lostPhotos) await writeQcDraft(restored);
+  if (draft.formatVersion !== 2 || lostScreenshot || lostPhotos) {
+    try { await writeQcDraft(restored); }
+    catch {
+      restored.recoveryWarning = restored.recoveryWarning
+        ? `${restored.recoveryWarning} The restored draft is open, but its phone backup could not be refreshed.`
+        : "Your unfinished QC was restored, but its phone backup could not be refreshed. Keep this page open until you submit it.";
+    }
+  }
   return restored;
 }
 
