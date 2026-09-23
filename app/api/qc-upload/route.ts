@@ -5,8 +5,9 @@ import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export const dynamic = "force-dynamic";
 
-const MAX_IMAGE_BYTES = 30 * 1024;
-const MAX_BODY_BYTES = 64 * 1024;
+const MAX_SCREENSHOT_BYTES = 250 * 1024;
+const MAX_LIVE_PHOTO_BYTES = 200 * 1024;
+const MAX_BODY_BYTES = 512 * 1024;
 const DRAFT_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 type UploadBody = {
@@ -22,8 +23,8 @@ type UploadBody = {
   location?: unknown;
 };
 
-function validJpeg(bytes: Uint8Array): boolean {
-  return bytes.length >= 500 && bytes.length <= MAX_IMAGE_BYTES && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9;
+function validJpeg(bytes: Uint8Array, maxBytes: number): boolean {
+  return bytes.length >= 500 && bytes.length <= maxBytes && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9;
 }
 
 function photoId(now: number): string {
@@ -56,11 +57,12 @@ export async function POST(request: Request) {
     : Response.json({ error: "Submission ID already used." }, { status: 409 });
 
   if (body?.action === "photo") {
-    if (!Number.isInteger(body.slot) || (body.slot as number) < 0 || (body.slot as number) > 7 || typeof body.image !== "string" || body.image.length > 41_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(body.image)) {
+    if (!Number.isInteger(body.slot) || (body.slot as number) < 0 || (body.slot as number) > 7 || typeof body.image !== "string" || body.image.length > 350_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(body.image)) {
       return Response.json({ error: "The picture could not be read. Retake it and try again." }, { status: 400 });
     }
     const bytes = Buffer.from(body.image, "base64");
-    if (!validJpeg(bytes)) return Response.json({ error: "The picture must be a valid JPEG no larger than 30 KB." }, { status: 400 });
+    const maxBytes = body.slot === 0 ? MAX_SCREENSHOT_BYTES : MAX_LIVE_PHOTO_BYTES;
+    if (!validJpeg(bytes, maxBytes)) return Response.json({ error: `The picture must be a valid JPEG no larger than ${body.slot === 0 ? 250 : 200} KB.` }, { status: 400 });
     try {
       const now = Date.now();
       await env.DB.prepare("DELETE FROM qc_upload_photos WHERE created_at < ?").bind(now - DRAFT_LIFETIME_MS).run();
@@ -84,7 +86,7 @@ export async function POST(request: Request) {
   const rows = await env.DB.prepare("SELECT slot, image FROM qc_upload_photos WHERE submission_id = ? AND tech_id = ? ORDER BY slot")
     .bind(submissionId, techId).all<{ slot: number; image: Uint8Array }>();
   const images = Array.from({ length: photoCount + 1 }, (_, slot) => rows.results.find((row) => row.slot === slot)?.image);
-  if (images.some((image) => !image || !validJpeg(image))) return Response.json({ error: "One or more pictures did not reach the laptop. Tap Submit again to resume." }, { status: 409 });
+  if (images.some((image, index) => !image || !validJpeg(image, index === 0 ? MAX_SCREENSHOT_BYTES : MAX_LIVE_PHOTO_BYTES))) return Response.json({ error: "One or more pictures did not reach the server. Tap Submit again to resume." }, { status: 409 });
 
   const now = Date.now();
   const ids = images.map(() => photoId(now));

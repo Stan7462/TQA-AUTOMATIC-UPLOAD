@@ -8,7 +8,8 @@ import { deleteQcDraft, readQcDraft, writeQcDraft, type QcDraft } from "@/lib/qc
 import type { QcLocation } from "@/lib/qc-location";
 
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
-const MAX_IMAGE_BYTES = 30 * 1024;
+const MAX_SCREENSHOT_OUTPUT_BYTES = 250 * 1024;
+const MAX_LIVE_PHOTO_BYTES = 200 * 1024;
 const MAX_PHOTOS = 7;
 const MONTHLY_QC_GOAL = 5;
 const MAX_CAMERA_ZOOM = 5;
@@ -35,7 +36,7 @@ function drawCaptureTimestamp(context: CanvasRenderingContext2D, width: number, 
   context.fillText(stamp, margin + paddingX, top + boxHeight / 2, boxWidth - paddingX * 2);
 }
 
-async function compactJpeg(source: HTMLCanvasElement, maxDimension = 1600): Promise<Blob> {
+async function compactJpeg(source: HTMLCanvasElement, maxBytes: number, maxDimension = 1600): Promise<Blob> {
   const longest = Math.max(source.width, source.height);
   let dimension = Math.min(longest, maxDimension);
   while (dimension >= 240 || dimension === longest) {
@@ -46,16 +47,16 @@ async function compactJpeg(source: HTMLCanvasElement, maxDimension = 1600): Prom
     const context = canvas.getContext("2d");
     if (!context) throw new Error("This browser could not prepare the image.");
     context.drawImage(source, 0, 0, canvas.width, canvas.height);
-    for (const quality of [0.82, 0.68, 0.55, 0.42, 0.3]) {
+    for (const quality of [0.88, 0.82, 0.75, 0.68, 0.6]) {
       const jpeg = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
-      if (jpeg && jpeg.size >= 500 && jpeg.size <= MAX_IMAGE_BYTES) return jpeg;
+      if (jpeg && jpeg.size >= 500 && jpeg.size <= maxBytes) return jpeg;
     }
     dimension = Math.floor(dimension * 0.78);
   }
-  throw new Error("This image could not be reduced to 30 KB. Try another image.");
+  throw new Error("This image could not be prepared for upload. Try another image.");
 }
 
-async function savedImageAsJpeg(blob: Blob): Promise<Blob> {
+async function savedImageAsJpeg(blob: Blob, maxBytes: number): Promise<Blob> {
   let source: ImageBitmap | HTMLImageElement;
   let temporaryUrl: string | null = null;
   try { source = await createImageBitmap(blob); }
@@ -76,7 +77,7 @@ async function savedImageAsJpeg(blob: Blob): Promise<Blob> {
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(height * scale));
     canvas.getContext("2d")?.drawImage(source, 0, 0, canvas.width, canvas.height);
-    return await compactJpeg(canvas);
+    return await compactJpeg(canvas, maxBytes);
   } finally {
     if (bitmap) (source as ImageBitmap).close();
     if (temporaryUrl) URL.revokeObjectURL(temporaryUrl);
@@ -123,7 +124,7 @@ async function screenshotAsJpeg(file: File): Promise<Blob> {
   canvas.getContext("2d")?.drawImage(source, 0, 0, canvas.width, canvas.height);
   if (bitmap) (source as ImageBitmap).close();
   if (temporaryUrl) URL.revokeObjectURL(temporaryUrl);
-  return compactJpeg(canvas);
+  return compactJpeg(canvas, MAX_SCREENSHOT_OUTPUT_BYTES);
 }
 
 async function recognizeJobNumber(file: File, onProgress: (progress: number) => void): Promise<string | null> {
@@ -288,6 +289,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         setPhotos(draft.photos);
         setLocation(draft.location);
         setDraftStatus("saved");
+        if (draft.recoveryWarning) setError(draft.recoveryWarning);
       }
       setDraftReady(true);
     }).catch(() => {
@@ -633,7 +635,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       const takenAt = new Date();
       context.drawImage(video.current, (width - cropWidth) / 2, (height - cropHeight) / 2, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
       drawCaptureTimestamp(context, canvas.width, canvas.height, takenAt);
-      const photo = await compactJpeg(canvas, 1280);
+      const photo = await compactJpeg(canvas, MAX_LIVE_PHOTO_BYTES, 1600);
       if (draftTimer.current !== null) { window.clearTimeout(draftTimer.current); draftTimer.current = null; }
       const nextPhotos = [...photos, photo];
       setPhotos(nextPhotos);
@@ -660,16 +662,26 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       const images = [screenshot, ...photos];
       const prepared: Blob[] = [];
       for (let index = 0; index < images.length; index++) {
-        const image = images[index].size <= MAX_IMAGE_BYTES && images[index].type === "image/jpeg" ? images[index] : await savedImageAsJpeg(images[index]);
-        if (image.size > MAX_IMAGE_BYTES) throw new Error("One of the pictures is still larger than 30 KB. Retake it and try again.");
+        let stableImage: Blob;
+        try {
+          stableImage = new Blob([await images[index].arrayBuffer()], { type: images[index].type || "image/jpeg" });
+        } catch {
+          throw new Error(index === 0
+            ? "Your saved account screenshot is no longer readable. Replace it and submit again."
+            : `Live photo ${index} is no longer readable. Delete it, retake it, and submit again.`);
+        }
+        const maxBytes = index === 0 ? MAX_SCREENSHOT_OUTPUT_BYTES : MAX_LIVE_PHOTO_BYTES;
+        const image = stableImage.size <= maxBytes && stableImage.type === "image/jpeg" ? stableImage : await savedImageAsJpeg(stableImage, maxBytes);
+        if (image.size > maxBytes) throw new Error("One of the pictures is still too large. Retake it and try again.");
         prepared.push(image);
         setUploadProgress(Math.round(10 * (index + 1) / images.length));
       }
       const preparedScreenshot = prepared[0];
       const preparedPhotos = prepared.slice(1);
       setScreenshot(preparedScreenshot); setPhotos(preparedPhotos);
-      const draftSaved = await queueDraftSave({ ...draftRef.current!, screenshot: preparedScreenshot, photos: preparedPhotos });
-      if (!draftSaved) throw new Error("Could not save this unfinished QC on your phone. Keep this page open and try again.");
+      // A local backup is useful, but an iPhone storage failure must not block a
+      // valid QC that is already in memory from reaching the server.
+      await queueDraftSave({ ...draftRef.current!, screenshot: preparedScreenshot, photos: preparedPhotos });
       const redoSourceId = draftRef.current!.redoSourceId;
       const details = { techId, jobNumber: jobNumber.trim(), submissionId, redoSourceId, redoChanged: draftRef.current!.redoChanged };
       const submissionLocation = draftRef.current!.location ?? await captureQcLocation();
@@ -749,7 +761,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         {submitHint && <p id="qc-submit-hint" className="qc-submit-hint" role="status">{submitHint}</p>}
         <button aria-describedby={submitHint ? "qc-submit-hint" : undefined} className="button dark qc-submit" onClick={submit} disabled={!ready || busy || taking || processingScreenshot || cameraOn}><Send size={18}/>{busy ? "Submitting…" : "Submit QC for approval"}</button>
         {uploadProgress !== null && <div className="qc-upload-progress" role="status"><div><strong>{uploadLabel}</strong><span>{uploadProgress}%</span></div><progress max={100} value={uploadProgress} aria-label="QC picture upload progress" /></div>}
-        <p className="camera-note camera-note-desktop">The account screenshot is the only saved image selected from your phone. QC photos use the live camera. Each picture is reduced to 30 KB or less. An unfinished QC stays in this browser until you submit it.</p>
+        <p className="camera-note camera-note-desktop">The account screenshot is the only saved image selected from your phone. QC photos use the live camera. Pictures are optimized for clear details and quick upload. An unfinished QC stays in this browser until you submit it.</p>
         <QcRequirements />
       </>}
     </div>

@@ -12,19 +12,35 @@ export type QcDraft = {
   photos: Blob[];
   location: QcLocation | null;
   updatedAt: number;
+  recoveryWarning?: string;
+};
+
+type StoredImage = { type: string; bytes: ArrayBuffer };
+type StoredQcDraft = Omit<QcDraft, "screenshot" | "photos" | "recoveryWarning"> & {
+  formatVersion: 2;
+  screenshot: StoredImage | null;
+  photos: StoredImage[];
 };
 
 const DATABASE_NAME = "tqa-unfinished-qcs";
+const DATABASE_VERSION = 2;
 const STORE_NAME = "drafts";
 
 function openDraftDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (!window.indexedDB) { reject(new Error("Local storage is unavailable.")); return; }
-    const request = window.indexedDB.open(DATABASE_NAME, 1);
+    const request = window.indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: "techId" });
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
+        request.result.close();
+        reject(new Error("The unfinished QC storage needs to be reset."));
+        return;
+      }
+      resolve(request.result);
+    };
     request.onerror = () => reject(request.error ?? new Error("Could not open local storage."));
     request.onblocked = () => reject(new Error("Local storage is busy. Close other tabs and try again."));
   });
@@ -33,7 +49,9 @@ function openDraftDatabase(): Promise<IDBDatabase> {
 async function runDraftTransaction<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore, resolve: (value: T) => void) => void): Promise<T> {
   const db = await openDraftDatabase();
   return new Promise<T>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, mode);
+    let transaction: IDBTransaction;
+    try { transaction = db.transaction(STORE_NAME, mode); }
+    catch (cause) { db.close(); reject(cause); return; }
     let result: T;
     transaction.oncomplete = () => { db.close(); resolve(result); };
     transaction.onerror = () => { db.close(); reject(transaction.error ?? new Error("Could not save the unfinished QC.")); };
@@ -42,27 +60,90 @@ async function runDraftTransaction<T>(mode: IDBTransactionMode, action: (store: 
   });
 }
 
+function validDraftMetadata(draft: Partial<QcDraft>, techId: string) {
+  return draft.techId === techId && typeof draft.jobNumber === "string" && draft.jobNumber.length <= 64 &&
+    typeof draft.submissionId === "string" && /^[0-9a-f-]{36}$/.test(draft.submissionId) &&
+    (draft.redoSourceId === undefined || draft.redoSourceId === null || (typeof draft.redoSourceId === "string" && /^[0-9a-f-]{36}$/.test(draft.redoSourceId))) &&
+    (draft.redoChanged === undefined || typeof draft.redoChanged === "boolean");
+}
+
+function isStoredImage(value: unknown): value is StoredImage {
+  if (!value || typeof value !== "object") return false;
+  const image = value as Partial<StoredImage>;
+  return typeof image.type === "string" && image.bytes instanceof ArrayBuffer;
+}
+
+async function restoreImage(value: unknown): Promise<Blob | null> {
+  try {
+    if (isStoredImage(value)) return new Blob([value.bytes.slice(0)], { type: value.type || "image/jpeg" });
+    // Version 1 stored Blob objects directly. Copy their bytes while they are still
+    // readable so iOS Safari no longer depends on a temporary file reference.
+    if (value instanceof Blob) return new Blob([await value.arrayBuffer()], { type: value.type || "image/jpeg" });
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function storeImage(image: Blob): Promise<StoredImage> {
+  return { type: image.type || "image/jpeg", bytes: await image.arrayBuffer() };
+}
+
 export async function readQcDraft(techId: string): Promise<QcDraft | null> {
   const value = await runDraftTransaction<unknown>("readonly", (store, setResult) => {
     const request = store.get(techId);
     request.onsuccess = () => setResult(request.result);
   });
   if (!value || typeof value !== "object") return null;
-  const draft = value as Partial<QcDraft>;
+  const draft = value as Partial<QcDraft> & { formatVersion?: number };
   const currentMonth = fiscalMonthKey();
   const draftMonth = typeof draft.fiscalMonth === "string" ? draft.fiscalMonth : typeof draft.updatedAt === "number" ? fiscalMonthKey(new Date(draft.updatedAt)) : "";
   if (draftMonth !== currentMonth) { await deleteQcDraft(techId); return null; }
-  if (draft.techId !== techId || typeof draft.jobNumber !== "string" || draft.jobNumber.length > 64 ||
-      typeof draft.submissionId !== "string" || !/^[0-9a-f-]{36}$/.test(draft.submissionId) ||
-      (draft.redoSourceId !== undefined && draft.redoSourceId !== null && (typeof draft.redoSourceId !== "string" || !/^[0-9a-f-]{36}$/.test(draft.redoSourceId))) ||
-      (draft.redoChanged !== undefined && typeof draft.redoChanged !== "boolean") ||
-      (draft.screenshot !== null && !(draft.screenshot instanceof Blob)) ||
-      !Array.isArray(draft.photos) || draft.photos.length > 7 || !draft.photos.every((photo) => photo instanceof Blob)) return null;
-  return { ...draft, fiscalMonth: currentMonth, redoSourceId: draft.redoSourceId ?? null, redoChanged: draft.redoChanged ?? false, location: normalizeQcLocation(draft.location) } as QcDraft;
+  if (!validDraftMetadata(draft, techId) || !Array.isArray(draft.photos) || draft.photos.length > 7) return null;
+
+  const screenshot = draft.screenshot == null ? null : await restoreImage(draft.screenshot);
+  const restoredPhotos = await Promise.all(draft.photos.map(restoreImage));
+  const photos = restoredPhotos.filter((photo): photo is Blob => photo !== null);
+  const lostScreenshot = draft.screenshot != null && screenshot === null;
+  const lostPhotos = draft.photos.length - photos.length;
+  const recoveryWarning = lostScreenshot || lostPhotos
+    ? `${lostScreenshot ? "Your saved account screenshot" : `${lostPhotos} saved live ${lostPhotos === 1 ? "photo" : "photos"}`} could not be restored. ${lostScreenshot ? "Replace the screenshot" : "Retake the missing photo"} before submitting.`
+    : undefined;
+
+  const restored: QcDraft = {
+    techId,
+    fiscalMonth: currentMonth,
+    submissionId: draft.submissionId!,
+    redoSourceId: draft.redoSourceId ?? null,
+    redoChanged: draft.redoChanged ?? false,
+    jobNumber: draft.jobNumber!,
+    screenshot,
+    photos,
+    location: normalizeQcLocation(draft.location),
+    updatedAt: typeof draft.updatedAt === "number" ? draft.updatedAt : Date.now(),
+    recoveryWarning,
+  };
+
+  // Migrate readable version 1 drafts immediately to the iOS-safe byte format.
+  if (draft.formatVersion !== 2 || lostScreenshot || lostPhotos) await writeQcDraft(restored);
+  return restored;
 }
 
 export async function writeQcDraft(draft: QcDraft): Promise<void> {
-  await runDraftTransaction<void>("readwrite", (store) => { store.put(draft); });
+  const stored: StoredQcDraft = {
+    techId: draft.techId,
+    fiscalMonth: draft.fiscalMonth,
+    submissionId: draft.submissionId,
+    redoSourceId: draft.redoSourceId,
+    redoChanged: draft.redoChanged,
+    jobNumber: draft.jobNumber,
+    screenshot: draft.screenshot ? await storeImage(draft.screenshot) : null,
+    photos: await Promise.all(draft.photos.map(storeImage)),
+    location: draft.location,
+    updatedAt: draft.updatedAt,
+    formatVersion: 2,
+  };
+  await runDraftTransaction<void>("readwrite", (store) => { store.put(stored); });
 }
 
 export async function deleteQcDraft(techId: string): Promise<void> {

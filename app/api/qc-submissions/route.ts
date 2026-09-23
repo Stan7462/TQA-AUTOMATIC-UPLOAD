@@ -6,13 +6,14 @@ import { normalizeQcLocation } from "@/lib/qc-location";
 
 export const dynamic = "force-dynamic";
 
-const MAX_IMAGE_BYTES = 30 * 1024;
-const MAX_REQUEST_BYTES = 512 * 1024;
+const MAX_SCREENSHOT_BYTES = 250 * 1024;
+const MAX_LIVE_PHOTO_BYTES = 200 * 1024;
+const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 const PAGE_SIZE = 25;
 const statuses = new Set(["all", "pending", "approved", "rejected"]);
 
-function validJpeg(file: FormDataEntryValue | null): file is File {
-  return file instanceof File && file.type === "image/jpeg" && file.size >= 500 && file.size <= MAX_IMAGE_BYTES;
+function validJpeg(file: FormDataEntryValue | null, maxBytes: number): file is File {
+  return file instanceof File && file.type === "image/jpeg" && file.size >= 500 && file.size <= maxBytes;
 }
 
 function validJpegBytes(bytes: Uint8Array): boolean {
@@ -47,9 +48,9 @@ export async function POST(request: Request) {
   if (removal) return Response.json({ error: "This Tech ID is no longer available. Contact your supervisor." }, { status: 403 });
   if (!/^\d{1,6}$/.test(jobNumber)) return Response.json({ error: "Enter a job number using 1 to 6 digits." }, { status: 400 });
   if (!/^[0-9a-f-]{36}$/.test(requestedId)) return Response.json({ error: "Invalid submission ID." }, { status: 400 });
-  if ((screenshot instanceof File && screenshot.size > MAX_IMAGE_BYTES) || photos.some((photo) => photo instanceof File && photo.size > MAX_IMAGE_BYTES)) return Response.json({ error: "Each picture must be 30 KB or smaller." }, { status: 413 });
-  if (!validJpeg(screenshot)) return Response.json({ error: "Choose one valid account screenshot." }, { status: 400 });
-  if (photos.length < 2 || photos.length > 7 || !photos.every(validJpeg)) return Response.json({ error: "Take at least 2 live QC photos. Check the QC requirements for your job." }, { status: 400 });
+  if ((screenshot instanceof File && screenshot.size > MAX_SCREENSHOT_BYTES) || photos.some((photo) => photo instanceof File && photo.size > MAX_LIVE_PHOTO_BYTES)) return Response.json({ error: "The screenshot must be 250 KB or smaller and live photos must be 200 KB or smaller." }, { status: 413 });
+  if (!validJpeg(screenshot, MAX_SCREENSHOT_BYTES)) return Response.json({ error: "Choose one valid account screenshot." }, { status: 400 });
+  if (photos.length < 2 || photos.length > 7 || !photos.every((photo) => validJpeg(photo, MAX_LIVE_PHOTO_BYTES))) return Response.json({ error: "Take at least 2 live QC photos. Check the QC requirements for your job." }, { status: 400 });
   const images = [screenshot, ...photos] as File[];
   if (images.reduce((total, image) => total + image.size, 0) > MAX_REQUEST_BYTES) return Response.json({ error: "The images are too large." }, { status: 413 });
 
