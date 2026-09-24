@@ -12,7 +12,7 @@ export async function GET() {
   if (!env.DB) return Response.json({ error: "Unavailable" }, { status: 503 });
   try {
     const { start, end } = fiscalMonthBounds(fiscalMonthKey());
-    const result = await env.DB.prepare("SELECT t.tech_id AS techId, COALESCE(q.total, 0) AS qcCount, 1 AS hasPin, t.pin_ciphertext AS pinCiphertext, COALESCE(r.state, 'active') AS state FROM technicians t LEFT JOIN (SELECT tech_id, COUNT(*) AS total FROM qc_submissions WHERE submitted_at >= ? AND submitted_at < ? GROUP BY tech_id) q ON q.tech_id = t.tech_id LEFT JOIN technician_removals r ON r.tech_id = t.tech_id WHERE t.active = 1 AND (r.state IS NULL OR r.state = 'deleting') ORDER BY t.tech_id").bind(start, end).all<{ techId: string; qcCount: number; hasPin: number; pinCiphertext: string | null; state: string }>();
+    const result = await env.DB.prepare("SELECT t.tech_id AS techId, COALESCE(q.total, 0) AS qcCount, 1 AS hasPin, t.pin_ciphertext AS pinCiphertext, CASE WHEN t.active = 1 THEN 'active' ELSE 'disabled' END AS state FROM technicians t LEFT JOIN (SELECT tech_id, COUNT(*) AS total FROM qc_submissions WHERE submitted_at >= ? AND submitted_at < ? GROUP BY tech_id) q ON q.tech_id = t.tech_id ORDER BY t.active DESC, t.tech_id").bind(start, end).all<{ techId: string; qcCount: number; hasPin: number; pinCiphertext: string | null; state: string }>();
     const technicians = await Promise.all(result.results.map(async ({ pinCiphertext, ...tech }) => ({ ...tech, isAdmin: tech.techId === ADMIN_TECH_ID, pin: pinCiphertext ? await decryptPin(pinCiphertext, env.PIN_ENCRYPTION_KEY) : null })));
     return Response.json({ technicians }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
@@ -29,8 +29,6 @@ export async function POST(request: Request) {
   const techId = normalizeTechId(body?.techId);
   if (!techId) return Response.json({ error: "Enter a valid Tech ID." }, { status: 400 });
   if (techId === ADMIN_TECH_ID && process.env.TQA_ADMIN_PIN) return Response.json({ error: "The admin PIN is managed by the deployment environment." }, { status: 409 });
-  const removal = await env.DB.prepare("SELECT state FROM technician_removals WHERE tech_id = ?").bind(techId).first<{ state: string }>();
-  if (removal?.state === "deleting") return Response.json({ error: "Finish removing this technician before re-adding them." }, { status: 409 });
   try {
     const pin = newPin();
     const salt = randomHex(16);

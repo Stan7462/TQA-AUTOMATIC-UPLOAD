@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Copy, KeyRound, Trash2, UsersRound } from "lucide-react";
+import { Copy, KeyRound, UserX, UsersRound } from "lucide-react";
 import AdminShell from "@/app/admin-shell";
 import TrustIntegrationSettings from "@/app/settings/trust-integration-settings";
 
-type Technician = { techId: string; qcCount: number; hasPin: number; isAdmin: boolean; pin: string | null; state: "active" | "deleting" | "removed" };
+type Technician = { techId: string; qcCount: number; hasPin: number; isAdmin: boolean; pin: string | null; state: "active" | "disabled" };
 
 export default function TechnicianSettings() {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
@@ -15,7 +15,7 @@ export default function TechnicianSettings() {
   const [pinBusy, setPinBusy] = useState(false);
   const [confirmTechId, setConfirmTechId] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState("");
-  const [deleteBusy, setDeleteBusy] = useState<string | null>(null);
+  const [disableBusy, setDisableBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [section, setSection] = useState<"technicians" | "api">("technicians");
@@ -25,7 +25,7 @@ export default function TechnicianSettings() {
     sync(); window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, []);
-  const visibleTechnicians = technicians.filter(tech => tech.state !== "removed" && tech.techId.toLowerCase().includes(search.trim().toLowerCase())).sort((a,b) => a.techId.localeCompare(b.techId, undefined, {numeric:true}));
+  const visibleTechnicians = technicians.filter(tech => tech.techId.toLowerCase().includes(search.trim().toLowerCase())).sort((a,b) => Number(a.state === "disabled") - Number(b.state === "disabled") || a.techId.localeCompare(b.techId, undefined, {numeric:true}));
   async function copyLogin(tech: Technician) {
     try {
       await navigator.clipboard.writeText(`TQA Automatic Upload\n${location.origin}/login\nTech ID: ${tech.techId}\nPIN: ${tech.pin}`);
@@ -52,22 +52,16 @@ export default function TechnicianSettings() {
     finally { setPinBusy(false); }
   }
 
-  async function removeTechnician(id: string) {
-    setDeleteBusy(id); setError(""); setNotice("");
+  async function disableTechnician(id: string) {
+    setDisableBusy(id); setError(""); setNotice("");
     try {
-      for (let batch = 0; batch < 100; batch++) {
-        const response = await fetch(`/api/technicians/${encodeURIComponent(id)}`, { method: "DELETE" });
-        const result = await response.json() as { error?: string; complete?: boolean };
-        if (!response.ok) throw new Error(result.error || "Could not remove this technician.");
-        if (result.complete) {
-          setConfirmTechId(null); setConfirmation(""); setIssued(null);
-          await load(); setNotice(`Tech ${id} and all their QCs and photos were removed.`);
-          return;
-        }
-      }
-      throw new Error("Removal is still in progress. Select Resume removal to continue.");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not remove this technician."); await load().catch(() => undefined); }
-    finally { setDeleteBusy(null); }
+      const response = await fetch(`/api/technicians/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Could not disable this technician.");
+      setConfirmTechId(null); setConfirmation(""); setIssued(null);
+      await load(); setNotice(`Tech ${id} was disabled. Their QC records and pictures were kept.`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not disable this technician."); await load().catch(() => undefined); }
+    finally { setDisableBusy(null); }
   }
 
   return <AdminShell active="settings">
@@ -76,8 +70,8 @@ export default function TechnicianSettings() {
     <div className="admin-page-content settings-page">
     <div className="settings-content">
     <div hidden={section !== "technicians"}>
-      <section id="technicians-settings" className="qc-pin-panel settings-panel"><div className="settings-section-title"><KeyRound size={21}/><h2>Add technician or reset PIN</h2></div><p>Enter a Tech ID to issue a private 5-digit PIN. The current PIN stays visible below in Settings. Resetting a PIN signs out that technician’s current profile sessions. Re-adding a removed ID allows new uploads under that ID.</p><form onSubmit={issuePin}><input aria-label="Tech ID for PIN" placeholder="Tech ID" value={techId} maxLength={32} onChange={(event) => setTechId(event.target.value.toUpperCase())} required/><button className="button dark" disabled={pinBusy}>{pinBusy ? "Issuing…" : "Issue / reset PIN"}</button></form>{issued && <div className="issued-pin" role="status"><strong>Private PIN for Tech {issued.techId}</strong><span>{issued.pin}</span><p>This PIN is also shown in the technician list below whenever you open Settings.</p></div>}</section>
-      <section className="qc-pin-panel settings-panel"><div className="settings-section-title"><UsersRound size={21}/><h2>Technicians</h2></div><p>Only active technicians appear here. Removing a technician permanently deletes their profile, QC records, screenshots, and live photos. Their Tech ID stays blocked until you issue a new PIN for it. The admin Tech ID cannot be removed.</p><label className="settings-tech-search">Find a technician<input type="search" placeholder="Search Tech ID" value={search} onChange={e => setSearch(e.target.value)}/></label>{loading ? <p>Loading technicians…</p> : visibleTechnicians.length ? <div className="qc-tech-rows">{visibleTechnicians.map((tech) => <div className="qc-tech-manage-row" key={tech.techId}><div><strong>Tech {tech.techId}{tech.isAdmin ? " · Admin" : ""}</strong><small>{tech.state === "deleting" ? "Removal in progress" : `${tech.qcCount} QCs this month · ${tech.hasPin ? "PIN active" : "No profile PIN"}`}</small>{tech.state === "active" && tech.pin && <span className="qc-tech-pin">Private PIN <strong>{tech.pin}</strong></span>}{tech.state === "active" && tech.hasPin && !tech.pin && <span className="qc-tech-legacy">Previous PIN cannot be displayed. Reset it to issue a visible 5-digit PIN.</span>}</div><div className="qc-tech-manage-actions">{tech.state === "active" && tech.pin && <button type="button" className="button light" onClick={() => void copyLogin(tech)}><Copy size={16}/>Copy login</button>}{tech.state === "active" && !tech.isAdmin && <button type="button" className="button light" disabled={pinBusy || !!deleteBusy} onClick={() => void issuePin(undefined, tech.techId)}><KeyRound size={16}/>{tech.pin ? "Reset PIN" : "Issue 5-digit PIN"}</button>}{!tech.isAdmin && <button type="button" className="button light qc-remove-button" disabled={pinBusy || !!deleteBusy} onClick={() => { setConfirmTechId(tech.techId); setConfirmation(""); }}><Trash2 size={16}/>{tech.state === "deleting" ? "Resume removal" : "Remove"}</button>}</div></div>)}</div> : <p>{search ? "No technicians match your search." : "No active technicians yet."}</p>}{confirmTechId && <div className="qc-delete-confirm"><strong>Remove Tech {confirmTechId} permanently?</strong><p>All their QCs, notes, screenshots, live photos, PIN, and profile sessions will be deleted. Type the Tech ID to confirm.</p><input aria-label="Confirm Tech ID to remove" autoComplete="off" placeholder={confirmTechId} value={confirmation} onChange={(event) => setConfirmation(event.target.value.toUpperCase())}/><div><button type="button" className="button light" onClick={() => { setConfirmTechId(null); setConfirmation(""); }} disabled={!!deleteBusy}>Cancel</button><button type="button" className="button danger" disabled={confirmation !== confirmTechId || !!deleteBusy} onClick={() => void removeTechnician(confirmTechId)}>{deleteBusy ? "Removing…" : "Delete technician and data"}</button></div></div>}</section>
+      <section id="technicians-settings" className="qc-pin-panel settings-panel"><div className="settings-section-title"><KeyRound size={21}/><h2>Add, reactivate, or reset PIN</h2></div><p>Enter a Tech ID to issue a private 5-digit PIN. Resetting a PIN signs out that technician’s current sessions. Reactivating a disabled Tech ID keeps its existing QC history.</p><form onSubmit={issuePin}><input aria-label="Tech ID for PIN" placeholder="Tech ID" value={techId} maxLength={32} onChange={(event) => setTechId(event.target.value.toUpperCase())} required/><button className="button dark" disabled={pinBusy}>{pinBusy ? "Issuing…" : "Issue / reset PIN"}</button></form>{issued && <div className="issued-pin" role="status"><strong>Private PIN for Tech {issued.techId}</strong><span>{issued.pin}</span><p>This PIN is also shown in the technician list below whenever you open Settings.</p></div>}</section>
+      <section className="qc-pin-panel settings-panel"><div className="settings-section-title"><UsersRound size={21}/><h2>Technicians</h2></div><p>Disabling a technician prevents login and new submissions while keeping their QC records and pictures. Issue a new PIN to reactivate the same Tech ID. Every submitted QC is retained for at least three full months.</p><label className="settings-tech-search">Find a technician<input type="search" placeholder="Search Tech ID" value={search} onChange={e => setSearch(e.target.value)}/></label>{loading ? <p>Loading technicians…</p> : visibleTechnicians.length ? <div className="qc-tech-rows">{visibleTechnicians.map((tech) => <div className="qc-tech-manage-row" key={tech.techId}><div><strong>Tech {tech.techId}{tech.isAdmin ? " · Admin" : ""}</strong><small>{tech.state === "disabled" ? `Disabled · ${tech.qcCount} QCs this month` : `${tech.qcCount} QCs this month · ${tech.hasPin ? "PIN active" : "No profile PIN"}`}</small>{tech.state === "active" && tech.pin && <span className="qc-tech-pin">Private PIN <strong>{tech.pin}</strong></span>}{tech.state === "active" && tech.hasPin && !tech.pin && <span className="qc-tech-legacy">Previous PIN cannot be displayed. Reset it to issue a visible 5-digit PIN.</span>}</div><div className="qc-tech-manage-actions">{tech.state === "active" && tech.pin && <button type="button" className="button light" onClick={() => void copyLogin(tech)}><Copy size={16}/>Copy login</button>}{!tech.isAdmin && <button type="button" className="button light" disabled={pinBusy || !!disableBusy} onClick={() => void issuePin(undefined, tech.techId)}><KeyRound size={16}/>{tech.state === "disabled" ? "Reactivate" : tech.pin ? "Reset PIN" : "Issue 5-digit PIN"}</button>}{tech.state === "active" && !tech.isAdmin && <button type="button" className="button light qc-remove-button" disabled={pinBusy || !!disableBusy} onClick={() => { setConfirmTechId(tech.techId); setConfirmation(""); }}><UserX size={16}/>Disable</button>}</div></div>)}</div> : <p>{search ? "No technicians match your search." : "No technicians yet."}</p>}{confirmTechId && <div className="qc-delete-confirm"><strong>Disable Tech {confirmTechId}?</strong><p>They will be signed out and unable to submit new QCs. Their QC records and pictures will be kept. Type the Tech ID to confirm.</p><input aria-label="Confirm Tech ID to disable" autoComplete="off" placeholder={confirmTechId} value={confirmation} onChange={(event) => setConfirmation(event.target.value.toUpperCase())}/><div><button type="button" className="button light" onClick={() => { setConfirmTechId(null); setConfirmation(""); }} disabled={!!disableBusy}>Cancel</button><button type="button" className="button danger" disabled={confirmation !== confirmTechId || !!disableBusy} onClick={() => void disableTechnician(confirmTechId)}>{disableBusy ? "Disabling…" : "Disable technician"}</button></div></div>}</section>
       </div>
       <div hidden={section !== "api"}><TrustIntegrationSettings/></div>
       {notice && <p className="qc-notice" role="status">{notice}</p>}{error && <p className="form-error" role="alert">{error}</p>}

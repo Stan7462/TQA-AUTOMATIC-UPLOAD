@@ -10,6 +10,8 @@ For the planned Trust browser extension, the owner can create or revoke a dedica
 
 An unfinished QC is saved in the technician's browser storage after each screenshot or camera photo. The same Tech ID on the same phone and browser restores the job number, screenshot, photos, and submission ID when the link is reopened, including after an hour. The page shows when saving is complete and warns if the phone cannot store the draft. A successful submission clears the local draft. Private browsing or cleared site data can remove it.
 
+Successfully submitted QCs and their JPG files are retained for at least three full calendar months from the submission timestamp. The production container checks for expired QCs at startup and every six hours, removes their individual files, and then removes their database records. Disabling a technician immediately revokes their sessions and prevents new submissions without deleting their submitted QCs; issuing a new PIN reactivates the same Tech ID and keeps any history still inside the retention period.
+
 The six QCs, 27 photos, Tech 7462 account, and five blocked Tech IDs from the earlier Sites deployment were imported into the laptop. The old Sites version is kept intact as a fallback. Any new QC submitted to the old URL after the migration snapshot must be imported separately before retiring it.
 
 ## Local start and update
