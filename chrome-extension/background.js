@@ -6,6 +6,7 @@ const successWaiters = new Map();
 const storageReady = chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 let logChain = Promise.resolve();
 const BETWEEN_QC_DELAY_MS = 20_000;
+const MAX_QC_ATTEMPTS = 3;
 
 function logEvent(level, step, message) {
   const entry = { at: new Date().toISOString(), level, step, message: safeError(message) };
@@ -175,22 +176,28 @@ async function photoBase64(url) {
   return btoa(encoded);
 }
 
-async function processOne(qcSummary, tabId, index, total) {
+async function processOne(qcSummary, tabId, index, total, attempt) {
   let photoCount = 0;
-  const qc = await detail(qcSummary.id);
-  if (qc.reviewStatus !== "approved" || !["ready", "failed"].includes(qc.uploadStatus)) return null;
-  const photos = orderedPhotos(qc);
-  await setRun({ currentQcId: qc.id, jobId: null, jobNumber: qc.jobNumber, techId: qc.techId, index: index + 1, total,
-    photoIndex: 0, photoTotal: photos.length, stage: "finding job", message: `Finding job ${qc.jobNumber}` });
+  let qc = null;
+  await setRun({ currentQcId: qcSummary.id, jobId: null, jobNumber: qcSummary.jobNumber, techId: qcSummary.techId,
+    index: index + 1, total, attempt, maxAttempts: MAX_QC_ATTEMPTS, photoIndex: 0, photoTotal: 0,
+    stage: "loading QC", message: `Loading job ${qcSummary.jobNumber} (attempt ${attempt} of ${MAX_QC_ATTEMPTS})` });
   try {
+    qc = await detail(qcSummary.id);
+    if (qc.reviewStatus !== "approved" || !["ready", "failed"].includes(qc.uploadStatus)) {
+      return { status: "skipped", jobNumber: qc.jobNumber };
+    }
+    const photos = orderedPhotos(qc);
+    await setRun({ currentQcId: qc.id, jobNumber: qc.jobNumber, techId: qc.techId, photoTotal: photos.length,
+      stage: "finding job", message: `Finding job ${qc.jobNumber} (attempt ${attempt} of ${MAX_QC_ATTEMPTS})` });
     await navigate(tabId, JOBS_URL);
     const search = await pageCommand(tabId, "FIND_JOB", { jobNumber: qc.jobNumber }, 45000);
     const matches = exactJobMatches(search.rows, qc.jobNumber, qc.techId);
     if (matches.length !== 1) {
       const reason = matches.length === 0 ? "No exact job number and Tech ID match in Catalyst." : "Multiple exact job number and Tech ID matches in Catalyst.";
       await report(qc.id, "failed", reason);
-      await setRun({ stage: "skipped", message: `${reason} Job ${qc.jobNumber} needs review.` });
-      return null;
+      await setRun({ stage: "failed", message: `Job ${qc.jobNumber}: ${reason}` });
+      return { status: "failed", jobNumber: qc.jobNumber, reason };
     }
     const jobId = matches[0].jobId;
     await setRun({ stage: "opening observation", jobId, message: `Opening Catalyst job ID ${jobId}` });
@@ -215,16 +222,20 @@ async function processOne(qcSummary, tabId, index, total) {
     const uploaded = await report(qc.id, "uploaded", jobId);
     if (uploaded.uploadStatus !== "uploaded") throw new Error("TQA did not confirm uploaded status.");
     await setRun({ stage: "uploaded", message: `Job ${qc.jobNumber}: ${successMessage}` });
-    return qc.jobNumber;
+    return { status: "uploaded", jobNumber: qc.jobNumber };
   } catch (error) {
     const reason = safeError(error);
-    if (photoCount > 0 || /uploading|quality checks|completing|reporting/i.test((await stored()).run?.stage || "")) {
-      await setRun({ status: "needs_review", stage: "needs review", message: `Job ${qc.jobNumber} may be partially uploaded. Check Catalyst before retrying. ${reason}` });
+    const { run } = await stored();
+    const jobNumber = qc?.jobNumber || qcSummary.jobNumber || qcSummary.id;
+    const mayBePartial = qc && run?.currentQcId === qc.id
+      && (photoCount > 0 || /uploading|quality checks|completing|reporting/i.test(run.stage || ""));
+    if (mayBePartial) {
+      await setRun({ status: "needs_review", stage: "needs review", message: `Job ${jobNumber} may be partially uploaded. Check Catalyst before retrying. ${reason}` });
       throw error;
     }
-    try { await report(qc.id, "failed", reason); } catch { /* preserve original error */ }
-    await setRun({ stage: "failed", message: `Job ${qc.jobNumber}: ${reason}` });
-    return null;
+    try { await report(qcSummary.id, "failed", reason); } catch { /* preserve original error */ }
+    await setRun({ stage: "failed", message: `Job ${jobNumber}: ${reason}` });
+    return { status: "failed", jobNumber, reason };
   }
 }
 
@@ -237,16 +248,31 @@ async function runQueue() {
     const tab = await chrome.tabs.create({ url: JOBS_URL, active: true });
     tabId = tab.id;
     await setRun({ tabId });
-    for (let i = 0; i < queue.length; i++) {
+    const pending = queue.map((qc, index) => ({ qc, index, attempt: 1 }));
+    const exhausted = [];
+    while (pending.length) {
       if (stopRequested) break;
-      const uploadedJobNumber = await processOne(queue[i], tabId, i, queue.length);
+      const item = pending.shift();
+      const result = await processOne(item.qc, tabId, item.index, queue.length, item.attempt);
       if ((await stored()).run?.status === "needs_review") return;
-      if (uploadedJobNumber && i < queue.length - 1 && !stopRequested) {
-        await waitBeforeNextQc(uploadedJobNumber);
+      if (result.status === "failed" && !stopRequested) {
+        if (item.attempt < MAX_QC_ATTEMPTS) {
+          pending.push({ ...item, attempt: item.attempt + 1 });
+          await setRun({ stage: "requeued", message: `Job ${result.jobNumber} failed attempt ${item.attempt} of ${MAX_QC_ATTEMPTS} and was moved to the end of the queue.` });
+        } else {
+          exhausted.push(result.jobNumber);
+          await setRun({ stage: "failed", message: `Job ${result.jobNumber} failed after ${MAX_QC_ATTEMPTS} attempts. Continuing the queue.` });
+        }
+      } else if (result.status === "uploaded" && pending.length && !stopRequested) {
+        await waitBeforeNextQc(result.jobNumber);
       }
     }
     await loadQueue();
-    await setRun({ status: stopRequested ? "stopped" : "done", stage: "done", message: stopRequested ? "Stopped." : "Queue finished." });
+    const failedSummary = exhausted.length
+      ? `Queue finished. ${exhausted.length} QC${exhausted.length === 1 ? "" : "s"} failed after ${MAX_QC_ATTEMPTS} attempts: ${exhausted.join(", ")}.`
+      : "Queue finished.";
+    await setRun({ status: stopRequested ? "stopped" : "done", stage: exhausted.length ? "done with failures" : "done",
+      message: stopRequested ? "Stopped." : failedSummary });
   } catch (error) {
     const { run } = await stored();
     if (run?.status !== "needs_review") await setRun({ status: "error", stage: "error", message: safeError(error) });
