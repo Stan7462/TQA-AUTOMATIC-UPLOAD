@@ -10,7 +10,9 @@ async function send(command, data = {}) {
 function render() {
   const queue = state.queue || [];
   const run = state.run || {};
-  $("key-status").textContent = state.hasKey ? "Key saved in this Chrome profile" : "No key saved";
+  $("auth-status").textContent = state.authMode === "session"
+    ? "Using your signed-in TQA admin session"
+    : state.authMode === "key" ? "Using the saved API key" : "Sign in to the TQA website as admin";
   $("total").textContent = String(queue.length);
   $("status").textContent = run.message || "Ready.";
   $("counts").textContent = run.status === "running" || run.status === "needs_review"
@@ -18,7 +20,7 @@ function render() {
     : "";
   $("progress").max = Math.max(1, run.total || queue.length);
   $("progress").value = Math.min(run.index || 0, run.total || queue.length || 1);
-  $("start").disabled = !state.hasKey || run.status === "running" || run.status === "needs_review";
+  $("start").disabled = !state.hasAuth || run.status === "running" || run.status === "needs_review";
   $("stop").disabled = run.status !== "running";
   $("ack-review").hidden = run.status !== "needs_review";
   $("confirm-reviewed").hidden = run.status !== "needs_review" || !run.jobId;
@@ -54,7 +56,7 @@ function render() {
 
 async function refreshState() {
   const result = await send("GET_STATE");
-  state = { ...result, hasKey: result.hasKey };
+  state = result;
   render();
 }
 
@@ -63,11 +65,6 @@ async function action(callback) {
   catch (error) { $("status").textContent = error.message; }
 }
 
-$("save-key").addEventListener("click", () => action(async () => {
-  await send("SAVE_KEY", { key: $("key").value.trim() });
-  $("key").value = "";
-  await send("REFRESH");
-}));
 $("refresh").addEventListener("click", () => action(() => send("REFRESH")));
 $("start").addEventListener("click", () => action(() => send("START")));
 $("stop").addEventListener("click", () => action(() => send("STOP")));
@@ -82,6 +79,6 @@ chrome.storage.onChanged.addListener(() => { void refreshState(); });
 void (async () => {
   try {
     await refreshState();
-    if (state.hasKey) { await send("REFRESH"); await refreshState(); }
+    if (state.hasAuth) { await send("REFRESH"); await refreshState(); }
   } catch (error) { $("status").textContent = error.message; }
 })();

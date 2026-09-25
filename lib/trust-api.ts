@@ -1,7 +1,7 @@
 import { env } from "@/lib/local-env";
-import { hashToken } from "@/lib/tech-auth";
+import { ADMIN_TECH_ID, getTechSessionFromCookie, hashToken, TECH_COOKIE } from "@/lib/tech-auth";
 
-export type TrustKey = { id: string; label: string };
+export type TrustKey = { id: string | null; label: string };
 export type TrustQcRow = {
   id: string;
   jobNumber: string;
@@ -27,10 +27,17 @@ export function trustError(status: number, code: string, message: string): Respo
 
 export async function requireTrustKey(request: Request): Promise<TrustKey | Response> {
   const header = request.headers.get("authorization") ?? "";
-  const match = /^Bearer (tqa_trust_[a-f0-9]{64})$/.exec(header);
-  if (!match) return trustError(401, "UNAUTHORIZED", "Send the Trust API key as a Bearer token.");
+  const keyMatch = /^Bearer (tqa_trust_[a-f0-9]{64})$/.exec(header);
+  const sessionMatch = /^Session ([a-f0-9]{64})$/.exec(header);
+  if (!keyMatch && !sessionMatch) return trustError(401, "UNAUTHORIZED", "Sign in to TQA as an admin or send a Trust API key.");
   try {
-    const hash = await hashToken(match[1]);
+    if (sessionMatch) {
+      const techId = await getTechSessionFromCookie(`${TECH_COOKIE}=${sessionMatch[1]}`, env.DB);
+      return techId === ADMIN_TECH_ID
+        ? { id: null, label: "Admin browser session" }
+        : trustError(401, "UNAUTHORIZED", "Sign in to TQA as an admin.");
+    }
+    const hash = await hashToken(keyMatch![1]);
     const key = await env.DB.prepare("SELECT id, label, last_used_at AS lastUsedAt FROM trust_api_keys WHERE token_hash = ? AND revoked_at IS NULL").bind(hash).first<{ id: string; label: string; lastUsedAt: number | null }>();
     if (!key) return trustError(401, "UNAUTHORIZED", "API key is invalid or revoked.");
     if (!key.lastUsedAt || key.lastUsedAt < Date.now() - 300_000) {

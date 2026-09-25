@@ -19,6 +19,18 @@ function logEvent(level, step, message) {
 }
 
 async function stored() { await storageReady; return chrome.storage.local.get(["trustApiKey", "queue", "run", "logs"]); }
+async function authentication() {
+  await storageReady;
+  const { trustApiKey } = await chrome.storage.local.get("trustApiKey");
+  if (/^tqa_trust_[a-f0-9]{64}$/.test(trustApiKey || "")) {
+    return { available: true, mode: "key", header: `Bearer ${trustApiKey}` };
+  }
+  const session = await chrome.cookies.get({ url: API_ORIGIN, name: "tqa_tech_session" });
+  if (/^[a-f0-9]{64}$/.test(session?.value || "")) {
+    return { available: true, mode: "session", header: `Session ${session.value}` };
+  }
+  return { available: false, mode: "none", header: null };
+}
 async function setRun(patch) {
   await storageReady;
   const { run = {} } = await chrome.storage.local.get("run");
@@ -31,9 +43,8 @@ async function setRun(patch) {
 }
 
 async function api(path, options = {}) {
-  await storageReady;
-  const { trustApiKey } = await chrome.storage.local.get("trustApiKey");
-  if (!/^tqa_trust_[a-f0-9]{64}$/.test(trustApiKey || "")) throw new Error("Enter a valid TQA API key in the extension.");
+  const auth = await authentication();
+  if (!auth.available) throw new Error("Sign in to the TQA website as admin, then reopen the extension.");
   const method = options.method || "GET";
   await logEvent("info", "TQA API", `${method} ${path}`);
   let response;
@@ -41,7 +52,7 @@ async function api(path, options = {}) {
     response = await fetch(`${API_ORIGIN}${path}`, {
       ...options,
       cache: "no-store",
-      headers: { Authorization: `Bearer ${trustApiKey}`, ...(options.body ? { "Content-Type": "application/json" } : {}) }
+      headers: { Authorization: auth.header, ...(options.body ? { "Content-Type": "application/json" } : {}) }
     });
   } catch (error) {
     await logEvent("error", "TQA API", `${method} ${path}: ${safeError(error)}`);
@@ -301,7 +312,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message?.command) {
       case "GET_STATE": {
         const data = await stored();
-        return { queue: data.queue || [], run: data.run || {}, logs: data.logs || [], hasKey: Boolean(data.trustApiKey) };
+        const auth = await authentication();
+        return { queue: data.queue || [], run: data.run || {}, logs: data.logs || [], hasAuth: auth.available, authMode: auth.mode };
       }
       case "SAVE_KEY": {
         if (!/^tqa_trust_[a-f0-9]{64}$/.test(message.key || "")) throw new Error("Invalid TQA API key format.");

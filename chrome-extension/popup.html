@@ -10,9 +10,8 @@
   <main>
     <header><h1>TQA → Catalyst</h1><span>Approved QC uploader</span></header>
     <section class="key-card">
-      <label for="key">TQA API key</label>
-      <div class="key-row"><input id="key" type="password" autocomplete="off" placeholder="Paste key once"><button id="save-key">Save</button></div>
-      <small id="key-status">No key saved</small>
+      <strong>Automatic authentication</strong>
+      <small id="auth-status">Checking your TQA admin session…</small>
     </section>
     <section class="run-card">
       <div class="actions"><button id="refresh">Refresh queue</button><button id="start" class="primary">Start upload</button><button id="stop">Stop</button><button id="ack-review" hidden>Retry after cleanup</button><button id="confirm-reviewed" hidden>Confirm already uploaded</button></div>
