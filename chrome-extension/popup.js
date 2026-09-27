@@ -10,9 +10,13 @@ async function send(command, data = {}) {
 function render() {
   const queue = state.queue || [];
   const run = state.run || {};
+  const runStatus = run.status || "ready";
   $("auth-status").textContent = state.authMode === "session"
     ? "Using your signed-in TQA admin session"
     : state.authMode === "key" ? "Using the saved API key" : "Sign in to the TQA website as admin";
+  $("auth-card").classList.toggle("missing", !state.hasAuth);
+  $("run-state").textContent = runStatus === "running" ? "Uploading" : runStatus === "needs_review" ? "Needs review" : runStatus === "failed" ? "Attention" : "Ready";
+  $("run-state").className = `state-pill ${runStatus}`;
   $("total").textContent = String(queue.length);
   $("status").textContent = run.message || "Ready.";
   $("counts").textContent = run.status === "running" || run.status === "needs_review"
@@ -33,7 +37,7 @@ function render() {
     const meta = document.createElement("div");
     const name = document.createElement("strong"); name.textContent = `Job ${qc.jobNumber}`;
     const details = document.createElement("small"); details.textContent = `Tech ${qc.techId} · ${qc.photos.length} photos`;
-    const badge = document.createElement("span"); badge.className = `badge ${qc.uploadStatus}`; badge.textContent = qc.uploadStatus;
+    const badge = document.createElement("span"); badge.className = `badge ${qc.uploadStatus}`; badge.textContent = qc.uploadStatus === "failed" ? "Retry needed" : qc.uploadStatus === "uploaded" ? "Uploaded" : "Ready";
     meta.append(name, details); card.append(meta, badge); $("queue").append(card);
   }
   const logs = state.logs || [];
