@@ -1,4 +1,5 @@
 const $ = (id) => document.getElementById(id);
+const DELAY_OPTIONS = [5, 15, 30, 60, 90, 120];
 let state = {};
 
 async function send(command, data = {}) {
@@ -15,10 +16,12 @@ function render() {
     ? "Using your signed-in TQA admin session"
     : state.authMode === "key" ? "Using the saved API key" : "Sign in to the TQA website as admin";
   $("auth-card").classList.toggle("missing", !state.hasAuth);
-  $("run-state").textContent = runStatus === "running" ? "Uploading" : runStatus === "needs_review" ? "Needs review" : runStatus === "failed" ? "Attention" : "Ready";
+  $("run-state").textContent = runStatus === "running" ? "Uploading" : runStatus === "needs_review" ? "Needs review" : ["failed", "error"].includes(runStatus) ? "Attention" : "Ready";
   $("run-state").className = `state-pill ${runStatus}`;
   $("total").textContent = String(queue.length);
-  $("status").textContent = run.message || "Ready.";
+  $("status").textContent = run.stage === "waiting" && Number.isFinite(run.waitRemainingSeconds)
+    ? `Next QC begins in ${run.waitRemainingSeconds} second${run.waitRemainingSeconds === 1 ? "" : "s"}.`
+    : run.message || "Ready.";
   $("counts").textContent = run.status === "running" || run.status === "needs_review"
     ? `QC ${run.index || 0} of ${run.total || 0} · Photo ${run.photoIndex || 0} of ${run.photoTotal || 0}`
     : "";
@@ -28,6 +31,9 @@ function render() {
   $("stop").disabled = run.status !== "running";
   $("ack-review").hidden = run.status !== "needs_review";
   $("confirm-reviewed").hidden = run.status !== "needs_review" || !run.jobId;
+  const delaySeconds = DELAY_OPTIONS.includes(state.qcDelaySeconds) ? state.qcDelaySeconds : 30;
+  $("qc-delay").value = String(DELAY_OPTIONS.indexOf(delaySeconds));
+  $("delay-value").textContent = `${delaySeconds} seconds`;
   $("queue").replaceChildren();
   if (!queue.length) {
     const empty = document.createElement("p"); empty.className = "empty"; empty.textContent = "No uploadable QCs loaded."; $("queue").append(empty);
@@ -78,6 +84,14 @@ $("clear-log").addEventListener("click", () => action(() => send("CLEAR_LOGS")))
 $("copy-log").addEventListener("click", () => action(async () => {
   const text = (state.logs || []).map((entry) => `${entry.at} [${entry.level.toUpperCase()}] ${entry.step}: ${entry.message}`).join("\n");
   await navigator.clipboard.writeText(text);
+}));
+$("qc-delay").addEventListener("input", () => {
+  const seconds = DELAY_OPTIONS[Number($("qc-delay").value)] || 30;
+  $("delay-value").textContent = `${seconds} seconds`;
+});
+$("qc-delay").addEventListener("change", () => action(() => {
+  const seconds = DELAY_OPTIONS[Number($("qc-delay").value)] || 30;
+  return send("SET_DELAY", { seconds });
 }));
 chrome.storage.onChanged.addListener(() => { void refreshState(); });
 void (async () => {

@@ -5,7 +5,8 @@ let stopRequested = false;
 const successWaiters = new Map();
 const storageReady = chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 let logChain = Promise.resolve();
-const BETWEEN_QC_DELAY_MS = 20_000;
+const DELAY_OPTIONS_SECONDS = [5, 15, 30, 60, 90, 120];
+const DEFAULT_QC_DELAY_SECONDS = 30;
 const MAX_QC_ATTEMPTS = 3;
 
 function logEvent(level, step, message) {
@@ -18,7 +19,11 @@ function logEvent(level, step, message) {
   return logChain;
 }
 
-async function stored() { await storageReady; return chrome.storage.local.get(["trustApiKey", "queue", "run", "logs"]); }
+async function stored() { await storageReady; return chrome.storage.local.get(["trustApiKey", "queue", "run", "logs", "qcDelaySeconds"]); }
+async function qcDelaySeconds() {
+  const { qcDelaySeconds: saved } = await stored();
+  return DELAY_OPTIONS_SECONDS.includes(saved) ? saved : DEFAULT_QC_DELAY_SECONDS;
+}
 async function authentication() {
   await storageReady;
   const { trustApiKey } = await chrome.storage.local.get("trustApiKey");
@@ -100,16 +105,33 @@ async function report(id, status, value) {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitBeforeNextQc(jobNumber) {
+  let seconds = await qcDelaySeconds();
   await setRun({
     stage: "waiting",
-    message: `Job ${jobNumber} uploaded successfully. Waiting 20 seconds before the next QC.`
+    waitTotalSeconds: seconds,
+    waitRemainingSeconds: seconds,
+    message: `Job ${jobNumber} uploaded successfully. Waiting ${seconds} seconds before the next QC.`
   });
-  const waitUntil = Date.now() + BETWEEN_QC_DELAY_MS;
-  while (!stopRequested && Date.now() < waitUntil) {
+  const waitStartedAt = Date.now();
+  let previousRemaining = seconds;
+  while (!stopRequested) {
+    const configuredSeconds = await qcDelaySeconds();
+    if (configuredSeconds !== seconds) {
+      seconds = configuredSeconds;
+      await setRun({ waitTotalSeconds: seconds });
+    }
+    const waitUntil = waitStartedAt + seconds * 1000;
+    const remaining = Math.max(0, Math.ceil((waitUntil - Date.now()) / 1000));
+    if (remaining !== previousRemaining) {
+      previousRemaining = remaining;
+      await setRun({ waitRemainingSeconds: remaining });
+    }
+    if (remaining === 0) break;
     await delay(Math.min(500, waitUntil - Date.now()));
   }
   if (!stopRequested) {
-    await logEvent("info", "waiting", "20-second wait finished. Starting the next QC.");
+    await setRun({ waitRemainingSeconds: 0 });
+    await logEvent("info", "waiting", `${seconds}-second wait finished. Starting the next QC.`);
   }
 }
 function withTimeout(promise, ms, message) {
@@ -313,7 +335,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "GET_STATE": {
         const data = await stored();
         const auth = await authentication();
-        return { queue: data.queue || [], run: data.run || {}, logs: data.logs || [], hasAuth: auth.available, authMode: auth.mode };
+        return { queue: data.queue || [], run: data.run || {}, logs: data.logs || [], qcDelaySeconds: DELAY_OPTIONS_SECONDS.includes(data.qcDelaySeconds) ? data.qcDelaySeconds : DEFAULT_QC_DELAY_SECONDS, hasAuth: auth.available, authMode: auth.mode };
       }
       case "SAVE_KEY": {
         if (!/^tqa_trust_[a-f0-9]{64}$/.test(message.key || "")) throw new Error("Invalid TQA API key format.");
@@ -323,6 +345,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { saved: true };
       }
       case "REFRESH": return { queue: await loadQueue() };
+      case "SET_DELAY": {
+        if (!DELAY_OPTIONS_SECONDS.includes(message.seconds)) throw new Error("Choose a wait time shown in the extension.");
+        await storageReady;
+        await chrome.storage.local.set({ qcDelaySeconds: message.seconds });
+        await logEvent("info", "Settings", `Wait between QC uploads set to ${message.seconds} seconds.`);
+        return { qcDelaySeconds: message.seconds };
+      }
       case "CLEAR_LOGS": {
         await logChain;
         await chrome.storage.local.set({ logs: [] });
