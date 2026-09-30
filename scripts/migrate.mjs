@@ -56,17 +56,18 @@ function inspectExistingDatabase() {
   }
 }
 
-function reconcileRuntimeMigration(runtimeName, prismaName, columns) {
+function reconcileRuntimeMigration(runtimeName, prismaName, table, columns, indexes = []) {
   if (!existsSync(databasePath)) return;
   const database = new DatabaseSync(databasePath);
   let shouldResolve = false;
   try {
     const tables = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
-    if (!tables.has("local_migrations") || !tables.has("_prisma_migrations") || !tables.has("qc_submissions")) return;
+    if (!tables.has("local_migrations") || !tables.has("_prisma_migrations") || !tables.has(table)) return;
     const runtimeApplied = database.prepare("SELECT 1 FROM local_migrations WHERE name = ?").get(runtimeName);
     const prismaApplied = database.prepare("SELECT 1 FROM _prisma_migrations WHERE migration_name = ? AND finished_at IS NOT NULL").get(prismaName);
-    const available = new Set(database.prepare('PRAGMA table_info("qc_submissions")').all().map((row) => row.name));
-    shouldResolve = Boolean(runtimeApplied && !prismaApplied && columns.every((column) => available.has(column)));
+    const available = new Set(database.prepare(`PRAGMA table_info("${table}")`).all().map((row) => row.name));
+    const availableIndexes = new Set(database.prepare(`PRAGMA index_list("${table}")`).all().map((row) => row.name));
+    shouldResolve = Boolean(runtimeApplied && !prismaApplied && columns.every((column) => available.has(column)) && indexes.every((index) => availableIndexes.has(index)));
   } finally {
     database.close();
   }
@@ -82,6 +83,8 @@ if (existing.hasSchema && !existing.hasPrismaHistory) {
   console.log(`Adopting existing SQLite schema as Prisma baseline ${baseline}.`);
   runPrisma("migrate", "resolve", "--applied", baseline);
 }
-reconcileRuntimeMigration("0007_qc_location.sql", "20260921000000_qc_location", ["location_status", "location_latitude", "location_longitude", "location_accuracy", "location_captured_at"]);
-reconcileRuntimeMigration("0008_multi_tenant.sql", "20260929000000_multi_tenant", ["tenant_id"]);
+reconcileRuntimeMigration("0007_qc_location.sql", "20260921000000_qc_location", "qc_submissions", ["location_status", "location_latitude", "location_longitude", "location_accuracy", "location_captured_at"]);
+reconcileRuntimeMigration("0008_multi_tenant.sql", "20260929000000_multi_tenant", "qc_submissions", ["tenant_id"]);
+reconcileRuntimeMigration("0009_shared_domain_login.sql", "20260930000000_shared_domain_login", "technicians", [], ["idx_technicians_global_tech_id"]);
+reconcileRuntimeMigration("0010_admin_first_login.sql", "20260930010000_admin_first_login", "technicians", ["must_change_credentials", "credential_fingerprint"]);
 runPrisma("migrate", "deploy");

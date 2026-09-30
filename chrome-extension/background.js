@@ -45,7 +45,7 @@ async function setRun(patch) {
 
 async function api(path, options = {}) {
   const auth = await authentication();
-  if (!auth.available) throw new Error("Connect the extension with your TQA domain, admin Tech ID, and PIN.");
+  if (!auth.available) throw new Error("Connect the extension with your TQA domain, Admin ID, and password.");
   const method = options.method || "GET";
   await logEvent("info", "TQA API", `${method} ${path}`);
   let response;
@@ -339,8 +339,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case "CONNECT": {
         if (!/^https?:\/\//.test(message.apiOrigin || "")) throw new Error("Enter a valid TQA domain.");
-        if (!/^[A-Z0-9_-]{3,32}$/.test(message.techId || "") || !/^\d{5}$/.test(message.pin || "")) throw new Error("Enter the admin Tech ID and 5-digit PIN.");
-        const response = await fetch(`${message.apiOrigin}/api/integrations/trust/login`, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ techId: message.techId, pin: message.pin }) });
+        if (!/^[A-Z0-9_-]{4,32}$/.test(message.techId || "") || !((/^\d{5}$/.test(message.pin || "")) || ((message.pin || "").length >= 8 && /[A-Za-z]/.test(message.pin) && /\d/.test(message.pin)))) throw new Error("Enter the Admin ID and password.");
+        const response = await fetch(`${message.apiOrigin}/api/integrations/trust/login`, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ techId: message.techId, password: message.pin }) });
         const body = await response.json().catch(() => null);
         if (!response.ok || !/^[a-f0-9]{64}$/.test(body?.sessionToken || "")) throw new Error(body?.error?.message || `TQA login returned HTTP ${response.status}.`);
         await storageReady;

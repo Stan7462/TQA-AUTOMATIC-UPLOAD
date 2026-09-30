@@ -4,6 +4,7 @@ import { isOwner } from "@/app/access";
 import { hashPin, newPin, normalizeTechId, randomHex, sameOrigin } from "@/lib/tech-auth";
 import { decryptPin, encryptPin } from "@/lib/pin-vault";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
+import { uniqueTechnicianPin } from "@/lib/credential-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export async function GET() {
   if (!env.DB) return Response.json({ error: "Unavailable" }, { status: 503 });
   try {
     const { start, end } = fiscalMonthBounds(fiscalMonthKey());
-    const result = await env.DB.prepare("SELECT t.tech_id AS techId, t.is_admin AS isAdmin, COALESCE(q.total, 0) AS qcCount, 1 AS hasPin, t.pin_ciphertext AS pinCiphertext, CASE WHEN t.active = 1 THEN 'active' ELSE 'disabled' END AS state FROM technicians t LEFT JOIN (SELECT tech_id, COUNT(*) AS total FROM qc_submissions WHERE tenant_id = ? AND submitted_at >= ? AND submitted_at < ? GROUP BY tech_id) q ON q.tech_id = t.tech_id WHERE t.tenant_id = ? ORDER BY t.active DESC, t.tech_id").bind(user!.tenantId, start, end, user!.tenantId).all<{ techId: string; isAdmin: number; qcCount: number; hasPin: number; pinCiphertext: string | null; state: string }>();
+    const result = await env.DB.prepare("SELECT t.tech_id AS techId, t.is_admin AS isAdmin, COALESCE(q.total, 0) AS qcCount, 1 AS hasPin, t.pin_ciphertext AS pinCiphertext, CASE WHEN t.active = 1 THEN 'active' ELSE 'disabled' END AS state FROM technicians t LEFT JOIN (SELECT tech_id, COUNT(*) AS total FROM qc_submissions WHERE tenant_id = ? AND submitted_at >= ? AND submitted_at < ? GROUP BY tech_id) q ON q.tech_id = t.tech_id WHERE t.tenant_id = ? AND t.is_admin = 0 ORDER BY t.active DESC, t.tech_id").bind(user!.tenantId, start, end, user!.tenantId).all<{ techId: string; isAdmin: number; qcCount: number; hasPin: number; pinCiphertext: string | null; state: string }>();
     const technicians = await Promise.all(result.results.map(async ({ pinCiphertext, isAdmin, ...tech }) => ({ ...tech, isAdmin: isAdmin === 1, pin: pinCiphertext ? await decryptPin(pinCiphertext, env.PIN_ENCRYPTION_KEY) : null })));
     return Response.json({ technicians }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
@@ -30,9 +31,9 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as { techId?: unknown } | null;
   const techId = normalizeTechId(body?.techId);
   if (!techId) return Response.json({ error: "Enter a valid Tech ID." }, { status: 400 });
-  if (techId === user!.techId) return Response.json({ error: "The admin PIN is managed by the deployment environment." }, { status: 409 });
+  if (techId === user!.techId) return Response.json({ error: "The administrator login is managed separately." }, { status: 409 });
   try {
-    const pin = newPin();
+    const pin = await uniqueTechnicianPin(env.DB, techId, newPin);
     const salt = randomHex(16);
     const [hash, pinCiphertext] = await Promise.all([hashPin(pin, salt), encryptPin(pin, env.PIN_ENCRYPTION_KEY)]);
     const now = Date.now();

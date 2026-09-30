@@ -15,7 +15,7 @@ function render() {
   $("auth-title").textContent = state.hasAuth ? (state.tenantName || "TQA admin connected") : "Connect your TQA app";
   $("auth-status").textContent = state.hasAuth
     ? `${state.apiOrigin} · Admin ${state.connectedTechId}`
-    : "Use the admin Tech ID and PIN for this domain.";
+    : "Use your Admin ID and password.";
   $("auth-card").classList.toggle("missing", !state.hasAuth);
   $("login-form").hidden = state.hasAuth;
   $("disconnect").hidden = !state.hasAuth;

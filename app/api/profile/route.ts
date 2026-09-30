@@ -13,6 +13,7 @@ export async function GET(request: Request) {
   if (!session) return Response.json({ error: "Sign in with your Tech ID and PIN." }, { status: 401 });
   const { techId, tenantId } = session;
   const headers: Record<string, string> = { "Cache-Control": "private, no-store" };
+  if (session.mustSetup) return Response.json({ techId, isAdmin: true, requiresAdminSetup: true, tenant: { id: tenantId, name: session.tenantName } }, { headers });
   if (!session.isAdmin && session.expiresAt - now < TECH_SESSION_LIFETIME_SECONDS * 500) {
     await env.DB.prepare("UPDATE tech_sessions SET expires_at = ? WHERE token_hash = ? AND tenant_id = ? AND tech_id = ?")
       .bind(now + TECH_SESSION_LIFETIME_SECONDS * 1000, await hashToken(token), tenantId, techId).run();

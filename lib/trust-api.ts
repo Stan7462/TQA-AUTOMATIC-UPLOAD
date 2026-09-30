@@ -1,6 +1,5 @@
 import { env } from "@/lib/local-env";
 import { getTechSessionFromCookie, hashToken, TECH_COOKIE } from "@/lib/tech-auth";
-import { getRequestTenant } from "@/lib/tenant";
 
 export type TrustKey = { id: string | null; label: string; tenantId: string };
 export type TrustQcRow = {
@@ -32,19 +31,17 @@ export async function requireTrustKey(request: Request): Promise<TrustKey | Resp
   const sessionMatch = /^Session ([a-f0-9]{64})$/.exec(header);
   if (!keyMatch && !sessionMatch) return trustError(401, "UNAUTHORIZED", "Sign in to TQA as an admin or send a Trust API key.");
   try {
-    const tenant = await getRequestTenant(request, env.DB);
-    if (!tenant) return trustError(404, "TENANT_NOT_FOUND", "This TQA domain is not configured.");
     if (sessionMatch) {
-      const session = await getTechSessionFromCookie(`${TECH_COOKIE}=${sessionMatch[1]}`, env.DB, tenant.id);
-      return session?.isAdmin
-        ? { id: null, label: "Admin extension session", tenantId: tenant.id }
+      const session = await getTechSessionFromCookie(`${TECH_COOKIE}=${sessionMatch[1]}`, env.DB);
+      return session?.isAdmin && !session.mustSetup
+        ? { id: null, label: "Admin extension session", tenantId: session.tenantId }
         : trustError(401, "UNAUTHORIZED", "Sign in to TQA as an admin.");
     }
     const hash = await hashToken(keyMatch![1]);
-    const key = await env.DB.prepare("SELECT id, label, tenant_id AS tenantId, last_used_at AS lastUsedAt FROM trust_api_keys WHERE tenant_id = ? AND token_hash = ? AND revoked_at IS NULL").bind(tenant.id, hash).first<{ id: string; label: string; tenantId: string; lastUsedAt: number | null }>();
+    const key = await env.DB.prepare("SELECT k.id, k.label, k.tenant_id AS tenantId, k.last_used_at AS lastUsedAt FROM trust_api_keys k JOIN tenants t ON t.id = k.tenant_id WHERE k.token_hash = ? AND k.revoked_at IS NULL AND t.active = 1").bind(hash).first<{ id: string; label: string; tenantId: string; lastUsedAt: number | null }>();
     if (!key) return trustError(401, "UNAUTHORIZED", "API key is invalid or revoked.");
     if (!key.lastUsedAt || key.lastUsedAt < Date.now() - 300_000) {
-      await env.DB.prepare("UPDATE trust_api_keys SET last_used_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL").bind(Date.now(), tenant.id, key.id).run();
+      await env.DB.prepare("UPDATE trust_api_keys SET last_used_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL").bind(Date.now(), key.tenantId, key.id).run();
     }
     return { id: key.id, label: key.label, tenantId: key.tenantId };
   } catch (error) {

@@ -10,12 +10,16 @@ model Technician {
   pinCiphertext  String?       @map("pin_ciphertext")
   active         Int           @default(1)
   isAdmin        Int           @default(0) @map("is_admin")
+  mustSetup      Int           @default(0) @map("must_change_credentials")
+  credentialFingerprint String? @map("credential_fingerprint")
   failedAttempts Int           @default(0) @map("failed_attempts")
   lockedUntil    BigInt        @default(0) @map("locked_until")
   createdAt      BigInt        @map("created_at")
   sessions       TechSession[]
 
   @@id([tenantId, techId])
+  @@index([techId], map: "idx_technicians_global_tech_id")
+  @@unique([credentialFingerprint])
   @@map("technicians")
 }
 

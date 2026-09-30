@@ -1,11 +1,78 @@
 import { env } from "@/lib/local-env";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { isPlatformOwner } from "@/app/access";
-import { hashPin,newPin,normalizeTechId,randomHex,sameOrigin } from "@/lib/tech-auth";
-import { encryptPin } from "@/lib/pin-vault";
-export const dynamic="force-dynamic";
-const slugPattern=/^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?$/;const reserved=new Set(["admin","api","app","default","owner","qc","www"]);
-const hostnamePattern=/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|localhost)$/;
-function companyLoginUrl(request:Request,hostname:string){const url=new URL(request.url),forwarded=request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();return `${forwarded?`${forwarded}:`:url.protocol}//${hostname}${url.port?`:${url.port}`:""}/login`;}
-export async function GET(){const user=await getChatGPTUser();if(!isPlatformOwner(user))return Response.json({error:"Only the platform owner can manage companies."},{status:403});try{const result=await env.DB.prepare(`SELECT t.id,t.name,t.active,d.hostname,(SELECT MIN(tech_id) FROM technicians WHERE tenant_id=t.id AND is_admin=1) AS adminTechId,(SELECT COUNT(*) FROM technicians WHERE tenant_id=t.id AND is_admin=0) AS technicianCount,(SELECT COUNT(*) FROM qc_submissions WHERE tenant_id=t.id) AS qcCount FROM tenants t JOIN tenant_domains d ON d.tenant_id=t.id WHERE t.id<>'default' GROUP BY t.id ORDER BY t.active DESC,t.name COLLATE NOCASE`).all<{id:string;name:string;active:number;hostname:string;adminTechId:string|null;technicianCount:number;qcCount:number}>();return Response.json({companies:result.results.map(company=>({...company,active:company.active===1}))},{headers:{"Cache-Control":"private, no-store"}});}catch(error){console.error("Company list failed",error);return Response.json({error:"Could not load companies."},{status:503});}}
-export async function POST(request:Request){if(!sameOrigin(request))return Response.json({error:"Invalid request origin."},{status:403});const user=await getChatGPTUser();if(!isPlatformOwner(user))return Response.json({error:"Only the platform owner can add companies."},{status:403});const body=await request.json().catch(()=>null) as {name?:unknown;slug?:unknown;hostname?:unknown;adminTechId?:unknown}|null;const name=typeof body?.name==="string"?body.name.trim().replace(/\s+/g," "):"",slug=typeof body?.slug==="string"?body.slug.trim().toLowerCase():"",hostname=typeof body?.hostname==="string"?body.hostname.trim().toLowerCase().replace(/\.$/,""):"",adminTechId=normalizeTechId(body?.adminTechId);if(name.length<2||name.length>80)return Response.json({error:"Enter a company name between 2 and 80 characters."},{status:400});if(!slugPattern.test(slug)||reserved.has(slug))return Response.json({error:"Enter a unique tenant ID using letters, numbers, and hyphens."},{status:400});if(!hostnamePattern.test(hostname))return Response.json({error:"Enter the complete domain assigned to this company."},{status:400});if(!adminTechId)return Response.json({error:"Enter a valid primary admin ID."},{status:400});const now=Date.now();try{const existing=await env.DB.prepare("SELECT id FROM tenants WHERE id=? UNION SELECT tenant_id AS id FROM tenant_domains WHERE hostname=?").bind(slug,hostname).first();if(existing)return Response.json({error:"That tenant ID or domain is already in use."},{status:409});const pin=newPin(),salt=randomHex(16);const[hash,pinCiphertext]=await Promise.all([hashPin(pin,salt),encryptPin(pin,env.PIN_ENCRYPTION_KEY)]);await env.DB.batch([env.DB.prepare("INSERT INTO tenants(id,name,active,created_at) VALUES(?,?,1,?)").bind(slug,name,now),env.DB.prepare("INSERT INTO tenant_domains(hostname,tenant_id,created_at) VALUES(?,?,?)").bind(hostname,slug,now),env.DB.prepare("INSERT INTO technicians(tenant_id,tech_id,pin_salt,pin_hash,pin_ciphertext,active,is_admin,failed_attempts,locked_until,created_at) VALUES(?,?,?,?,?,1,1,0,0,?)").bind(slug,adminTechId,salt,hash,pinCiphertext,now)]);return Response.json({company:{id:slug,name,hostname,adminTechId,pin,loginUrl:companyLoginUrl(request,hostname)}},{status:201,headers:{"Cache-Control":"no-store"}});}catch(error){console.error("Company creation failed",error);return Response.json({error:"Could not create the company. Try a different tenant ID, domain, or admin ID."},{status:503});}}
+import { hashPin, newPin, randomHex, sameOrigin } from "@/lib/tech-auth";
+import { decryptPin, encryptPin } from "@/lib/pin-vault";
+
+export const dynamic = "force-dynamic";
+
+const reserved = new Set(["admin", "api", "app", "default", "owner", "qc", "www"]);
+
+function slugBase(name: string): string {
+  const value = name.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30).replace(/-$/, "");
+  return value && !reserved.has(value) ? value : `company-${randomHex(3)}`;
+}
+
+async function availableSlug(name: string): Promise<string> {
+  const base = slugBase(name);
+  for (let index = 1; index <= 99; index++) {
+    const suffix = index === 1 ? "" : `-${index}`;
+    const candidate = `${base.slice(0, 30 - suffix.length)}${suffix}`;
+    if (!await env.DB.prepare("SELECT 1 FROM tenants WHERE id = ?").bind(candidate).first()) return candidate;
+  }
+  return `company-${randomHex(6)}`;
+}
+
+async function availableSetupId(): Promise<string> {
+  for (let index = 0; index < 20; index++) {
+    const candidate = `SETUP-${randomHex(4).toUpperCase()}`;
+    if (!await env.DB.prepare("SELECT 1 FROM technicians WHERE tech_id = ?").bind(candidate).first()) return candidate;
+  }
+  throw new Error("Could not generate setup ID");
+}
+
+function loginUrl(request: Request): string {
+  const url = new URL(request.url);
+  const protocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || url.protocol.replace(":", "");
+  const host = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || url.host;
+  return `${protocol}://${host}/login`;
+}
+
+type CompanyRow = { id: string; name: string; active: number; adminTechId: string | null; credentialCiphertext: string | null; setupPending: number | null; technicianCount: number; qcCount: number };
+
+export async function GET() {
+  const user = await getChatGPTUser();
+  if (!isPlatformOwner(user)) return Response.json({ error: "Only the platform owner can manage companies." }, { status: 403 });
+  try {
+    const result = await env.DB.prepare(`SELECT t.id,t.name,t.active,(SELECT tech_id FROM technicians WHERE tenant_id=t.id AND is_admin=1 LIMIT 1) AS adminTechId,(SELECT pin_ciphertext FROM technicians WHERE tenant_id=t.id AND is_admin=1 LIMIT 1) AS credentialCiphertext,(SELECT must_change_credentials FROM technicians WHERE tenant_id=t.id AND is_admin=1 LIMIT 1) AS setupPending,(SELECT COUNT(*) FROM technicians WHERE tenant_id=t.id AND is_admin=0) AS technicianCount,(SELECT COUNT(*) FROM qc_submissions WHERE tenant_id=t.id) AS qcCount FROM tenants t WHERE t.id<>'default' ORDER BY t.active DESC,t.name COLLATE NOCASE`).all<CompanyRow>();
+    const companies = await Promise.all(result.results.map(async ({ credentialCiphertext, setupPending, active, ...company }) => ({ ...company, active: active === 1, setupPending: setupPending === 1, credential: credentialCiphertext ? await decryptPin(credentialCiphertext, env.PIN_ENCRYPTION_KEY) : null })));
+    return Response.json({ companies }, { headers: { "Cache-Control": "private, no-store" } });
+  } catch (error) {
+    console.error("Company list failed", error);
+    return Response.json({ error: "Could not load companies." }, { status: 503 });
+  }
+}
+
+export async function POST(request: Request) {
+  if (!sameOrigin(request)) return Response.json({ error: "Invalid request origin." }, { status: 403 });
+  const user = await getChatGPTUser();
+  if (!isPlatformOwner(user)) return Response.json({ error: "Only the platform owner can add companies." }, { status: 403 });
+  const body = await request.json().catch(() => null) as { name?: unknown } | null;
+  const name = typeof body?.name === "string" ? body.name.trim().replace(/\s+/g, " ") : "";
+  if (name.length < 2 || name.length > 80) return Response.json({ error: "Enter a company name between 2 and 80 characters." }, { status: 400 });
+  const now = Date.now();
+  try {
+    const [slug, setupId] = await Promise.all([availableSlug(name), availableSetupId()]);
+    const setupPin = newPin();
+    const salt = randomHex(16);
+    const [hash, pinCiphertext] = await Promise.all([hashPin(setupPin, salt), encryptPin(setupPin, env.PIN_ENCRYPTION_KEY)]);
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO tenants(id,name,active,created_at) VALUES(?,?,1,?)").bind(slug, name, now),
+      env.DB.prepare("INSERT INTO technicians(tenant_id,tech_id,pin_salt,pin_hash,pin_ciphertext,active,is_admin,must_change_credentials,failed_attempts,locked_until,created_at) VALUES(?,?,?,?,?,1,1,1,0,0,?)").bind(slug, setupId, salt, hash, pinCiphertext, now),
+    ]);
+    return Response.json({ company: { id: slug, name, setupId, setupPin, loginUrl: loginUrl(request) } }, { status: 201, headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("Company creation failed", error);
+    return Response.json({ error: "Could not create the company. Try a different company name." }, { status: 503 });
+  }
+}

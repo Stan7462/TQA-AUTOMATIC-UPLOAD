@@ -27,6 +27,11 @@ export async function decryptPin(value: string, secret: string | undefined): Pro
   const key = await keyFromSecret(secret);
   const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytesFromHex(ivHex) }, key, bytesFromHex(dataHex));
   const pin = new TextDecoder().decode(decrypted);
-  if (!/^\d{5}$/.test(pin)) throw new Error("Invalid PIN encryption data");
+  if (pin.length < 5 || pin.length > 72 || /[\u0000-\u001f\u007f]/.test(pin)) throw new Error("Invalid encrypted credential");
   return pin;
+}
+
+export async function credentialFingerprint(value: string, secret: string | undefined): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`credential:${secret ?? ""}`)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return hex(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value))));
 }

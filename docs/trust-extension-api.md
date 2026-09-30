@@ -8,7 +8,7 @@ This document is the contract for a separate browser extension that uploads appr
 
 ## Required extension workflow
 
-1. The owner enters this tenant's TQA domain, admin Tech ID, and 5-digit PIN in the extension. The extension exchanges them for a 12-hour session and immediately discards the PIN.
+1. The supervisor enters the shared TQA domain, Admin ID, and password in the extension. The server verifies the complete credential pair, identifies exactly one company, and refuses an ambiguous match. The extension receives a 12-hour company-scoped session and immediately discards the password.
 2. On opening, call `GET /api/integrations/trust/qcs` and display the `qcs` list. Only approved QCs from the current fiscal month (22nd through the following 21st) with `uploadStatus` `ready` or `failed` appear by default. The queue starts fresh every 22nd. Follow `nextCursor` for more pages.
 3. On **Start**, process QCs one at a time. Before each QC, call `GET /api/integrations/trust/qcs/{id}` to recheck its status. Fetch every photo with the same bearer key, then upload the screenshot and live photos to the correct Trust job. Show progress in the extension (e.g., 2 of 6 photos and 3 of 10 QCs). The server does not track percentage.
 4. Confirm that Trust saved **all** required photos for that QC. Only then call `PATCH /api/integrations/trust/qcs/{id}/upload` with `{"status":"uploaded"}`. If Trust returns a job or upload ID, include it as `externalReference`.
@@ -25,10 +25,10 @@ Create an extension session with:
 POST /api/integrations/trust/login
 Content-Type: application/json
 
-{"techId":"1111","pin":"12345"}
+{"techId":"ADMIN01","password":"Example123"}
 ```
 
-The response contains `sessionToken`, `expiresAt`, `techId`, and the tenant identity. The credentials must belong to the admin for the hostname used in the request. Store the session token in extension storage and never store the PIN. Send the token on all QC and photo requests:
+The response contains `sessionToken`, `expiresAt`, `techId`, and the company identity. The globally unique Admin ID determines the company. Store the session token in extension storage and never store the password. Send the token on all QC and photo requests:
 
 ```http
 Authorization: Session <64 lowercase hex characters>
@@ -40,7 +40,7 @@ Legacy API keys created in Settings remain supported for external integrations:
 Authorization: Bearer tqa_trust_<64 lowercase hex characters>
 ```
 
-Both authentication methods are restricted to the tenant assigned to the request hostname. They permit reading approved QC metadata and images and reporting Catalyst upload results. They do not permit approving/rejecting QCs or managing technicians. Use HTTPS. Never put a session or key in a URL, log, Catalyst page DOM, or content-script message visible to the page. Keep TQA network calls and token storage in the extension background service worker. For Chrome Manifest V3, request host permission for the admin-entered domain.
+Both authentication methods are restricted to the company attached to the admin session or API key. They permit reading approved QC metadata and images and reporting Catalyst upload results. They do not permit approving/rejecting QCs or managing technicians. Use HTTPS. Never put a session or key in a URL, log, Catalyst page DOM, or content-script message visible to the page. Keep TQA network calls and token storage in the extension background service worker. For Chrome Manifest V3, request host permission for the shared TQA domain.
 
 Image `url` values are **protected API URLs**, not public links. Fetch each with `Authorization`, read the JPEG bytes as a `Blob`, then make a `File` for the Trust file input or upload flow. An ordinary `<img src="...">` request will not include the bearer key.
 

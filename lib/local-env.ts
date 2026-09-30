@@ -26,6 +26,8 @@ for (const name of [
   "0006_trust_integration.sql",
   "0007_qc_location.sql",
   "0008_multi_tenant.sql",
+  "0009_shared_domain_login.sql",
+  "0010_admin_first_login.sql",
 ]) {
   if (sqlite.prepare("SELECT 1 FROM local_migrations WHERE name = ?").get(name)) continue;
   const sql = readFileSync(join(process.cwd(), "drizzle", name), "utf8").replaceAll("--> statement-breakpoint", "");
