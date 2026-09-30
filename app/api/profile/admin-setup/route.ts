@@ -20,8 +20,8 @@ export async function POST(request: Request) {
     env.DB.prepare("SELECT 1 FROM technicians WHERE tech_id = ? AND NOT (tenant_id = ? AND tech_id = ?)").bind(adminId, session.tenantId, session.techId).first(),
     env.DB.prepare("SELECT 1 FROM technicians WHERE is_admin = 1 AND credential_fingerprint = ?").bind(fingerprint).first(),
   ]);
-  if (duplicateId) return Response.json({ error: "That Admin ID is already in use. Choose another one." }, { status: 409 });
-  if (duplicatePassword) return Response.json({ error: "That password is already used by another administrator. Choose another one." }, { status: 409 });
+  if (duplicateId) return Response.json({ error: "This Admin ID is not available. Change it and try again." }, { status: 409 });
+  if (duplicatePassword) return Response.json({ error: "This password is not available. Change it and try again." }, { status: 409 });
 
   const salt = randomHex(16);
   const now = Date.now();
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     if (!result[1].meta.changes) return Response.json({ error: "This company administrator was already configured." }, { status: 409 });
   } catch (error) {
     console.error("Company admin setup failed", error);
-    return Response.json({ error: "Could not save these credentials. Choose a different Admin ID or password." }, { status: 409 });
+    return Response.json({ error: "This Admin ID or password cannot be created. Change it and try again." }, { status: 409 });
   }
   const secure = (request.headers.get("x-forwarded-proto") || new URL(request.url).protocol.replace(":", "")) === "https";
   return Response.json({ adminId, tenant: { id: session.tenantId, name: session.tenantName } }, { headers: { "Set-Cookie": techCookie(newToken, secure, ADMIN_SESSION_LIFETIME_SECONDS), "Cache-Control": "no-store" } });

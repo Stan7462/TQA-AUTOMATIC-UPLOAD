@@ -2,7 +2,7 @@ import { env } from "@/lib/local-env";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { isOwner } from "@/app/access";
 import { hashPin, newPin, normalizeTechId, randomHex, sameOrigin } from "@/lib/tech-auth";
-import { decryptPin, encryptPin } from "@/lib/pin-vault";
+import { credentialFingerprint, decryptPin, encryptPin } from "@/lib/pin-vault";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 import { uniqueTechnicianPin } from "@/lib/credential-auth";
 
@@ -28,23 +28,42 @@ export async function POST(request: Request) {
   const user = await getChatGPTUser();
   if (!isOwner(user)) return Response.json({ error: "Forbidden" }, { status: 403 });
   if (!env.DB) return Response.json({ error: "Unavailable" }, { status: 503 });
-  const body = await request.json().catch(() => null) as { techId?: unknown } | null;
+  const body = await request.json().catch(() => null) as { techId?: unknown; resetExisting?: unknown } | null;
   const techId = normalizeTechId(body?.techId);
+  const resetExisting = body?.resetExisting === true;
   if (!techId) return Response.json({ error: "Enter a valid Tech ID." }, { status: 400 });
   if (techId === user!.techId) return Response.json({ error: "The administrator login is managed separately." }, { status: 409 });
   try {
+    const existing = await env.DB.prepare("SELECT is_admin AS isAdmin FROM technicians WHERE tenant_id = ? AND tech_id = ?").bind(user!.tenantId, techId).first<{ isAdmin: number }>();
+    if (existing?.isAdmin === 1) return Response.json({ error: "The administrator login is managed separately." }, { status: 409 });
+    if (existing && !resetExisting) return Response.json({ error: "This Tech ID already exists in your company." }, { status: 409 });
+    if (!existing && resetExisting) return Response.json({ error: "This Tech ID was not found in your company." }, { status: 404 });
+
     const pin = await uniqueTechnicianPin(env.DB, techId, newPin);
     const salt = randomHex(16);
-    const [hash, pinCiphertext] = await Promise.all([hashPin(pin, salt), encryptPin(pin, env.PIN_ENCRYPTION_KEY)]);
+    const [hash, pinCiphertext, fingerprint] = await Promise.all([
+      hashPin(pin, salt),
+      encryptPin(pin, env.PIN_ENCRYPTION_KEY),
+      credentialFingerprint(pin, env.PIN_ENCRYPTION_KEY),
+    ]);
     const now = Date.now();
+    const saveTechnician = resetExisting
+      ? env.DB.prepare("UPDATE technicians SET pin_salt = ?, pin_hash = ?, pin_ciphertext = ?, credential_fingerprint = ?, active = 1, failed_attempts = 0, locked_until = 0 WHERE tenant_id = ? AND tech_id = ? AND is_admin = 0").bind(salt, hash, pinCiphertext, fingerprint, user!.tenantId, techId)
+      : env.DB.prepare("INSERT INTO technicians (tenant_id, tech_id, pin_salt, pin_hash, pin_ciphertext, credential_fingerprint, active, is_admin, failed_attempts, locked_until, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, 0, ?)").bind(user!.tenantId, techId, salt, hash, pinCiphertext, fingerprint, now);
     await env.DB.batch([
-      env.DB.prepare("INSERT INTO technicians (tenant_id, tech_id, pin_salt, pin_hash, pin_ciphertext, active, is_admin, failed_attempts, locked_until, created_at) VALUES (?, ?, ?, ?, ?, 1, 0, 0, 0, ?) ON CONFLICT(tenant_id, tech_id) DO UPDATE SET pin_salt=excluded.pin_salt, pin_hash=excluded.pin_hash, pin_ciphertext=excluded.pin_ciphertext, active=1, failed_attempts=0, locked_until=0").bind(user!.tenantId, techId, salt, hash, pinCiphertext, now),
+      saveTechnician,
       env.DB.prepare("DELETE FROM tech_sessions WHERE tenant_id = ? AND tech_id = ?").bind(user!.tenantId, techId),
       env.DB.prepare("DELETE FROM technician_removals WHERE tenant_id = ? AND tech_id = ?").bind(user!.tenantId, techId),
     ]);
     return Response.json({ techId, pin }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Technician PIN issuance failed", error);
+    if (String(error).includes("LOGIN_ID_NOT_AVAILABLE")) {
+      return Response.json({ error: "This Tech ID is not available. Change it and try again." }, { status: 409 });
+    }
+    if (String(error).includes("UNIQUE constraint failed: technicians.tenant_id, technicians.tech_id")) {
+      return Response.json({ error: "This Tech ID already exists in your company." }, { status: 409 });
+    }
     return Response.json({ error: "Could not issue PIN. Try again shortly." }, { status: 503 });
   }
 }

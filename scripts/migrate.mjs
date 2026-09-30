@@ -85,6 +85,8 @@ if (existing.hasSchema && !existing.hasPrismaHistory) {
 }
 reconcileRuntimeMigration("0007_qc_location.sql", "20260921000000_qc_location", "qc_submissions", ["location_status", "location_latitude", "location_longitude", "location_accuracy", "location_captured_at"]);
 reconcileRuntimeMigration("0008_multi_tenant.sql", "20260929000000_multi_tenant", "qc_submissions", ["tenant_id"]);
-reconcileRuntimeMigration("0009_shared_domain_login.sql", "20260930000000_shared_domain_login", "technicians", [], ["idx_technicians_global_tech_id"]);
+reconcileRuntimeMigration("0009_shared_domain_login.sql", "20260930000000_shared_domain_login", "technicians", []);
 reconcileRuntimeMigration("0010_admin_first_login.sql", "20260930010000_admin_first_login", "technicians", ["must_change_credentials", "credential_fingerprint"]);
+reconcileRuntimeMigration("0011_global_login_id_unique.sql", "20260930020000_global_login_id_unique", "technicians", [], ["technicians_admin_credential_fingerprint_key", "technicians_tech_login_key"]);
+reconcileRuntimeMigration("0012_company_scoped_technicians.sql", "20260930030000_company_scoped_technicians", "technicians", [], ["idx_technicians_global_tech_id", "technicians_admin_credential_fingerprint_key", "technicians_tech_login_key"]);
 runPrisma("migrate", "deploy");

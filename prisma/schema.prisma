@@ -19,7 +19,6 @@ model Technician {
 
   @@id([tenantId, techId])
   @@index([techId], map: "idx_technicians_global_tech_id")
-  @@unique([credentialFingerprint])
   @@map("technicians")
 }
 

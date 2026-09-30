@@ -38,13 +38,13 @@ function loginUrl(request: Request): string {
   return `${protocol}://${host}/login`;
 }
 
-type CompanyRow = { id: string; name: string; active: number; adminTechId: string | null; credentialCiphertext: string | null; setupPending: number | null; technicianCount: number; qcCount: number };
+type CompanyRow = { id: string; name: string; active: number; adminTechId: string | null; credentialCiphertext: string | null; setupPending: number | null; technicianCount: number; qcCount: number; uploadedQcCount: number };
 
 export async function GET() {
   const user = await getChatGPTUser();
   if (!isPlatformOwner(user)) return Response.json({ error: "Only the platform owner can manage companies." }, { status: 403 });
   try {
-    const result = await env.DB.prepare(`SELECT t.id,t.name,t.active,(SELECT tech_id FROM technicians WHERE tenant_id=t.id AND is_admin=1 LIMIT 1) AS adminTechId,(SELECT pin_ciphertext FROM technicians WHERE tenant_id=t.id AND is_admin=1 LIMIT 1) AS credentialCiphertext,(SELECT must_change_credentials FROM technicians WHERE tenant_id=t.id AND is_admin=1 LIMIT 1) AS setupPending,(SELECT COUNT(*) FROM technicians WHERE tenant_id=t.id AND is_admin=0) AS technicianCount,(SELECT COUNT(*) FROM qc_submissions WHERE tenant_id=t.id) AS qcCount FROM tenants t WHERE t.id<>'default' ORDER BY t.active DESC,t.name COLLATE NOCASE`).all<CompanyRow>();
+    const result = await env.DB.prepare(`SELECT t.id,t.name,t.active,(SELECT tech_id FROM technicians WHERE tenant_id=t.id AND is_admin=1 LIMIT 1) AS adminTechId,(SELECT pin_ciphertext FROM technicians WHERE tenant_id=t.id AND is_admin=1 LIMIT 1) AS credentialCiphertext,(SELECT must_change_credentials FROM technicians WHERE tenant_id=t.id AND is_admin=1 LIMIT 1) AS setupPending,(SELECT COUNT(*) FROM technicians WHERE tenant_id=t.id AND is_admin=0) AS technicianCount,(SELECT COUNT(*) FROM qc_submissions WHERE tenant_id=t.id) AS qcCount,(SELECT COUNT(*) FROM qc_submissions WHERE tenant_id=t.id AND status='approved' AND trust_upload_status='uploaded') AS uploadedQcCount FROM tenants t WHERE t.id<>'default' ORDER BY t.active DESC,t.name COLLATE NOCASE`).all<CompanyRow>();
     const companies = await Promise.all(result.results.map(async ({ credentialCiphertext, setupPending, active, ...company }) => ({ ...company, active: active === 1, setupPending: setupPending === 1, credential: credentialCiphertext ? await decryptPin(credentialCiphertext, env.PIN_ENCRYPTION_KEY) : null })));
     return Response.json({ companies }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
