@@ -1,7 +1,7 @@
 import { env } from "@/lib/local-env";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { isOwner } from "@/app/access";
-import { getTechSession, normalizeTechId, sameOrigin } from "@/lib/tech-auth";
+import { getTechSessionContext, normalizeTechId, sameOrigin } from "@/lib/tech-auth";
 import { normalizeQcLocation } from "@/lib/qc-location";
 
 export const dynamic = "force-dynamic";
@@ -42,9 +42,9 @@ export async function POST(request: Request) {
   try { rawLocation = JSON.parse(String(form.get("location") ?? "null")); } catch { /* Use unavailable below. */ }
   const location = normalizeQcLocation(rawLocation);
   if (!techId) return Response.json({ error: "Enter a valid Tech ID." }, { status: 400 });
-  const authenticatedTechId = await getTechSession(request, env.DB);
-  if (!authenticatedTechId || authenticatedTechId !== techId) return Response.json({ error: "Sign in with this Tech ID and PIN before submitting." }, { status: 401 });
-  const removal = await env.DB.prepare("SELECT state FROM technician_removals WHERE tech_id = ?").bind(techId).first();
+  const session = await getTechSessionContext(request, env.DB);
+  if (!session || session.techId !== techId) return Response.json({ error: "Sign in with this Tech ID and PIN before submitting." }, { status: 401 });
+  const removal = await env.DB.prepare("SELECT state FROM technician_removals WHERE tenant_id = ? AND tech_id = ?").bind(session.tenantId, techId).first();
   if (removal) return Response.json({ error: "This Tech ID is no longer available. Contact your supervisor." }, { status: 403 });
   if (!/^\d{1,6}$/.test(jobNumber)) return Response.json({ error: "Enter a job number using 1 to 6 digits." }, { status: 400 });
   if (!/^[0-9a-f-]{36}$/.test(requestedId)) return Response.json({ error: "Invalid submission ID." }, { status: 400 });
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
   const images = [screenshot, ...photos] as File[];
   if (images.reduce((total, image) => total + image.size, 0) > MAX_REQUEST_BYTES) return Response.json({ error: "The images are too large." }, { status: 413 });
 
-  const prior = await env.DB.prepare("SELECT tech_id AS techId, job_number AS jobNumber FROM qc_submissions WHERE id = ?").bind(requestedId).first<{ techId: string; jobNumber: string }>();
+  const prior = await env.DB.prepare("SELECT tech_id AS techId, job_number AS jobNumber FROM qc_submissions WHERE tenant_id = ? AND id = ?").bind(session.tenantId, requestedId).first<{ techId: string; jobNumber: string }>();
   if (prior) return prior.techId === techId && prior.jobNumber === jobNumber ? Response.json({ id: requestedId, status: "pending" }, { headers: { "Cache-Control": "no-store" } }) : Response.json({ error: "Submission ID already used" }, { status: 409 });
   const now = Date.now();
   const submissionId = requestedId;
@@ -67,13 +67,13 @@ export async function POST(request: Request) {
       const key = "captures/" + ids[index];
       await env.BUCKET.put(key, bytes, {
         httpMetadata: { contentType: "image/jpeg" },
-        customMetadata: { techId, submissionId, kind: index === 0 ? "account-screenshot" : "live-photo", submittedAt: new Date(now).toISOString() },
+        customMetadata: { tenantId: session.tenantId, techId, submissionId, kind: index === 0 ? "account-screenshot" : "live-photo", submittedAt: new Date(now).toISOString() },
       });
       uploaded.push(key);
     }
     const inserted = await env.DB.prepare(
-      "INSERT INTO qc_submissions (id, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at) SELECT ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM technician_removals WHERE tech_id = ?)"
-    ).bind(submissionId, techId, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, location?.status ?? "unavailable", location?.status === "verified" ? location.latitude : null, location?.status === "verified" ? location.longitude : null, location?.status === "verified" ? location.accuracy : null, location?.capturedAt ?? now, techId).run();
+      "INSERT INTO qc_submissions (id, tenant_id, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at) SELECT ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM technician_removals WHERE tenant_id = ? AND tech_id = ?)"
+    ).bind(submissionId, session.tenantId, techId, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, location?.status ?? "unavailable", location?.status === "verified" ? location.latitude : null, location?.status === "verified" ? location.longitude : null, location?.status === "verified" ? location.accuracy : null, location?.capturedAt ?? now, session.tenantId, techId).run();
     if (!inserted.meta.changes) throw new Error("removed-technician");
     return Response.json({ id: submissionId, status: "pending" }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
@@ -84,7 +84,8 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  if (!isOwner(await getChatGPTUser())) return Response.json({ error: "Forbidden" }, { status: 403 });
+  const user = await getChatGPTUser();
+  if (!isOwner(user)) return Response.json({ error: "Forbidden" }, { status: 403 });
   if (!env.DB) return Response.json({ error: "QC submissions are unavailable" }, { status: 503 });
   const url = new URL(request.url);
   const status = url.searchParams.get("status") ?? "pending";
@@ -98,8 +99,8 @@ export async function GET(request: Request) {
   const match = cursor?.match(/^(\d{1,16}):([0-9a-f-]{36})$/);
   if (cursor && !match) return Response.json({ error: "Invalid page" }, { status: 400 });
   try {
-    const conditions: string[] = [];
-    const bindings: Array<string | number> = [];
+    const conditions: string[] = ["tenant_id = ?"];
+    const bindings: Array<string | number> = [user!.tenantId];
     const selectedId = url.searchParams.get("qc");
     if (selectedId) {
       if (!/^[0-9a-f-]{36}$/.test(selectedId)) return Response.json({ error: "Invalid QC" }, { status: 400 });
@@ -112,7 +113,7 @@ export async function GET(request: Request) {
     const query = env.DB.prepare("SELECT id, tech_id AS techId, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, status, submitted_at AS submittedAt, reviewed_at AS reviewedAt, review_note AS reviewNote, trust_upload_status AS trustUploadStatus, trust_uploaded_at AS trustUploadedAt, trust_external_reference AS trustExternalReference, trust_upload_error AS trustUploadError, location_status AS locationStatus, location_latitude AS locationLatitude, location_longitude AS locationLongitude, location_accuracy AS locationAccuracy, location_captured_at AS locationCapturedAt FROM qc_submissions" + where + " ORDER BY submitted_at DESC, id DESC LIMIT ?").bind(...bindings, pageSize + 1);
     const [result, totals] = await Promise.all([
       query.all(),
-      env.DB.prepare("SELECT status, trust_upload_status AS trustUploadStatus, COUNT(*) AS total FROM qc_submissions" + (hasRange ? " WHERE submitted_at >= ? AND submitted_at < ?" : "") + " GROUP BY status, trust_upload_status").bind(...(hasRange ? [start, end] : [])).all<{ status: string; trustUploadStatus: string; total: number }>(),
+      env.DB.prepare("SELECT status, trust_upload_status AS trustUploadStatus, COUNT(*) AS total FROM qc_submissions WHERE tenant_id = ?" + (hasRange ? " AND submitted_at >= ? AND submitted_at < ?" : "") + " GROUP BY status, trust_upload_status").bind(user!.tenantId, ...(hasRange ? [start, end] : [])).all<{ status: string; trustUploadStatus: string; total: number }>(),
     ]);
     const counts = { pending: 0, approved: 0, uploaded: 0, rejected: 0 };
     for (const row of totals.results) {

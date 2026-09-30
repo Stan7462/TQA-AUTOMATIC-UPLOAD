@@ -18,8 +18,8 @@ export async function GET(request: Request) {
   if (cursor && !match) return trustError(400, "INVALID_CURSOR", "Invalid cursor.");
   try {
     const range = fiscalMonthBounds(fiscalMonthKey());
-    const conditions = ["status = 'approved'", "submitted_at >= ?", "submitted_at < ?"];
-    const values: Array<string | number> = [range.start, range.end];
+    const conditions = ["tenant_id = ?", "status = 'approved'", "submitted_at >= ?", "submitted_at < ?"];
+    const values: Array<string | number> = [key.tenantId, range.start, range.end];
     if (uploadStatus === "uploadable") conditions.push("trust_upload_status IN ('ready', 'failed')");
     if (uploadStatus === "uploaded") conditions.push("trust_upload_status = 'uploaded'");
     if (match) {
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     const page = rows.results.slice(0, limit);
     const last = page.at(-1);
     const countWhere = uploadStatus === "uploadable" ? "status = 'approved' AND trust_upload_status IN ('ready', 'failed')" : uploadStatus === "uploaded" ? "status = 'approved' AND trust_upload_status = 'uploaded'" : "status = 'approved'";
-    const count = await env.DB.prepare(`SELECT COUNT(*) AS total FROM qc_submissions WHERE ${countWhere} AND submitted_at >= ? AND submitted_at < ?`).bind(range.start, range.end).first<{ total: number }>();
+    const count = await env.DB.prepare(`SELECT COUNT(*) AS total FROM qc_submissions WHERE tenant_id = ? AND ${countWhere} AND submitted_at >= ? AND submitted_at < ?`).bind(key.tenantId, range.start, range.end).first<{ total: number }>();
     return Response.json({ qcs: page.map((row) => trustQc(request, row)), nextCursor: rows.results.length > limit && last ? `${String(last.reviewedAt ?? last.submittedAt).padStart(13, "0")}:${last.id}` : null, total: count?.total ?? 0 }, { headers: trustNoStore });
   } catch (error) {
     console.error("Trust QC list failed", error);

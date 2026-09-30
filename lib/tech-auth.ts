@@ -1,3 +1,5 @@
+import { getRequestTenant, requestHostname } from "@/lib/tenant";
+
 export const TECH_COOKIE = "tqa_tech_session";
 const configuredAdminTechId = process.env.TQA_ADMIN_TECH_ID?.trim().toUpperCase();
 export const ADMIN_TECH_ID = configuredAdminTechId && /^[A-Z0-9_-]{3,32}$/.test(configuredAdminTechId) ? configuredAdminTechId : "1111";
@@ -5,6 +7,8 @@ export const ADMIN_SESSION_LIFETIME_SECONDS = 60 * 60 * 12;
 export const TECH_SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 30;
 // workerd rejects PBKDF2 calls above 100,000 iterations.
 const PIN_HASH_ITERATIONS = 100_000;
+
+export type AuthenticatedTech = { tenantId: string; tenantName: string; techId: string; isAdmin: boolean; expiresAt: number };
 
 function hex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -55,23 +59,28 @@ export function getCookie(request: Request, name: string): string | null {
 export function sameOrigin(request: Request): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return false;
-  if (origin === process.env.TQA_PUBLIC_ORIGIN) return true;
-  const url = new URL(request.url);
-  return origin === url.origin && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  try { return new URL(origin).hostname.toLowerCase() === requestHostname(request); }
+  catch { return false; }
 }
 
 export async function getTechSession(request: Request, db: typeof import("./local-env").DB): Promise<string | null> {
-  return getTechSessionFromCookie(request.headers.get("cookie"), db);
+  return (await getTechSessionContext(request, db))?.techId ?? null;
 }
 
-export async function getTechSessionFromCookie(cookieHeader: string | null, db: typeof import("./local-env").DB): Promise<string | null> {
+export async function getTechSessionContext(request: Request, db: typeof import("./local-env").DB): Promise<AuthenticatedTech | null> {
+  const tenant = await getRequestTenant(request, db);
+  if (!tenant) return null;
+  return getTechSessionFromCookie(request.headers.get("cookie"), db, tenant.id);
+}
+
+export async function getTechSessionFromCookie(cookieHeader: string | null, db: typeof import("./local-env").DB, tenantId?: string): Promise<AuthenticatedTech | null> {
   const entry = cookieHeader?.split(";").map((part) => part.trim()).find((part) => part.startsWith(TECH_COOKIE + "="));
   const token = entry ? entry.slice(TECH_COOKIE.length + 1) : null;
   if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
   const result = await db.prepare(
-    "SELECT s.tech_id AS tech_id FROM tech_sessions s JOIN technicians t ON t.tech_id = s.tech_id WHERE s.token_hash = ? AND s.expires_at > ? AND t.active = 1"
-  ).bind(await hashToken(token), Date.now()).first<{ tech_id: string }>();
-  return result?.tech_id ?? null;
+    "SELECT s.tenant_id AS tenantId, s.tech_id AS techId, s.expires_at AS expiresAt, t.is_admin AS isAdmin, n.name AS tenantName FROM tech_sessions s JOIN technicians t ON t.tenant_id = s.tenant_id AND t.tech_id = s.tech_id JOIN tenants n ON n.id = s.tenant_id WHERE s.token_hash = ? AND s.expires_at > ? AND t.active = 1 AND n.active = 1" + (tenantId ? " AND s.tenant_id = ?" : "")
+  ).bind(await hashToken(token), Date.now(), ...(tenantId ? [tenantId] : [])).first<{ tenantId: string; tenantName: string; techId: string; expiresAt: number; isAdmin: number }>();
+  return result ? { ...result, isAdmin: result.isAdmin === 1 } : null;
 }
 
 export function techCookie(token: string, secure: boolean, lifetimeSeconds = TECH_SESSION_LIFETIME_SECONDS): string {

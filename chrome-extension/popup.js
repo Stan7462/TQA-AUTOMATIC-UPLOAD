@@ -12,10 +12,13 @@ function render() {
   const queue = state.queue || [];
   const run = state.run || {};
   const runStatus = run.status || "ready";
-  $("auth-status").textContent = state.authMode === "session"
-    ? "Using your signed-in TQA admin session"
-    : state.authMode === "key" ? "Using the saved API key" : "Sign in to the TQA website as admin";
+  $("auth-title").textContent = state.hasAuth ? (state.tenantName || "TQA admin connected") : "Connect your TQA app";
+  $("auth-status").textContent = state.hasAuth
+    ? `${state.apiOrigin} · Admin ${state.connectedTechId}`
+    : "Use the admin Tech ID and PIN for this domain.";
   $("auth-card").classList.toggle("missing", !state.hasAuth);
+  $("login-form").hidden = state.hasAuth;
+  $("disconnect").hidden = !state.hasAuth;
   $("run-state").textContent = runStatus === "running" ? "Uploading" : runStatus === "needs_review" ? "Needs review" : ["failed", "error"].includes(runStatus) ? "Attention" : "Ready";
   $("run-state").className = `state-pill ${runStatus}`;
   $("total").textContent = String(queue.length);
@@ -74,6 +77,29 @@ async function action(callback) {
   try { await callback(); await refreshState(); }
   catch (error) { $("status").textContent = error.message; }
 }
+
+function normalizedOrigin(value) {
+  const raw = value.trim();
+  const url = new URL(raw.includes("://") ? raw : `https://${raw}`);
+  if (!/^https?:$/.test(url.protocol) || url.username || url.password || (url.pathname !== "/" && url.pathname !== "") || url.search || url.hash) throw new Error("Enter only the TQA domain, without a page path.");
+  if (url.protocol === "http:" && !["localhost", "127.0.0.1"].includes(url.hostname)) throw new Error("Use HTTPS for a public TQA domain.");
+  return url.origin;
+}
+
+$("login-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void action(async () => {
+    const apiOrigin = normalizedOrigin($("domain").value);
+    const techId = $("admin-tech-id").value.trim().toUpperCase();
+    const pin = $("admin-pin").value.trim();
+    const allowed = await chrome.permissions.request({ origins: [`${apiOrigin}/*`] });
+    if (!allowed) throw new Error("Allow access to this TQA domain so the extension can load its QC queue.");
+    await send("CONNECT", { apiOrigin, techId, pin });
+    $("admin-pin").value = "";
+    await send("REFRESH");
+  });
+});
+$("disconnect").addEventListener("click", () => action(() => send("DISCONNECT")));
 
 $("refresh").addEventListener("click", () => action(() => send("REFRESH")));
 $("start").addEventListener("click", () => action(() => send("START")));

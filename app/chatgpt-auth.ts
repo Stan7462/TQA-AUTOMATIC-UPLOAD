@@ -1,25 +1,33 @@
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { env } from '@/lib/local-env';
-import { ADMIN_TECH_ID, getTechSessionFromCookie, TECH_COOKIE } from '@/lib/tech-auth';
+import { getTechSessionFromCookie, TECH_COOKIE, type AuthenticatedTech } from '@/lib/tech-auth';
+import { getRequestTenant } from '@/lib/tenant';
 
-export type ChatGPTUser = { userId: string; displayName: string; email: string; fullName: string | null };
+export type ChatGPTUser = { userId: string; displayName: string; email: string; fullName: string | null; tenantId: string; tenantName: string; techId: string };
 export const OWNER_COOKIE = 'tqa_owner_session';
 const OWNER_EMAIL = 'hrynivstanislav@gmail.com';
 
-async function currentTechId(): Promise<string | null> {
+async function currentTech(): Promise<AuthenticatedTech | null> {
   const jar = await cookies();
+  const requestHeaders = await headers();
   const techToken = jar.get(TECH_COOKIE)?.value;
-  return techToken ? getTechSessionFromCookie(`${TECH_COOKIE}=${techToken}`, env.DB) : null;
+  if (!techToken) return null;
+  const protocol = requestHeaders.get('x-forwarded-proto') || 'https';
+  const host = (requestHeaders.get('x-forwarded-host') || requestHeaders.get('host') || 'localhost').split(',')[0].trim();
+  const request = new Request(`${protocol}://${host}/`);
+  const tenant = await getRequestTenant(request, env.DB);
+  return tenant ? getTechSessionFromCookie(`${TECH_COOKIE}=${techToken}`, env.DB, tenant.id) : null;
 }
-const owner = (): ChatGPTUser => ({ userId: 'local-owner', displayName: 'Owner', email: OWNER_EMAIL, fullName: null });
+const owner = (tech: AuthenticatedTech): ChatGPTUser => ({ userId: 'local-owner', displayName: tech.tenantName, email: OWNER_EMAIL, fullName: null, tenantId: tech.tenantId, tenantName: tech.tenantName, techId: tech.techId });
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
-  return (await currentTechId()) === ADMIN_TECH_ID ? owner() : null;
+  const tech = await currentTech();
+  return tech?.isAdmin ? owner(tech) : null;
 }
 export async function requireChatGPTUser(returnTo: string): Promise<ChatGPTUser> {
-  const techId = await currentTechId();
-  if (techId === ADMIN_TECH_ID) return owner();
-  if (techId) redirect('/capture');
+  const tech = await currentTech();
+  if (tech?.isAdmin) return owner(tech);
+  if (tech) redirect('/capture');
   redirect('/login?return_to=' + encodeURIComponent(returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/'));
 }
 export function chatGPTSignOutPath(): string { return '/api/owner/logout'; }

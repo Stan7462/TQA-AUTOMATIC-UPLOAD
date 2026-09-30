@@ -1,4 +1,3 @@
-export const API_ORIGIN = "https://qc.leadtechx.com";
 export const JOBS_URL = "https://catalystqms.comcast.net/TechOps/jobs";
 export const observationUrl = (jobId) => `https://catalystqms.comcast.net/TechOps/observation/?jobid=${encodeURIComponent(jobId)}`;
 
@@ -13,5 +12,5 @@ export function orderedPhotos(qc) {
 
 export function safeError(error) {
   const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/tqa_trust_[a-f0-9]{64}/g, "[redacted]");
+  return message.replace(/tqa_trust_[a-f0-9]{64}/g, "[redacted]").replace(/\b[a-f0-9]{64}\b/g, "[redacted]");
 }

@@ -11,7 +11,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!qcIdPattern.test(id)) return trustError(404, "NOT_FOUND", "Approved QC not found.");
   try {
     const range = fiscalMonthBounds(fiscalMonthKey());
-    const row = await env.DB.prepare(`SELECT ${trustQcSelect} FROM qc_submissions WHERE id = ? AND status = 'approved' AND submitted_at >= ? AND submitted_at < ?`).bind(id, range.start, range.end).first<TrustQcRow>();
+    const row = await env.DB.prepare(`SELECT ${trustQcSelect} FROM qc_submissions WHERE tenant_id = ? AND id = ? AND status = 'approved' AND submitted_at >= ? AND submitted_at < ?`).bind(key.tenantId, id, range.start, range.end).first<TrustQcRow>();
     if (!row) return trustError(404, "NOT_FOUND", "Approved QC not found.");
     return Response.json({ qc: trustQc(request, row) }, { headers: trustNoStore });
   } catch (error) {

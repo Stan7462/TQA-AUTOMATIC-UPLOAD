@@ -76,7 +76,7 @@ export default function QcRecordList({ view, historyMode = false }: { view: Reco
     const filtered = items.filter(item => selectedId ? item.id === selectedId :
       (!range || (item.submittedAt >= range.start && item.submittedAt < range.end)) &&
       (!filters.tech || filters.tech === item.techId) &&
-      (filters.status === "all" || (filters.status === "uploaded" ? item.status === "approved" && item.trustUploadStatus === "uploaded" : filters.status === item.status)) &&
+      (filters.status === "all" || (filters.status === "uploaded" ? item.status === "approved" && item.trustUploadStatus === "uploaded" : filters.status === "approved" ? item.status === "approved" && item.trustUploadStatus !== "uploaded" : filters.status === item.status)) &&
       `${item.techId} ${item.jobNumber}`.toLowerCase().includes(search));
     return Object.entries(Object.groupBy(filtered, item => item.techId)).sort((a,b) => collator.compare(a[0],b[0]));
   }, [items, filters, selectedId]);

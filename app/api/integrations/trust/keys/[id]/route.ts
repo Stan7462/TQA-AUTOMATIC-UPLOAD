@@ -8,11 +8,12 @@ export const dynamic = "force-dynamic";
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   if (!sameOrigin(request)) return trustError(403, "INVALID_ORIGIN", "Invalid request origin.");
-  if (!isOwner(await getChatGPTUser())) return trustError(403, "FORBIDDEN", "Admin sign-in required.");
+  const user = await getChatGPTUser();
+  if (!isOwner(user)) return trustError(403, "FORBIDDEN", "Admin sign-in required.");
   const { id } = await context.params;
   if (!qcIdPattern.test(id)) return trustError(400, "INVALID_ID", "Invalid API key ID.");
   try {
-    const result = await env.DB.prepare("UPDATE trust_api_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(Date.now(), id).run();
+    const result = await env.DB.prepare("UPDATE trust_api_keys SET revoked_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL").bind(Date.now(), user!.tenantId, id).run();
     if (!result.meta.changes) return trustError(404, "NOT_FOUND", "Active API key not found.");
     return Response.json({ id, revoked: true }, { headers: trustNoStore });
   } catch (error) {

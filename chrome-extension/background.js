@@ -1,4 +1,4 @@
-import { API_ORIGIN, JOBS_URL, exactJobMatches, observationUrl, orderedPhotos, safeError } from "./core.js";
+import { JOBS_URL, exactJobMatches, observationUrl, orderedPhotos, safeError } from "./core.js";
 
 let activeRun = null;
 let stopRequested = false;
@@ -19,22 +19,18 @@ function logEvent(level, step, message) {
   return logChain;
 }
 
-async function stored() { await storageReady; return chrome.storage.local.get(["trustApiKey", "queue", "run", "logs", "qcDelaySeconds"]); }
+async function stored() { await storageReady; return chrome.storage.local.get(["apiOrigin", "sessionToken", "connectedTechId", "tenantName", "queue", "run", "logs", "qcDelaySeconds"]); }
 async function qcDelaySeconds() {
   const { qcDelaySeconds: saved } = await stored();
   return DELAY_OPTIONS_SECONDS.includes(saved) ? saved : DEFAULT_QC_DELAY_SECONDS;
 }
 async function authentication() {
   await storageReady;
-  const { trustApiKey } = await chrome.storage.local.get("trustApiKey");
-  if (/^tqa_trust_[a-f0-9]{64}$/.test(trustApiKey || "")) {
-    return { available: true, mode: "key", header: `Bearer ${trustApiKey}` };
+  const { apiOrigin, sessionToken, connectedTechId, tenantName } = await stored();
+  if (/^https?:\/\//.test(apiOrigin || "") && /^[a-f0-9]{64}$/.test(sessionToken || "")) {
+    return { available: true, mode: "session", header: `Session ${sessionToken}`, apiOrigin, connectedTechId, tenantName };
   }
-  const session = await chrome.cookies.get({ url: API_ORIGIN, name: "tqa_tech_session" });
-  if (/^[a-f0-9]{64}$/.test(session?.value || "")) {
-    return { available: true, mode: "session", header: `Session ${session.value}` };
-  }
-  return { available: false, mode: "none", header: null };
+  return { available: false, mode: "none", header: null, apiOrigin: null };
 }
 async function setRun(patch) {
   await storageReady;
@@ -49,12 +45,12 @@ async function setRun(patch) {
 
 async function api(path, options = {}) {
   const auth = await authentication();
-  if (!auth.available) throw new Error("Sign in to the TQA website as admin, then reopen the extension.");
+  if (!auth.available) throw new Error("Connect the extension with your TQA domain, admin Tech ID, and PIN.");
   const method = options.method || "GET";
   await logEvent("info", "TQA API", `${method} ${path}`);
   let response;
   try {
-    response = await fetch(`${API_ORIGIN}${path}`, {
+    response = await fetch(`${auth.apiOrigin}${path}`, {
       ...options,
       cache: "no-store",
       headers: { Authorization: auth.header, ...(options.body ? { "Content-Type": "application/json" } : {}) }
@@ -67,6 +63,7 @@ async function api(path, options = {}) {
     let message = `TQA API returned HTTP ${response.status}`;
     try { message = (await response.json()).error?.message || message; } catch { /* keep status */ }
     await logEvent("error", "TQA API", `${method} ${path}: HTTP ${response.status}: ${message}`);
+    if (response.status === 401 && auth.mode === "session") await chrome.storage.local.remove(["sessionToken", "queue"]);
     throw new Error(message);
   }
   await logEvent("success", "TQA API", `${method} ${path}: HTTP ${response.status}`);
@@ -74,11 +71,13 @@ async function api(path, options = {}) {
 }
 
 async function loadQueue() {
+  const auth = await authentication();
+  if (!auth.available) throw new Error("Connect the extension before refreshing the queue.");
   const qcs = [];
   const seen = new Set();
   let cursor = null;
   do {
-    const url = new URL("/api/integrations/trust/qcs", API_ORIGIN);
+    const url = new URL("/api/integrations/trust/qcs", auth.apiOrigin);
     url.searchParams.set("uploadStatus", "uploadable");
     url.searchParams.set("limit", "100");
     if (cursor) url.searchParams.set("cursor", cursor);
@@ -199,8 +198,9 @@ function waitForSuccess(tabId, timeoutMs = 45000) {
 }
 
 async function photoBase64(url) {
+  const auth = await authentication();
   const parsed = new URL(url);
-  if (parsed.origin !== API_ORIGIN || !/^\/api\/integrations\/trust\/photos\//.test(parsed.pathname)) throw new Error("Unexpected photo URL from TQA API.");
+  if (!auth.available || parsed.origin !== auth.apiOrigin || !/^\/api\/integrations\/trust\/photos\//.test(parsed.pathname)) throw new Error("Unexpected photo URL from TQA API.");
   const blob = await (await api(parsed.pathname)).blob();
   if (blob.type && blob.type !== "image/jpeg") throw new Error("TQA returned a non-JPEG photo.");
   const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -335,14 +335,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "GET_STATE": {
         const data = await stored();
         const auth = await authentication();
-        return { queue: data.queue || [], run: data.run || {}, logs: data.logs || [], qcDelaySeconds: DELAY_OPTIONS_SECONDS.includes(data.qcDelaySeconds) ? data.qcDelaySeconds : DEFAULT_QC_DELAY_SECONDS, hasAuth: auth.available, authMode: auth.mode };
+        return { queue: data.queue || [], run: data.run || {}, logs: data.logs || [], qcDelaySeconds: DELAY_OPTIONS_SECONDS.includes(data.qcDelaySeconds) ? data.qcDelaySeconds : DEFAULT_QC_DELAY_SECONDS, hasAuth: auth.available, authMode: auth.mode, apiOrigin: auth.apiOrigin, connectedTechId: auth.connectedTechId, tenantName: auth.tenantName };
       }
-      case "SAVE_KEY": {
-        if (!/^tqa_trust_[a-f0-9]{64}$/.test(message.key || "")) throw new Error("Invalid TQA API key format.");
+      case "CONNECT": {
+        if (!/^https?:\/\//.test(message.apiOrigin || "")) throw new Error("Enter a valid TQA domain.");
+        if (!/^[A-Z0-9_-]{3,32}$/.test(message.techId || "") || !/^\d{5}$/.test(message.pin || "")) throw new Error("Enter the admin Tech ID and 5-digit PIN.");
+        const response = await fetch(`${message.apiOrigin}/api/integrations/trust/login`, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ techId: message.techId, pin: message.pin }) });
+        const body = await response.json().catch(() => null);
+        if (!response.ok || !/^[a-f0-9]{64}$/.test(body?.sessionToken || "")) throw new Error(body?.error?.message || `TQA login returned HTTP ${response.status}.`);
         await storageReady;
-        await chrome.storage.local.set({ trustApiKey: message.key });
-        await logEvent("info", "Settings", "TQA API key saved in extension storage.");
-        return { saved: true };
+        await chrome.storage.local.set({ apiOrigin: message.apiOrigin, sessionToken: body.sessionToken, connectedTechId: body.techId, tenantName: body.tenant?.name || "TQA", queue: [], run: {} });
+        await chrome.storage.local.remove("trustApiKey");
+        await logEvent("success", "Authentication", `Connected to ${message.apiOrigin} as admin ${body.techId}.`);
+        return { connected: true };
+      }
+      case "DISCONNECT": {
+        if (activeRun) throw new Error("Stop the current upload before switching domains.");
+        await storageReady;
+        await chrome.storage.local.remove(["apiOrigin", "sessionToken", "connectedTechId", "tenantName", "trustApiKey", "queue", "run"]);
+        await logEvent("info", "Authentication", "Disconnected from the TQA domain.");
+        return { disconnected: true };
       }
       case "REFRESH": return { queue: await loadQueue() };
       case "SET_DELAY": {

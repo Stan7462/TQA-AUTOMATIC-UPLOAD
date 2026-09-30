@@ -48,7 +48,7 @@ export default function QcInbox(){
   try{const response: Response=await fetch(`/api/qc-submissions/${id}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status,reviewNote:notes[id]||''})});const result=await response.json() as {error?:string};if(!response.ok)throw Error(result.error||'Could not save decision.');await load();setNotice(`Job ${items.find(q=>q.id===id)?.jobNumber || ''} ${status}.`);}
   catch(cause){setError(cause instanceof Error?cause.message:'Could not save decision.');}finally{setDecisionBusy(null);}
  }
- const visible=items.filter(q=>selected?q.id===selected:(!filters.tech||q.techId===filters.tech)&&(filters.status==='all'||(filters.status==='uploaded'?q.status==='approved'&&q.trustUploadStatus==='uploaded':q.status===filters.status))&&`${q.techId} ${q.jobNumber}`.toLowerCase().includes(filters.search.trim().toLowerCase()));
+ const visible=items.filter(q=>selected?q.id===selected:(!filters.tech||q.techId===filters.tech)&&(filters.status==='all'||(filters.status==='uploaded'?q.status==='approved'&&q.trustUploadStatus==='uploaded':filters.status==='approved'?q.status==='approved'&&q.trustUploadStatus!=='uploaded':q.status===filters.status))&&`${q.techId} ${q.jobNumber}`.toLowerCase().includes(filters.search.trim().toLowerCase()));
  const groups=Object.entries(Object.groupBy(visible,q=>q.techId)).sort(([a],[b])=>a.localeCompare(b,undefined,{numeric:true}));
  const monthBounds=fiscalMonthBounds(statsMonth);
  return <AdminShell active="approvals"><section className="intro"><div><h1>QC approvals</h1><p>Check the pictures, then approve or leave a rejection note.</p></div>{selected&&<a className="button light" href="/">Back to all data</a>}</section>

@@ -1,7 +1,8 @@
 import { env } from "@/lib/local-env";
-import { ADMIN_TECH_ID, getTechSessionFromCookie, hashToken, TECH_COOKIE } from "@/lib/tech-auth";
+import { getTechSessionFromCookie, hashToken, TECH_COOKIE } from "@/lib/tech-auth";
+import { getRequestTenant } from "@/lib/tenant";
 
-export type TrustKey = { id: string | null; label: string };
+export type TrustKey = { id: string | null; label: string; tenantId: string };
 export type TrustQcRow = {
   id: string;
   jobNumber: string;
@@ -31,19 +32,21 @@ export async function requireTrustKey(request: Request): Promise<TrustKey | Resp
   const sessionMatch = /^Session ([a-f0-9]{64})$/.exec(header);
   if (!keyMatch && !sessionMatch) return trustError(401, "UNAUTHORIZED", "Sign in to TQA as an admin or send a Trust API key.");
   try {
+    const tenant = await getRequestTenant(request, env.DB);
+    if (!tenant) return trustError(404, "TENANT_NOT_FOUND", "This TQA domain is not configured.");
     if (sessionMatch) {
-      const techId = await getTechSessionFromCookie(`${TECH_COOKIE}=${sessionMatch[1]}`, env.DB);
-      return techId === ADMIN_TECH_ID
-        ? { id: null, label: "Admin browser session" }
+      const session = await getTechSessionFromCookie(`${TECH_COOKIE}=${sessionMatch[1]}`, env.DB, tenant.id);
+      return session?.isAdmin
+        ? { id: null, label: "Admin extension session", tenantId: tenant.id }
         : trustError(401, "UNAUTHORIZED", "Sign in to TQA as an admin.");
     }
     const hash = await hashToken(keyMatch![1]);
-    const key = await env.DB.prepare("SELECT id, label, last_used_at AS lastUsedAt FROM trust_api_keys WHERE token_hash = ? AND revoked_at IS NULL").bind(hash).first<{ id: string; label: string; lastUsedAt: number | null }>();
+    const key = await env.DB.prepare("SELECT id, label, tenant_id AS tenantId, last_used_at AS lastUsedAt FROM trust_api_keys WHERE tenant_id = ? AND token_hash = ? AND revoked_at IS NULL").bind(tenant.id, hash).first<{ id: string; label: string; tenantId: string; lastUsedAt: number | null }>();
     if (!key) return trustError(401, "UNAUTHORIZED", "API key is invalid or revoked.");
     if (!key.lastUsedAt || key.lastUsedAt < Date.now() - 300_000) {
-      await env.DB.prepare("UPDATE trust_api_keys SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL").bind(Date.now(), key.id).run();
+      await env.DB.prepare("UPDATE trust_api_keys SET last_used_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL").bind(Date.now(), tenant.id, key.id).run();
     }
-    return { id: key.id, label: key.label };
+    return { id: key.id, label: key.label, tenantId: key.tenantId };
   } catch (error) {
     console.error("Trust API authentication failed", error);
     return trustError(503, "UNAVAILABLE", "Trust API is temporarily unavailable.");
@@ -51,7 +54,7 @@ export async function requireTrustKey(request: Request): Promise<TrustKey | Resp
 }
 
 export function trustQc(request: Request, row: TrustQcRow) {
-  const base = (process.env.TQA_PUBLIC_ORIGIN || new URL(request.url).origin).replace(/\/$/, "");
+  const base = new URL(request.url).origin.replace(/\/$/, "");
   const ids = JSON.parse(row.photoIds) as unknown;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && photoIdPattern.test(id))) throw new Error("Invalid QC photos");
   const photos = [

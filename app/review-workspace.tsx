@@ -108,7 +108,10 @@ export default function Home() {
   useEffect(()=>{const controller=new AbortController();void load(controller.signal);return ()=>controller.abort();},[load]);
   useAutoRefresh(load);
   const base = items.filter(q => !filters.tech || q.techId === filters.tech);
-  const matches = (q: Qc, status: string) => status === 'all' || (status === 'uploaded' ? q.status === 'approved' && q.trustUploadStatus === 'uploaded' : q.status === status);
+  const matches = (q: Qc, status: string) => status === 'all' ||
+    (status === 'uploaded' ? q.status === 'approved' && q.trustUploadStatus === 'uploaded' :
+      status === 'approved' ? q.status === 'approved' && q.trustUploadStatus !== 'uploaded' :
+        q.status === status);
   const visible = base.filter(q => matches(q,filters.status) && `${q.techId} ${q.jobNumber}`.toLowerCase().includes(filters.search.trim().toLowerCase()));
   const snapshotMonth = fiscalMonthKey();
   const snapshotRange = fiscalMonthBounds(snapshotMonth);

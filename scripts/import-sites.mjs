@@ -25,9 +25,10 @@ for (const id of ids) {
   chmodSync(target, 0o600);
 }
 const db = new DatabaseSync(join(dir, 'tqa.sqlite'));
+const tenantId = process.env.TQA_TENANT_ID || 'default';
 db.exec('PRAGMA foreign_keys=ON; BEGIN');
 try {
-  const insertTech = db.prepare('INSERT OR IGNORE INTO technicians (tech_id,pin_salt,pin_hash,pin_ciphertext,active,failed_attempts,locked_until,created_at) VALUES (?,?,?,?,?,?,?,?)');
+  const insertTech = db.prepare('INSERT OR IGNORE INTO technicians (tenant_id,tech_id,pin_salt,pin_hash,pin_ciphertext,active,is_admin,failed_attempts,locked_until,created_at) VALUES (?,?,?,?,?,?,0,?,?,?)');
   for (const row of payload.technicians) {
     const pin = payload.pins[row.tech_id];
     if (!/^\d{5}$/.test(pin || '')) throw new Error('Missing five-digit PIN for ' + row.tech_id);
@@ -36,12 +37,12 @@ try {
     const iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', Buffer.from(secrets.pinEncryptionKey, 'hex'), iv);
     const ciphertext = Buffer.concat([cipher.update(pin), cipher.final(), cipher.getAuthTag()]);
-    insertTech.run(row.tech_id,row.pin_salt,row.pin_hash,iv.toString('hex')+':'+ciphertext.toString('hex'),row.active,0,0,row.created_at);
+    insertTech.run(tenantId,row.tech_id,row.pin_salt,row.pin_hash,iv.toString('hex')+':'+ciphertext.toString('hex'),row.active,0,0,row.created_at);
   }
-  const insertRemoval = db.prepare('INSERT OR IGNORE INTO technician_removals (tech_id,state,started_at) VALUES (?,?,?)');
-  for (const row of payload.removals) insertRemoval.run(row.tech_id,row.state,row.started_at);
-  const insertQc = db.prepare('INSERT OR IGNORE INTO qc_submissions (id,tech_id,screenshot_id,photo_ids,status,submitted_at,reviewed_at,job_number,review_note) VALUES (?,?,?,?,?,?,?,?,?)');
-  for (const row of payload.submissions) insertQc.run(row.id,row.tech_id,row.screenshot_id,row.photo_ids,row.status,row.submitted_at,row.reviewed_at,row.job_number,row.review_note);
+  const insertRemoval = db.prepare('INSERT OR IGNORE INTO technician_removals (tenant_id,tech_id,state,started_at) VALUES (?,?,?,?)');
+  for (const row of payload.removals) insertRemoval.run(tenantId,row.tech_id,row.state,row.started_at);
+  const insertQc = db.prepare('INSERT OR IGNORE INTO qc_submissions (id,tenant_id,tech_id,screenshot_id,photo_ids,status,submitted_at,reviewed_at,job_number,review_note) VALUES (?,?,?,?,?,?,?,?,?,?)');
+  for (const row of payload.submissions) insertQc.run(row.id,tenantId,row.tech_id,row.screenshot_id,row.photo_ids,row.status,row.submitted_at,row.reviewed_at,row.job_number,row.review_note);
   db.exec('COMMIT');
 } catch (error) { db.exec('ROLLBACK'); throw error; }
 console.log('Imported ' + payload.submissions.length + ' QCs, ' + ids.size + ' photos, ' + payload.technicians.length + ' active technician, and ' + payload.removals.length + ' blocked IDs.');

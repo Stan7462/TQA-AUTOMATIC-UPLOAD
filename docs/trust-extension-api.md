@@ -1,6 +1,6 @@
 # TQA Automatic Upload → Trust extension API
 
-Version: 1 (2026-09-18)
+Version: 2 (2026-09-29)
 
 Base URL: `{{TQA_BASE_URL}}`
 
@@ -8,7 +8,7 @@ This document is the contract for a separate browser extension that uploads appr
 
 ## Required extension workflow
 
-1. The owner signs into Trust in the browser, opens the extension, and supplies a TQA API key generated in **TQA → Settings → Trust extension API**. Treat the key as a secret. The TQA admin Tech ID/PIN is never used by the extension.
+1. The owner enters this tenant's TQA domain, admin Tech ID, and 5-digit PIN in the extension. The extension exchanges them for a 12-hour session and immediately discards the PIN.
 2. On opening, call `GET /api/integrations/trust/qcs` and display the `qcs` list. Only approved QCs from the current fiscal month (22nd through the following 21st) with `uploadStatus` `ready` or `failed` appear by default. The queue starts fresh every 22nd. Follow `nextCursor` for more pages.
 3. On **Start**, process QCs one at a time. Before each QC, call `GET /api/integrations/trust/qcs/{id}` to recheck its status. Fetch every photo with the same bearer key, then upload the screenshot and live photos to the correct Trust job. Show progress in the extension (e.g., 2 of 6 photos and 3 of 10 QCs). The server does not track percentage.
 4. Confirm that Trust saved **all** required photos for that QC. Only then call `PATCH /api/integrations/trust/qcs/{id}/upload` with `{"status":"uploaded"}`. If Trust returns a job or upload ID, include it as `externalReference`.
@@ -19,13 +19,28 @@ Run one uploader at a time for this key. The API does not reserve QCs or prevent
 
 ## Authentication and transport
 
-All `/api/integrations/trust/qcs...` and `/api/integrations/trust/photos...` endpoints require:
+Create an extension session with:
+
+```http
+POST /api/integrations/trust/login
+Content-Type: application/json
+
+{"techId":"1111","pin":"12345"}
+```
+
+The response contains `sessionToken`, `expiresAt`, `techId`, and the tenant identity. The credentials must belong to the admin for the hostname used in the request. Store the session token in extension storage and never store the PIN. Send the token on all QC and photo requests:
+
+```http
+Authorization: Session <64 lowercase hex characters>
+```
+
+Legacy API keys created in Settings remain supported for external integrations:
 
 ```http
 Authorization: Bearer tqa_trust_<64 lowercase hex characters>
 ```
 
-The API key is created and revoked from the TQA admin Settings page. It is shown **once** on creation, stored as a SHA-256 hash on the server, and can be revoked. A key permits reading approved QC metadata and images and reporting Trust upload results. It does not permit approving/rejecting QCs, managing technicians, or creating keys. Use HTTPS. Never put the key in a URL, log, Trust page DOM, or content-script message visible to the page. Keep network calls and key storage in the extension background service worker. For Chrome Manifest V3, grant host permission for `{{TQA_BASE_URL}}/*`; fetch from the background context, and use a content script only for interaction with Trust.
+Both authentication methods are restricted to the tenant assigned to the request hostname. They permit reading approved QC metadata and images and reporting Catalyst upload results. They do not permit approving/rejecting QCs or managing technicians. Use HTTPS. Never put a session or key in a URL, log, Catalyst page DOM, or content-script message visible to the page. Keep TQA network calls and token storage in the extension background service worker. For Chrome Manifest V3, request host permission for the admin-entered domain.
 
 Image `url` values are **protected API URLs**, not public links. Fetch each with `Authorization`, read the JPEG bytes as a `Blob`, then make a `File` for the Trust file input or upload flow. An ordinary `<img src="...">` request will not include the bearer key.
 

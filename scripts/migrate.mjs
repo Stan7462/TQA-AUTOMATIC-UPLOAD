@@ -41,13 +41,15 @@ function inspectExistingDatabase() {
     const applicationTables = [...tables].filter((name) => name !== "_prisma_migrations");
     if (applicationTables.length === 0) return { hasSchema: false, hasPrismaHistory };
 
-    const problems = [];
-    for (const [table, expected] of Object.entries(requiredColumns)) {
-      if (!tables.has(table)) { problems.push(`missing table ${table}`); continue; }
-      const columns = new Set(database.prepare(`PRAGMA table_info("${table}")`).all().map((row) => row.name));
-      for (const column of expected) if (!columns.has(column)) problems.push(`missing column ${table}.${column}`);
+    if (!hasPrismaHistory) {
+      const problems = [];
+      for (const [table, expected] of Object.entries(requiredColumns)) {
+        if (!tables.has(table)) { problems.push(`missing table ${table}`); continue; }
+        const columns = new Set(database.prepare(`PRAGMA table_info("${table}")`).all().map((row) => row.name));
+        for (const column of expected) if (!columns.has(column)) problems.push(`missing column ${table}.${column}`);
+      }
+      if (problems.length) throw new Error(`Existing database cannot be baselined: ${problems.join(", ")}.`);
     }
-    if (problems.length) throw new Error(`Existing database cannot be baselined: ${problems.join(", ")}.`);
     return { hasSchema: true, hasPrismaHistory };
   } finally {
     database.close();
@@ -81,4 +83,5 @@ if (existing.hasSchema && !existing.hasPrismaHistory) {
   runPrisma("migrate", "resolve", "--applied", baseline);
 }
 reconcileRuntimeMigration("0007_qc_location.sql", "20260921000000_qc_location", ["location_status", "location_latitude", "location_longitude", "location_accuracy", "location_captured_at"]);
+reconcileRuntimeMigration("0008_multi_tenant.sql", "20260929000000_multi_tenant", ["tenant_id"]);
 runPrisma("migrate", "deploy");

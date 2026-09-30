@@ -42,17 +42,18 @@ async function* exportImages(rows: ExportQc[]): AsyncGenerator<ZipEntry> {
 }
 
 async function prepareExport(request: Request): Promise<{ rows: ExportQc[]; filename: string } | Response> {
-  if (!isOwner(await getChatGPTUser())) return Response.json({ error: "Forbidden" }, { status: 403 });
+  const user = await getChatGPTUser();
+  if (!isOwner(user)) return Response.json({ error: "Forbidden" }, { status: 403 });
   const period = new URL(request.url).searchParams.get("period") ?? "all";
   if (period !== "all" && !/^(20\d\d|2100)-(0[1-9]|1[0-2])$/.test(period)) return Response.json({ error: "Invalid fiscal month" }, { status: 400 });
 
   try {
     const bounds = period === "all" ? null : fiscalMonthBounds(period);
     const results = await env.DB.prepare(
-      "SELECT id, tech_id AS techId, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, submitted_at AS submittedAt FROM qc_submissions WHERE status = 'approved'" +
+      "SELECT id, tech_id AS techId, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, submitted_at AS submittedAt FROM qc_submissions WHERE tenant_id = ? AND status = 'approved'" +
       (bounds ? " AND submitted_at >= ? AND submitted_at < ?" : "") +
       " ORDER BY submitted_at ASC, id ASC"
-    ).bind(...(bounds ? [bounds.start, bounds.end] : [])).all<ApprovedQc>();
+    ).bind(user!.tenantId, ...(bounds ? [bounds.start, bounds.end] : [])).all<ApprovedQc>();
     if (!results.results.length) return Response.json({ error: "No approved QCs in this period." }, { status: 404 });
 
     const rows: ExportQc[] = results.results.map((row) => {
