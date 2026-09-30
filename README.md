@@ -29,10 +29,10 @@ Deploy the repository with its `Dockerfile`, expose port `3000`, and mount persi
 Example (enter it as one line in Coolify):
 
 ```json
-[{"id":"leadtechx","name":"LeadTechX","domains":["qc.leadtechx.com"],"adminTechId":"1111","adminPin":"74621"},{"id":"second-team","name":"Second Team","domains":["qc.second-company.com"],"adminTechId":"2222","adminPin":"12345"}]
+[{"id":"default","name":"LeadTechX","domains":["qc.leadtechx.com"],"adminTechId":"1111","adminPin":"74621"},{"id":"second-team","name":"Second Team","domains":["qc.second-company.com"],"adminTechId":"2222","adminPin":"12345"}]
 ```
 
-`TQA_TENANTS_JSON` creates or updates the tenants it lists without deleting tenants created later in Settings. Tenant IDs should stay unchanged. Domains can be changed or moved between tenants. Keep this variable secret because it contains admin PINs. Set `TQA_PLATFORM_TENANT_ID` only if the company allowed to manage other companies is not `default`. The older `TQA_ADMIN_TECH_ID`, `TQA_ADMIN_PIN`, `TQA_TENANT_ID`, `TQA_TENANT_NAME`, and `TQA_TENANT_DOMAINS` variables remain supported for a single tenant deployment.
+`TQA_TENANTS_JSON` creates or updates the tenants it lists without deleting tenants created later in Settings. Keep the existing primary company on tenant ID `default` so its admin can open the **Companies** settings tab. Tenant IDs should stay unchanged. Domains can be changed or moved between tenants. Keep this variable secret because it contains admin PINs. Set `TQA_PLATFORM_TENANT_ID` only if the company allowed to manage other companies uses a different ID. The older `TQA_ADMIN_TECH_ID`, `TQA_ADMIN_PIN`, `TQA_TENANT_ID`, `TQA_TENANT_NAME`, and `TQA_TENANT_DOMAINS` variables remain supported for a single tenant deployment.
 
 The first Prisma migration is a full baseline. A new empty volume receives the complete schema. An existing TQA database is verified and marked with that baseline without recreating its tables or deleting data. If an existing database does not match the expected baseline, startup stops instead of applying an unsafe partial migration.
 
