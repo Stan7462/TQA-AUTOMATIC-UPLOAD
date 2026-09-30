@@ -37,6 +37,10 @@ function render() {
   const delaySeconds = DELAY_OPTIONS.includes(state.qcDelaySeconds) ? state.qcDelaySeconds : 30;
   $("qc-delay").value = String(DELAY_OPTIONS.indexOf(delaySeconds));
   $("delay-value").textContent = `${delaySeconds} seconds`;
+  const rideAlongPercentage = Number.isInteger(state.rideAlongPercentage) ? state.rideAlongPercentage : 50;
+  $("ride-along-percentage").value = String(rideAlongPercentage);
+  $("ride-along-percentage").disabled = run.status === "running";
+  $("ride-along-value").textContent = `${rideAlongPercentage}%`;
   $("queue").replaceChildren();
   if (!queue.length) {
     const empty = document.createElement("p"); empty.className = "empty"; empty.textContent = "No uploadable QCs loaded."; $("queue").append(empty);
@@ -118,6 +122,13 @@ $("qc-delay").addEventListener("input", () => {
 $("qc-delay").addEventListener("change", () => action(() => {
   const seconds = DELAY_OPTIONS[Number($("qc-delay").value)] || 30;
   return send("SET_DELAY", { seconds });
+}));
+$("ride-along-percentage").addEventListener("input", () => {
+  $("ride-along-value").textContent = `${$("ride-along-percentage").value}%`;
+});
+$("ride-along-percentage").addEventListener("change", () => action(() => {
+  const percentage = Number($("ride-along-percentage").value);
+  return send("SET_RIDE_ALONG_PERCENTAGE", { percentage });
 }));
 chrome.storage.onChanged.addListener(() => { void refreshState(); });
 void (async () => {

@@ -1,4 +1,4 @@
-import { JOBS_URL, exactJobMatches, observationUrl, orderedPhotos, safeError } from "./core.js";
+import { JOBS_URL, exactJobMatches, observationTypeAssignments, observationUrl, orderedPhotos, safeError } from "./core.js";
 
 let activeRun = null;
 let stopRequested = false;
@@ -7,6 +7,7 @@ const storageReady = chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED
 let logChain = Promise.resolve();
 const DELAY_OPTIONS_SECONDS = [5, 15, 30, 60, 90, 120];
 const DEFAULT_QC_DELAY_SECONDS = 30;
+const DEFAULT_RIDE_ALONG_PERCENTAGE = 50;
 const MAX_QC_ATTEMPTS = 3;
 
 function logEvent(level, step, message) {
@@ -19,10 +20,17 @@ function logEvent(level, step, message) {
   return logChain;
 }
 
-async function stored() { await storageReady; return chrome.storage.local.get(["apiOrigin", "sessionToken", "connectedTechId", "tenantName", "queue", "run", "logs", "qcDelaySeconds"]); }
+async function stored() { await storageReady; return chrome.storage.local.get(["apiOrigin", "sessionToken", "connectedTechId", "tenantName", "queue", "run", "logs", "qcDelaySeconds", "rideAlongPercentage"]); }
 async function qcDelaySeconds() {
   const { qcDelaySeconds: saved } = await stored();
   return DELAY_OPTIONS_SECONDS.includes(saved) ? saved : DEFAULT_QC_DELAY_SECONDS;
+}
+function validRideAlongPercentage(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 100 && value % 10 === 0;
+}
+async function rideAlongPercentage() {
+  const { rideAlongPercentage: saved } = await stored();
+  return validRideAlongPercentage(saved) ? saved : DEFAULT_RIDE_ALONG_PERCENTAGE;
 }
 async function authentication() {
   await storageReady;
@@ -209,12 +217,12 @@ async function photoBase64(url) {
   return btoa(encoded);
 }
 
-async function processOne(qcSummary, tabId, index, total, attempt) {
+async function processOne(qcSummary, tabId, index, total, attempt, observationType) {
   let photoCount = 0;
   let qc = null;
   await setRun({ currentQcId: qcSummary.id, jobId: null, jobNumber: qcSummary.jobNumber, techId: qcSummary.techId,
     index: index + 1, total, attempt, maxAttempts: MAX_QC_ATTEMPTS, photoIndex: 0, photoTotal: 0,
-    stage: "loading QC", message: `Loading job ${qcSummary.jobNumber} (attempt ${attempt} of ${MAX_QC_ATTEMPTS})` });
+    observationType, stage: "loading QC", message: `Loading job ${qcSummary.jobNumber} as ${observationType} (attempt ${attempt} of ${MAX_QC_ATTEMPTS})` });
   try {
     qc = await detail(qcSummary.id);
     if (qc.reviewStatus !== "approved" || !["ready", "failed"].includes(qc.uploadStatus)) {
@@ -235,7 +243,7 @@ async function processOne(qcSummary, tabId, index, total, attempt) {
     const jobId = matches[0].jobId;
     await setRun({ stage: "opening observation", jobId, message: `Opening Catalyst job ID ${jobId}` });
     await navigate(tabId, observationUrl(jobId));
-    await pageCommand(tabId, "PREPARE", { jobNumber: qc.jobNumber, techId: qc.techId });
+    await pageCommand(tabId, "PREPARE", { jobNumber: qc.jobNumber, techId: qc.techId, observationType });
     for (let i = 0; i < photos.length; i++) {
       if (stopRequested) throw new Error("Stopped by user before completing this QC.");
       await setRun({ stage: "uploading", photoIndex: i, message: `Uploading photo ${i + 1} of ${photos.length} for job ${qc.jobNumber}` });
@@ -276,17 +284,20 @@ async function runQueue() {
   let tabId;
   try {
     const queue = await loadQueue();
-    await setRun({ status: "running", total: queue.length, index: 0, stage: "starting", message: `${queue.length} approved QCs to process` });
+    const percentage = await rideAlongPercentage();
+    const pending = observationTypeAssignments(queue, percentage);
+    const rideAlongCount = pending.filter((item) => item.observationType === "Ride Along").length;
+    await setRun({ status: "running", total: queue.length, index: 0, rideAlongPercentage: percentage, rideAlongCount,
+      stage: "starting", message: `${queue.length} approved QCs to process; ${rideAlongCount} randomly selected as Ride Along (${percentage}%).` });
     if (!queue.length) { await setRun({ status: "done", stage: "done", message: "No approved QCs are ready to upload." }); return; }
     const tab = await chrome.tabs.create({ url: JOBS_URL, active: true });
     tabId = tab.id;
     await setRun({ tabId });
-    const pending = queue.map((qc, index) => ({ qc, index, attempt: 1 }));
     const exhausted = [];
     while (pending.length) {
       if (stopRequested) break;
       const item = pending.shift();
-      const result = await processOne(item.qc, tabId, item.index, queue.length, item.attempt);
+      const result = await processOne(item.qc, tabId, item.index, queue.length, item.attempt, item.observationType);
       if ((await stored()).run?.status === "needs_review") return;
       if (result.status === "failed" && !stopRequested) {
         if (item.attempt < MAX_QC_ATTEMPTS) {
@@ -335,7 +346,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "GET_STATE": {
         const data = await stored();
         const auth = await authentication();
-        return { queue: data.queue || [], run: data.run || {}, logs: data.logs || [], qcDelaySeconds: DELAY_OPTIONS_SECONDS.includes(data.qcDelaySeconds) ? data.qcDelaySeconds : DEFAULT_QC_DELAY_SECONDS, hasAuth: auth.available, authMode: auth.mode, apiOrigin: auth.apiOrigin, connectedTechId: auth.connectedTechId, tenantName: auth.tenantName };
+        return { queue: data.queue || [], run: data.run || {}, logs: data.logs || [], qcDelaySeconds: DELAY_OPTIONS_SECONDS.includes(data.qcDelaySeconds) ? data.qcDelaySeconds : DEFAULT_QC_DELAY_SECONDS, rideAlongPercentage: validRideAlongPercentage(data.rideAlongPercentage) ? data.rideAlongPercentage : DEFAULT_RIDE_ALONG_PERCENTAGE, hasAuth: auth.available, authMode: auth.mode, apiOrigin: auth.apiOrigin, connectedTechId: auth.connectedTechId, tenantName: auth.tenantName };
       }
       case "CONNECT": {
         if (!/^https?:\/\//.test(message.apiOrigin || "")) throw new Error("Enter a valid TQA domain.");
@@ -363,6 +374,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await chrome.storage.local.set({ qcDelaySeconds: message.seconds });
         await logEvent("info", "Settings", `Wait between QC uploads set to ${message.seconds} seconds.`);
         return { qcDelaySeconds: message.seconds };
+      }
+      case "SET_RIDE_ALONG_PERCENTAGE": {
+        if (activeRun) throw new Error("Wait until the current upload run finishes before changing the Ride Along percentage.");
+        if (!validRideAlongPercentage(message.percentage)) throw new Error("Choose a Ride Along percentage from 0% to 100% in 10% steps.");
+        await storageReady;
+        await chrome.storage.local.set({ rideAlongPercentage: message.percentage });
+        await logEvent("info", "Settings", `Ride Along target set to ${message.percentage}% for the next upload run.`);
+        return { rideAlongPercentage: message.percentage };
       }
       case "CLEAR_LOGS": {
         await logChain;

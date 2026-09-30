@@ -44,6 +44,12 @@
         <input id="qc-delay" type="range" min="0" max="5" step="1" value="2" aria-label="Wait time between QC uploads">
         <div class="delay-options" aria-hidden="true"><span>5s</span><span>15s</span><span>30s</span><span>60s</span><span>90s</span><span>120s</span></div>
       </div>
+      <div class="delay-control">
+        <div class="delay-heading"><label for="ride-along-percentage">Ride Along QCs</label><output id="ride-along-value" for="ride-along-percentage">50%</output></div>
+        <input id="ride-along-percentage" class="control-slider" type="range" min="0" max="100" step="10" value="50" aria-label="Percentage of QCs uploaded as Ride Along">
+        <div class="percentage-options" aria-hidden="true"><span>0%</span><span>20%</span><span>40%</span><span>60%</span><span>80%</span><span>100%</span></div>
+        <small class="control-help">Randomly selected for each upload run. Remaining QCs use After the Fact.</small>
+      </div>
     </section>
     <section class="queue-section"><div class="section-heading"><div><span class="eyebrow">CATALYST QUEUE</span><h2>Approved QCs</h2></div><span id="total" class="count-pill">0</span></div><div id="queue" class="queue"></div></section>
     <details class="log-card panel-card" open>

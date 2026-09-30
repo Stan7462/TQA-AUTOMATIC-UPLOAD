@@ -69,10 +69,12 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#87b3db,#d8e9f
 .delay-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}
 .delay-heading label{color:#dce8f1;font-size:11px;font-weight:700}
 .delay-heading output{color:var(--accent);font-size:11px;font-weight:800}
-#qc-delay{display:block;width:100%;height:18px;margin:0;accent-color:#c5ddf7;cursor:pointer}
-#qc-delay:disabled{opacity:.45;cursor:default}
+#qc-delay,.control-slider{display:block;width:100%;height:18px;margin:0;accent-color:#c5ddf7;cursor:pointer}
+#qc-delay:disabled,.control-slider:disabled{opacity:.45;cursor:default}
 .delay-options{display:flex;justify-content:space-between;margin-top:2px;color:#8295a4;font-size:9px;font-weight:700}
 .delay-options span{width:24px;text-align:center}
+.percentage-options{display:flex;justify-content:space-between;margin-top:2px;color:#8295a4;font-size:9px;font-weight:700}
+.control-help{display:block;margin-top:7px;color:var(--muted);font-size:10px}
 .queue-section{margin-bottom:14px}
 .section-heading{margin:0 2px 9px}
 .count-pill{min-width:29px;height:27px;padding:0 8px;background:#2b4250;color:var(--accent-soft);font-size:12px}

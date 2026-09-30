@@ -112,7 +112,7 @@
       `${option} selection to appear in dropdown ${index + 1}`, 5000);
   }
 
-  async function prepare(jobNumber, techId) {
+  async function prepare(jobNumber, techId, observationType) {
     if (!location.pathname.includes("/observation/")) throw new Error("Catalyst observation page is not open.");
     const expectedJob = String(jobNumber).trim();
     const expectedTech = String(techId).trim();
@@ -125,7 +125,8 @@
     pageLog("success", "observation match", `Verified job ${expectedJob} and Tech ID ${expectedTech} on the observation page.`);
     await waitFor(() => [...document.querySelectorAll("[role='combobox']")].filter(visible).length >= 2,
       "Observation type and Customer Contact fields");
-    await selectCombo(0, "After the Fact");
+    if (!["Ride Along", "After the Fact"].includes(observationType)) throw new Error("The requested observation type is invalid.");
+    await selectCombo(0, observationType);
     await selectCombo(1, "No");
     return { prepared: true };
   }
@@ -205,7 +206,7 @@
       switch (message.command) {
         case "PING": return { url: location.href };
         case "FIND_JOB": return findJob(message.jobNumber);
-        case "PREPARE": return prepare(message.jobNumber, message.techId);
+        case "PREPARE": return prepare(message.jobNumber, message.techId, message.observationType);
         case "UPLOAD_PHOTO": return uploadPhoto(message.base64, message.fileName);
         case "SET_CHECKS": return setChecks();
         case "COMPLETE": return complete();
