@@ -208,7 +208,8 @@ function waitForSuccess(tabId, timeoutMs = 45000) {
 async function photoBase64(url) {
   const auth = await authentication();
   const parsed = new URL(url);
-  if (!auth.available || parsed.origin !== auth.apiOrigin || !/^\/api\/integrations\/trust\/photos\//.test(parsed.pathname)) throw new Error("Unexpected photo URL from TQA API.");
+  const expected = auth.available ? new URL(auth.apiOrigin) : null;
+  if (!expected || parsed.hostname !== expected.hostname || !/^\/api\/integrations\/trust\/photos\//.test(parsed.pathname)) throw new Error("Unexpected photo URL from TQA API.");
   const blob = await (await api(parsed.pathname)).blob();
   if (blob.type && blob.type !== "image/jpeg") throw new Error("TQA returned a non-JPEG photo.");
   const bytes = new Uint8Array(await blob.arrayBuffer());

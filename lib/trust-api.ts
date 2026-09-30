@@ -51,7 +51,10 @@ export async function requireTrustKey(request: Request): Promise<TrustKey | Resp
 }
 
 export function trustQc(request: Request, row: TrustQcRow) {
-  const base = new URL(request.url).origin.replace(/\/$/, "");
+  const requestUrl = new URL(request.url);
+  const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  if (forwardedProtocol === "https" || forwardedProtocol === "http") requestUrl.protocol = `${forwardedProtocol}:`;
+  const base = requestUrl.origin.replace(/\/$/, "");
   const ids = JSON.parse(row.photoIds) as unknown;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && photoIdPattern.test(id))) throw new Error("Invalid QC photos");
   const photos = [
