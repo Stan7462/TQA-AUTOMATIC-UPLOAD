@@ -8,7 +8,7 @@ This document is the contract for a separate browser extension that uploads appr
 
 ## Required extension workflow
 
-1. The supervisor enters the shared TQA domain, Admin ID, and password in the extension. The server verifies the complete credential pair, identifies exactly one company, and refuses an ambiguous match. The extension receives a 12-hour company-scoped session and immediately discards the password.
+1. The supervisor enters only their Admin ID and password. The extension connects to the built-in shared TQA origin, and the server verifies the complete credential pair, identifies exactly one company, and refuses an ambiguous match. The extension receives a 12-hour company-scoped session and immediately discards the password.
 2. On opening, call `GET /api/integrations/trust/qcs` and display the `qcs` list. Only approved QCs from the current fiscal month (22nd through the following 21st) with `uploadStatus` `ready` or `failed` appear by default. The queue starts fresh every 22nd. Follow `nextCursor` for more pages.
 3. On **Start**, process QCs one at a time. Before each QC, call `GET /api/integrations/trust/qcs/{id}` to recheck its status. Fetch every photo with the same bearer key, then upload the screenshot and live photos to the correct Trust job. Show progress in the extension (e.g., 2 of 6 photos and 3 of 10 QCs). The server does not track percentage.
 4. Confirm that Trust saved **all** required photos for that QC. Only then call `PATCH /api/integrations/trust/qcs/{id}/upload` with `{"status":"uploaded"}`. If Trust returns a job or upload ID, include it as `externalReference`.

@@ -1,4 +1,4 @@
-import { JOBS_URL, exactJobMatches, observationTypeAssignments, observationUrl, orderedPhotos, safeError } from "./core.js";
+import { JOBS_URL, TQA_APP_ORIGIN, exactJobMatches, observationTypeAssignments, observationUrl, orderedPhotos, safeError } from "./core.js";
 
 let activeRun = null;
 let stopRequested = false;
@@ -20,7 +20,7 @@ function logEvent(level, step, message) {
   return logChain;
 }
 
-async function stored() { await storageReady; return chrome.storage.local.get(["apiOrigin", "sessionToken", "connectedTechId", "tenantName", "queue", "run", "logs", "qcDelaySeconds", "rideAlongPercentage"]); }
+async function stored() { await storageReady; return chrome.storage.local.get(["sessionToken", "connectedTechId", "tenantName", "queue", "run", "logs", "qcDelaySeconds", "rideAlongPercentage"]); }
 async function qcDelaySeconds() {
   const { qcDelaySeconds: saved } = await stored();
   return DELAY_OPTIONS_SECONDS.includes(saved) ? saved : DEFAULT_QC_DELAY_SECONDS;
@@ -34,9 +34,9 @@ async function rideAlongPercentage() {
 }
 async function authentication() {
   await storageReady;
-  const { apiOrigin, sessionToken, connectedTechId, tenantName } = await stored();
-  if (/^https?:\/\//.test(apiOrigin || "") && /^[a-f0-9]{64}$/.test(sessionToken || "")) {
-    return { available: true, mode: "session", header: `Session ${sessionToken}`, apiOrigin, connectedTechId, tenantName };
+  const { sessionToken, connectedTechId, tenantName } = await stored();
+  if (/^[a-f0-9]{64}$/.test(sessionToken || "")) {
+    return { available: true, mode: "session", header: `Session ${sessionToken}`, apiOrigin: TQA_APP_ORIGIN, connectedTechId, tenantName };
   }
   return { available: false, mode: "none", header: null, apiOrigin: null };
 }
@@ -53,7 +53,7 @@ async function setRun(patch) {
 
 async function api(path, options = {}) {
   const auth = await authentication();
-  if (!auth.available) throw new Error("Connect the extension with your TQA domain, Admin ID, and password.");
+  if (!auth.available) throw new Error("Connect the extension with your Admin ID and password.");
   const method = options.method || "GET";
   await logEvent("info", "TQA API", `${method} ${path}`);
   let response;
@@ -346,25 +346,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "GET_STATE": {
         const data = await stored();
         const auth = await authentication();
-        return { queue: data.queue || [], run: data.run || {}, logs: data.logs || [], qcDelaySeconds: DELAY_OPTIONS_SECONDS.includes(data.qcDelaySeconds) ? data.qcDelaySeconds : DEFAULT_QC_DELAY_SECONDS, rideAlongPercentage: validRideAlongPercentage(data.rideAlongPercentage) ? data.rideAlongPercentage : DEFAULT_RIDE_ALONG_PERCENTAGE, hasAuth: auth.available, authMode: auth.mode, apiOrigin: auth.apiOrigin, connectedTechId: auth.connectedTechId, tenantName: auth.tenantName };
+        return { queue: data.queue || [], run: data.run || {}, logs: data.logs || [], qcDelaySeconds: DELAY_OPTIONS_SECONDS.includes(data.qcDelaySeconds) ? data.qcDelaySeconds : DEFAULT_QC_DELAY_SECONDS, rideAlongPercentage: validRideAlongPercentage(data.rideAlongPercentage) ? data.rideAlongPercentage : DEFAULT_RIDE_ALONG_PERCENTAGE, hasAuth: auth.available, connectedTechId: auth.connectedTechId, tenantName: auth.tenantName };
       }
       case "CONNECT": {
-        if (!/^https?:\/\//.test(message.apiOrigin || "")) throw new Error("Enter a valid TQA domain.");
         if (!/^[A-Z0-9_-]{4,32}$/.test(message.techId || "") || !((/^\d{5}$/.test(message.pin || "")) || ((message.pin || "").length >= 8 && /[A-Za-z]/.test(message.pin) && /\d/.test(message.pin)))) throw new Error("Enter the Admin ID and password.");
-        const response = await fetch(`${message.apiOrigin}/api/integrations/trust/login`, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ techId: message.techId, password: message.pin }) });
+        const response = await fetch(`${TQA_APP_ORIGIN}/api/integrations/trust/login`, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ techId: message.techId, password: message.pin }) });
         const body = await response.json().catch(() => null);
         if (!response.ok || !/^[a-f0-9]{64}$/.test(body?.sessionToken || "")) throw new Error(body?.error?.message || `TQA login returned HTTP ${response.status}.`);
         await storageReady;
-        await chrome.storage.local.set({ apiOrigin: message.apiOrigin, sessionToken: body.sessionToken, connectedTechId: body.techId, tenantName: body.tenant?.name || "TQA", queue: [], run: {} });
-        await chrome.storage.local.remove("trustApiKey");
-        await logEvent("success", "Authentication", `Connected to ${message.apiOrigin} as admin ${body.techId}.`);
+        await chrome.storage.local.set({ sessionToken: body.sessionToken, connectedTechId: body.techId, tenantName: body.tenant?.name || "TQA", queue: [], run: {} });
+        await chrome.storage.local.remove(["apiOrigin", "trustApiKey"]);
+        await logEvent("success", "Authentication", `Connected to ${body.tenant?.name || "TQA"} as admin ${body.techId}.`);
         return { connected: true };
       }
       case "DISCONNECT": {
-        if (activeRun) throw new Error("Stop the current upload before switching domains.");
+        if (activeRun) throw new Error("Stop the current upload before switching accounts.");
         await storageReady;
         await chrome.storage.local.remove(["apiOrigin", "sessionToken", "connectedTechId", "tenantName", "trustApiKey", "queue", "run"]);
-        await logEvent("info", "Authentication", "Disconnected from the TQA domain.");
+        await logEvent("info", "Authentication", "Disconnected from the TQA account.");
         return { disconnected: true };
       }
       case "REFRESH": return { queue: await loadQueue() };

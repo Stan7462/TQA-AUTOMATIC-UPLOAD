@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
   "name": "TQA Catalyst Uploader",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Uploads approved TQA QCs to the matching Catalyst observation.",
   "permissions": ["storage", "tabs"],
   "host_permissions": [
-    "https://catalystqms.comcast.net/*"
+    "https://catalystqms.comcast.net/*",
+    "https://qc.leadtechx.com/*"
   ],
-  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_title": "TQA Catalyst Uploader", "default_popup": "popup.html" },
   "content_scripts": [{

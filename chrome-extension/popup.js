@@ -14,7 +14,7 @@ function render() {
   const runStatus = run.status || "ready";
   $("auth-title").textContent = state.hasAuth ? (state.tenantName || "TQA admin connected") : "Connect your TQA app";
   $("auth-status").textContent = state.hasAuth
-    ? `${state.apiOrigin} · Admin ${state.connectedTechId}`
+    ? `${state.tenantName || "TQA"} · Admin ${state.connectedTechId}`
     : "Use your Admin ID and password.";
   $("auth-card").classList.toggle("missing", !state.hasAuth);
   $("login-form").hidden = state.hasAuth;
@@ -82,23 +82,12 @@ async function action(callback) {
   catch (error) { $("status").textContent = error.message; }
 }
 
-function normalizedOrigin(value) {
-  const raw = value.trim();
-  const url = new URL(raw.includes("://") ? raw : `https://${raw}`);
-  if (!/^https?:$/.test(url.protocol) || url.username || url.password || (url.pathname !== "/" && url.pathname !== "") || url.search || url.hash) throw new Error("Enter only the TQA domain, without a page path.");
-  if (url.protocol === "http:" && !["localhost", "127.0.0.1"].includes(url.hostname)) throw new Error("Use HTTPS for a public TQA domain.");
-  return url.origin;
-}
-
 $("login-form").addEventListener("submit", (event) => {
   event.preventDefault();
   void action(async () => {
-    const apiOrigin = normalizedOrigin($("domain").value);
     const techId = $("admin-tech-id").value.trim().toUpperCase();
     const pin = $("admin-pin").value.trim();
-    const allowed = await chrome.permissions.request({ origins: [`${apiOrigin}/*`] });
-    if (!allowed) throw new Error("Allow access to this TQA domain so the extension can load its QC queue.");
-    await send("CONNECT", { apiOrigin, techId, pin });
+    await send("CONNECT", { techId, pin });
     $("admin-pin").value = "";
     await send("REFRESH");
   });

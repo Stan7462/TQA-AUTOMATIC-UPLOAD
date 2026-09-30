@@ -6,7 +6,7 @@ Share the same public root URL with admins and technicians. Technicians sign in 
 
 On **Approved / reviewed**, the admin can download approved QCs for all time or one fiscal month. The ZIP opens into one `TQA-approved-QCs` folder, with a separate job-number folder for each QC. Inside are the original account screenshot and live JPG photos, named in capture order for manual upload to Catalyst. Repeated job numbers stay separate because each folder also includes the submission ID.
 
-The Catalyst browser extension asks for the shared TQA domain, Admin ID, and password. It exchanges them for a short lived session, discards the password, and loads only that admin's company QCs. One extension installation connects to one company at a time. Legacy integration keys can still be created and revoked in Settings.
+The Catalyst browser extension has the shared TQA production origin built in and asks only for the Admin ID and password. It exchanges them for a short lived session, discards the password, and loads only that admin's company QCs. One extension installation connects to one company at a time. Legacy integration keys can still be created and revoked in Settings.
 
 An unfinished QC is saved in the technician's browser storage after each screenshot or camera photo. The same Tech ID on the same phone and browser restores the job number, screenshot, photos, and submission ID when the link is reopened, including after an hour. The page shows when saving is complete and warns if the phone cannot store the draft. A successful submission clears the local draft. Private browsing or cleared site data can remove it.
 

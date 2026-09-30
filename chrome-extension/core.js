@@ -1,4 +1,5 @@
 export const JOBS_URL = "https://catalystqms.comcast.net/TechOps/jobs";
+export const TQA_APP_ORIGIN = "https://qc.leadtechx.com";
 export const observationUrl = (jobId) => `https://catalystqms.comcast.net/TechOps/observation/?jobid=${encodeURIComponent(jobId)}`;
 
 export function exactJobMatches(rows, jobNumber, techId) {
