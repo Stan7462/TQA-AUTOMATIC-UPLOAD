@@ -14,7 +14,8 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "prisma migrate dev --create-only",
     "db:migrate": "node scripts/migrate.mjs",
-    "db:status": "prisma migrate status"
+    "db:status": "prisma migrate status",
+    "extension:package": "node scripts/package-extension.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

@@ -60,7 +60,7 @@ export default function CompanySettings() {
   async function copySetup() {
     if (!issued) return;
     try {
-      await navigator.clipboard.writeText(`TQA Automatic Upload\nCompany: ${issued.name}\nLogin: ${issued.loginUrl}\nTemporary setup ID: ${issued.setupId}\nTemporary PIN: ${issued.setupPin}\n\nSign in once, then create your permanent Admin ID and password.`);
+      await navigator.clipboard.writeText(`TQA Automatic Upload — Company setup\nCompany: ${issued.name}\n\n1. Open the app: ${issued.loginUrl}\nTemporary setup ID: ${issued.setupId}\nTemporary PIN: ${issued.setupPin}\n\n2. Sign in once and create your permanent Admin ID and password.\n\n3. Install the Catalyst extension: ${location.origin}/extension\nSign into the extension with the same permanent Admin ID and password.`);
       setCopied(true);
     } catch { setError("Could not copy the setup details. Copy them manually below."); }
   }
@@ -68,7 +68,7 @@ export default function CompanySettings() {
   async function copyCompanyLogin(company: Company) {
     if (!company.adminTechId || !company.credential) return;
     try {
-      await navigator.clipboard.writeText(`TQA Automatic Upload\nLogin: ${location.origin}/login\nAdmin ID: ${company.adminTechId}\nPassword: ${company.credential}`);
+      await navigator.clipboard.writeText(`TQA Automatic Upload\nCompany: ${company.name}\nLogin: ${location.origin}/login\nAdmin ID: ${company.adminTechId}\nPassword: ${company.credential}\n\nInstall the Catalyst extension: ${location.origin}/extension\nSign into the extension with the same Admin ID and password.`);
       setNotice(`Login details copied for ${company.name}.`);
     } catch { setError("Could not copy these login details."); }
   }

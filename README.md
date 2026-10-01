@@ -8,6 +8,8 @@ On **Approved / reviewed**, the admin can download approved QCs for all time or 
 
 The Catalyst browser extension has the shared TQA production origin built in and asks only for the Admin ID and password. It exchanges them for a short lived session, discards the password, and loads only that admin's company QCs. One extension installation connects to one company at a time. Legacy integration keys can still be created and revoked in Settings.
 
+Set `TQA_EXTENSION_STORE_URL` to the unlisted Chrome Web Store listing. Company setup messages link to `/extension`, which reads that variable at runtime and sends supervisors to the current store listing. Build the store upload ZIP with `pnpm extension:package`; the generated release file is intentionally not committed.
+
 An unfinished QC is saved in the technician's browser storage after each screenshot or camera photo. The same Tech ID on the same phone and browser restores the job number, screenshot, photos, and submission ID when the link is reopened, including after an hour. The page shows when saving is complete and warns if the phone cannot store the draft. A successful submission clears the local draft. Private browsing or cleared site data can remove it.
 
 Successfully submitted QCs and their JPG files are retained for at least three full calendar months from the submission timestamp. The production container checks for expired QCs at startup and every six hours, removes their individual files, and then removes their database records. Disabling a technician immediately revokes their sessions and prevents new submissions without deleting their submitted QCs; issuing a new PIN reactivates the same Tech ID and keeps any history still inside the retention period.
