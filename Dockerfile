@@ -13,6 +13,11 @@ RUN npm run build
 
 FROM node:24-bookworm-slim AS runtime
 
+# Prisma needs OpenSSL in the runtime image for schema migrations.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production \
     TQA_DATA_DIR=/data \
     TZ=America/Chicago \
