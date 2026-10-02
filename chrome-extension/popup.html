@@ -6,7 +6,7 @@
   <title>TQA Catalyst Uploader</title>
   <link rel="stylesheet" href="popup.css">
 </head>
-<body>
+<body class="signed-out">
   <main>
     <header class="app-header">
       <div class="brand-mark" aria-hidden="true">T<span>Q</span>A</div>
@@ -19,7 +19,7 @@
     </header>
     <section id="auth-card" class="auth-card panel-card">
       <div id="auth-summary" class="auth-summary">
-        <div class="section-icon auth-icon" aria-hidden="true">✓</div>
+        <div id="auth-icon" class="section-icon auth-icon" aria-hidden="true">→</div>
         <div class="auth-copy"><strong id="auth-title">Connect your TQA app</strong><small id="auth-status">Use your Admin ID and password.</small></div>
         <button id="disconnect" class="compact" hidden>Switch account</button>
       </div>
@@ -28,8 +28,10 @@
         <label>Password<input id="admin-pin" type="password" autocomplete="current-password" minlength="5" maxlength="72" required></label>
         <button id="connect" class="primary" type="submit">Connect</button>
       </form>
+      <p id="auth-error" class="auth-error" role="alert" hidden></p>
     </section>
-    <section class="run-card panel-card">
+    <div id="authenticated-content" hidden>
+      <section class="run-card panel-card">
       <div class="panel-heading">
         <div><span class="eyebrow">UPLOAD CONTROL</span><h2>Queue status</h2></div>
         <span id="run-state" class="state-pill">Ready</span>
@@ -49,13 +51,14 @@
         <div class="percentage-options" aria-hidden="true"><span>0%</span><span>20%</span><span>40%</span><span>60%</span><span>80%</span><span>100%</span></div>
         <small class="control-help">Randomly selected for each upload run. Remaining QCs use After the Fact.</small>
       </div>
-    </section>
-    <section class="queue-section"><div class="section-heading"><div><span class="eyebrow">CATALYST QUEUE</span><h2>Approved QCs</h2></div><span id="total" class="count-pill">0</span></div><div id="queue" class="queue"></div></section>
-    <details class="log-card panel-card" open>
-      <summary><span><span class="eyebrow">SYSTEM</span><strong>Activity log</strong></span><span id="log-count" class="count-pill">0</span></summary>
-      <div class="log-actions"><button id="copy-log">Copy log</button><button id="clear-log">Clear log</button></div>
-      <div id="logs" class="logs" aria-live="polite"></div>
-    </details>
+      </section>
+      <section class="queue-section"><div class="section-heading"><div><span class="eyebrow">CATALYST QUEUE</span><h2>Approved QCs</h2></div><span id="total" class="count-pill">0</span></div><div id="queue" class="queue"></div></section>
+      <details class="log-card panel-card" open>
+        <summary><span><span class="eyebrow">SYSTEM</span><strong>Activity log</strong></span><span id="log-count" class="count-pill">0</span></summary>
+        <div class="log-actions"><button id="copy-log">Copy log</button><button id="clear-log">Clear log</button></div>
+        <div id="logs" class="logs" aria-live="polite"></div>
+      </details>
+    </div>
   </main>
   <script type="module" src="popup.js"></script>
 </body>

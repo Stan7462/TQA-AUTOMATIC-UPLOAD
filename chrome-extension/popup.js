@@ -12,13 +12,18 @@ function render() {
   const queue = state.queue || [];
   const run = state.run || {};
   const runStatus = run.status || "ready";
-  $("auth-title").textContent = state.hasAuth ? (state.tenantName || "TQA admin connected") : "Connect your TQA app";
-  $("auth-status").textContent = state.hasAuth
+  const authenticated = Boolean(state.hasAuth);
+  document.body.classList.toggle("signed-out", !authenticated);
+  $("authenticated-content").hidden = !authenticated;
+  $("auth-title").textContent = authenticated ? (state.tenantName || "TQA admin connected") : "Connect your TQA app";
+  $("auth-status").textContent = authenticated
     ? `${state.tenantName || "TQA"} · Admin ${state.connectedTechId}`
     : "Use your Admin ID and password.";
-  $("auth-card").classList.toggle("missing", !state.hasAuth);
-  $("login-form").hidden = state.hasAuth;
-  $("disconnect").hidden = !state.hasAuth;
+  $("auth-card").classList.toggle("missing", !authenticated);
+  $("auth-icon").textContent = authenticated ? "✓" : "→";
+  $("login-form").hidden = authenticated;
+  $("disconnect").hidden = !authenticated;
+  if (authenticated) $("auth-error").hidden = true;
   $("run-state").textContent = runStatus === "running" ? "Uploading" : runStatus === "needs_review" ? "Needs review" : ["failed", "error"].includes(runStatus) ? "Attention" : "Ready";
   $("run-state").className = `state-pill ${runStatus}`;
   $("total").textContent = String(queue.length);
@@ -30,7 +35,7 @@ function render() {
     : "";
   $("progress").max = Math.max(1, run.total || queue.length);
   $("progress").value = Math.min(run.index || 0, run.total || queue.length || 1);
-  $("start").disabled = !state.hasAuth || run.status === "running" || run.status === "needs_review";
+  $("start").disabled = !authenticated || run.status === "running" || run.status === "needs_review";
   $("stop").disabled = run.status !== "running";
   $("ack-review").hidden = run.status !== "needs_review";
   $("confirm-reviewed").hidden = run.status !== "needs_review" || !run.jobId;
@@ -77,9 +82,19 @@ async function refreshState() {
   render();
 }
 
-async function action(callback) {
-  try { await callback(); await refreshState(); }
-  catch (error) { $("status").textContent = error.message; }
+async function action(callback, errorTarget = "status") {
+  try {
+    const target = $(errorTarget);
+    if (target && errorTarget === "auth-error") target.hidden = true;
+    await callback();
+    await refreshState();
+  } catch (error) {
+    const target = $(errorTarget);
+    if (target) {
+      target.textContent = error.message;
+      target.hidden = false;
+    }
+  }
 }
 
 $("login-form").addEventListener("submit", (event) => {
@@ -90,7 +105,7 @@ $("login-form").addEventListener("submit", (event) => {
     await send("CONNECT", { techId, pin });
     $("admin-pin").value = "";
     await send("REFRESH");
-  });
+  }, "auth-error");
 });
 $("disconnect").addEventListener("click", () => action(() => send("DISCONNECT")));
 
@@ -124,5 +139,10 @@ void (async () => {
   try {
     await refreshState();
     if (state.hasAuth) { await send("REFRESH"); await refreshState(); }
-  } catch (error) { $("status").textContent = error.message; }
+  } catch (error) {
+    await refreshState().catch(() => {});
+    const target = state.hasAuth ? $("status") : $("auth-error");
+    target.textContent = error.message;
+    target.hidden = false;
+  }
 })();

@@ -16,6 +16,7 @@
   --red:#ffc4cd;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;width:760px;min-width:760px;max-height:720px;overflow:auto;background:radial-gradient(circle at 0 0,#1b2b39 0,transparent 42%),var(--page);color:var(--text)}
 body::-webkit-scrollbar,.logs::-webkit-scrollbar{width:8px}
 body::-webkit-scrollbar-thumb,.logs::-webkit-scrollbar-thumb{background:#405362;border-radius:99px;border:2px solid var(--panel)}
@@ -42,6 +43,16 @@ h1{margin:2px 0 0;font-size:24px;line-height:1.15;letter-spacing:-.02em}
 .login-form label{color:var(--muted);font-size:10px;font-weight:700}
 .login-form input{display:block;width:100%;height:42px;margin-top:5px;border:1px solid var(--line);border-radius:10px;background:#101c25;color:var(--text);padding:0 11px;font:13px Arial,Helvetica,sans-serif;outline:none}
 .login-form input:focus{border-color:#8fb0ca;box-shadow:0 0 0 2px #8fb0ca25}
+.auth-error{margin:12px 0 0;padding:10px 12px;border:1px solid #754750;border-radius:10px;background:#3b252c;color:var(--red);font-size:11px;overflow-wrap:anywhere}
+body.signed-out{width:520px;min-width:520px;max-height:560px}
+body.signed-out main{padding:28px}
+body.signed-out .app-header{margin-bottom:22px}
+body.signed-out .connection-dot{background:#8092a0;box-shadow:0 0 0 4px #8092a01c}
+body.signed-out .auth-card{padding:20px}
+body.signed-out .login-form{grid-template-columns:1fr;gap:13px;margin-top:18px;padding-top:18px}
+body.signed-out .login-form label{font-size:11px}
+body.signed-out .login-form input{height:46px;font-size:14px}
+body.signed-out #connect{margin-top:2px}
 button.compact{min-height:34px;padding:6px 10px;font-size:11px}
 .run-card{padding:20px;margin-bottom:22px}
 .panel-heading,.section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}

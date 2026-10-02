@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TQA Catalyst Uploader",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Uploads approved TQA QCs to the matching Catalyst observation.",
   "icons": {
     "16": "icons/icon-16.png",
