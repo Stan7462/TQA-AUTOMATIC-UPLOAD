@@ -734,7 +734,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       </dialog>
       {resetMessage && <p className="qc-reset-status" role="status">{resetMessage}</p>}
       <section className="qc-tech-summary" aria-label="My QC totals">
-        <a className="qc-summary-card qc-summary-rejected" href="/profile?view=rejected" aria-label={`My rejected QCs ${qcCounts?.rejected ?? "loading"}${rejectedDeadlineHours === null ? "" : `, nearest deadline ${rejectedDeadlineHours} hours`}`}><span>My rejected QCs</span><strong>{qcCounts?.rejected ?? "—"}</strong>{rejectedDeadlineHours !== null && <em className="qc-summary-deadline-badge" aria-hidden="true">{rejectedDeadlineHours}</em>}</a>
+        <a className="qc-summary-card qc-summary-rejected" href="/profile?view=rejected" aria-label={`Rejected QCs ${qcCounts?.rejected ?? "loading"}${rejectedDeadlineHours === null ? "" : `, nearest deadline ${rejectedDeadlineHours} hours`}`}><span>Rejected QCs</span><strong>{qcCounts?.rejected ?? "—"}</strong>{rejectedDeadlineHours !== null && <em className="qc-summary-deadline-badge" aria-hidden="true">{rejectedDeadlineHours}</em>}</a>
         <a className="qc-summary-card" href="/profile?view=captured"><span>Captured QCs</span><strong>{qcCounts?.captured ?? "—"}</strong></a>
         <a className="qc-summary-card" href="/profile?view=uploaded"><span>Uploaded to Catalyst</span><strong>{qcCounts?.uploaded ?? "—"}</strong></a>
       </section>
