@@ -21,8 +21,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (status === "rejected" && (typeof reviewNote !== "string" || !reviewNote.trim() || reviewNote.trim().length > 1000)) return Response.json({ error: "Add a rejection note (up to 1,000 characters)." }, { status: 400 });
   try {
     const reviewedAt = Date.now();
+    const correctionDeadlineAt = status === "rejected" ? reviewedAt + 72 * 60 * 60 * 1000 : null;
     const range = fiscalMonthBounds(fiscalMonthKey());
-    const result = await env.DB.prepare("UPDATE qc_submissions SET status = ?, correction_pending = 0, reviewed_at = ?, review_note = ? WHERE tenant_id = ? AND id = ? AND submitted_at >= ? AND submitted_at < ? AND (status = 'pending' OR (status = 'rejected' AND correction_pending = 1))").bind(status, reviewedAt, status === "rejected" ? (reviewNote as string).trim() : null, user!.tenantId, id, range.start, range.end).run();
+    const result = await env.DB.prepare("UPDATE qc_submissions SET status = ?, correction_pending = 0, reviewed_at = ?, correction_deadline_at = ?, review_note = ? WHERE tenant_id = ? AND id = ? AND submitted_at >= ? AND submitted_at < ? AND (status = 'pending' OR (status = 'rejected' AND correction_pending = 1))").bind(status, reviewedAt, correctionDeadlineAt, status === "rejected" ? (reviewNote as string).trim() : null, user!.tenantId, id, range.start, range.end).run();
     if (!result.meta.changes) return Response.json({ error: "This QC is in view-only history." }, { status: 409 });
     return Response.json({ id, status, reviewedAt }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

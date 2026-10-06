@@ -14,7 +14,7 @@ const requiredColumns = {
   technicians: ["tech_id", "pin_salt", "pin_hash", "pin_ciphertext", "active", "failed_attempts", "locked_until", "created_at"],
   tech_sessions: ["token_hash", "tech_id", "expires_at", "created_at"],
   technician_removals: ["tech_id", "state", "started_at"],
-  qc_submissions: ["id", "tech_id", "job_number", "screenshot_id", "photo_ids", "status", "submitted_at", "reviewed_at", "review_note", "trust_upload_status", "trust_uploaded_at", "trust_external_reference", "trust_upload_error", "trust_upload_attempts", "trust_last_attempt_at", "trust_uploaded_by_key_id"],
+  qc_submissions: ["id", "tech_id", "job_number", "screenshot_id", "photo_ids", "status", "submitted_at", "reviewed_at", "correction_deadline_at", "review_note", "trust_upload_status", "trust_uploaded_at", "trust_external_reference", "trust_upload_error", "trust_upload_attempts", "trust_last_attempt_at", "trust_uploaded_by_key_id"],
   qc_upload_photos: ["submission_id", "tech_id", "slot", "image", "created_at"],
   trust_api_keys: ["id", "label", "token_hash", "token_hint", "created_at", "last_used_at", "revoked_at"],
 };
@@ -90,4 +90,5 @@ reconcileRuntimeMigration("0010_admin_first_login.sql", "20260930010000_admin_fi
 reconcileRuntimeMigration("0011_global_login_id_unique.sql", "20260930020000_global_login_id_unique", "technicians", [], ["technicians_admin_credential_fingerprint_key", "technicians_tech_login_key"]);
 reconcileRuntimeMigration("0012_company_scoped_technicians.sql", "20260930030000_company_scoped_technicians", "technicians", [], ["idx_technicians_global_tech_id", "technicians_admin_credential_fingerprint_key", "technicians_tech_login_key"]);
 reconcileRuntimeMigration("0013_qc_attempts.sql", "20261005000000_qc_attempts", "qc_submissions", ["root_submission_id", "attempt_number", "correction_pending"], ["idx_qc_submissions_tenant_corrections"]);
+reconcileRuntimeMigration("0014_rejection_deadline.sql", "20261005010000_rejection_deadline", "qc_submissions", ["correction_deadline_at"]);
 runPrisma("migrate", "deploy");

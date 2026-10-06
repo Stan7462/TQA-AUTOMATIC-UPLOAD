@@ -33,6 +33,7 @@ export const qcSubmissions = sqliteTable("qc_submissions", {
   status: text("status").notNull().default("pending"),
   submittedAt: integer("submitted_at").notNull(),
   reviewedAt: integer("reviewed_at"),
+  correctionDeadlineAt: integer("correction_deadline_at"),
   reviewNote: text("review_note"),
   trustUploadStatus: text("trust_upload_status").notNull().default("ready"),
   trustUploadedAt: integer("trust_uploaded_at"),

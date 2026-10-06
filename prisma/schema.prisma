@@ -69,6 +69,7 @@ model QcSubmission {
   rootSubmissionId       String? @map("root_submission_id")
   attemptNumber          Int     @default(1) @map("attempt_number")
   correctionPending      Int     @default(0) @map("correction_pending")
+  correctionDeadlineAt   BigInt? @map("correction_deadline_at")
 
   @@index([status, submittedAt], map: "idx_qc_submissions_status_submitted")
   @@index([techId, submittedAt], map: "idx_qc_submissions_tech_submitted")

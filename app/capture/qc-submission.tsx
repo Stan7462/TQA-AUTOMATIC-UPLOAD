@@ -13,7 +13,11 @@ const MAX_LIVE_PHOTO_BYTES = 200 * 1024;
 const MAX_PHOTOS = 7;
 const MONTHLY_QC_GOAL = 5;
 const MAX_CAMERA_ZOOM = 5;
-type QcCounts = { captured: number; uploaded: number; rejected: number };
+type QcCounts = { captured: number; uploaded: number; rejected: number; urgentRejectedAt: number | null };
+
+function remainingDeadlineHours(deadlineAt: number, now: number) {
+  return Math.max(0, Math.ceil((deadlineAt - now) / (60 * 60 * 1000)));
+}
 
 function drawCaptureTimestamp(context: CanvasRenderingContext2D, width: number, height: number, takenAt: Date) {
   const date = `${takenAt.getMonth() + 1}/${takenAt.getDate()}/${String(takenAt.getFullYear()).slice(-2)}`;
@@ -395,7 +399,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         const response = await fetch(`/api/profile?count=1&start=${currentMonth.start}&end=${currentMonth.end}`, { cache: "no-store", signal: current.signal });
         if (!response.ok) throw new Error("Could not load QC counts.");
         const result = await response.json() as { techId: string } & QcCounts;
-        if (!current.signal.aborted && result.techId === techId) setQcCounts({ captured: result.captured, uploaded: result.uploaded, rejected: result.rejected });
+        if (!current.signal.aborted && result.techId === techId) setQcCounts({ captured: result.captured, uploaded: result.uploaded, rejected: result.rejected, urgentRejectedAt: result.urgentRejectedAt });
       } catch {
         if (!current.signal.aborted) setQcCounts(null);
       }
@@ -413,6 +417,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const month = today ? fiscalMonthKey(today) : null;
   const approvedQcs = progress?.techId === techId && progress.month === month ? progress.approved : null;
   const remainingQcs = approvedQcs === null ? null : Math.max(0, MONTHLY_QC_GOAL - approvedQcs);
+  const rejectedDeadlineHours = qcCounts?.urgentRejectedAt && today ? remainingDeadlineHours(qcCounts.urgentRejectedAt, today.getTime()) : null;
   const validJobNumber = /^\d{1,6}$/.test(jobNumber);
   const redoNeedsChange = !!draftRef.current?.redoSourceId && !draftRef.current.redoChanged;
   const submitHint = processingScreenshot ? "Reading your screenshot…" : !screenshot ? "Add your account screenshot." : !validJobNumber ? "Check or enter the job number." : taking ? "Finishing your photo…" : cameraOn ? "Close the camera to submit." : redoNeedsChange ? "Change the job number or at least one picture before resubmitting." : "";
@@ -729,7 +734,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       </dialog>
       {resetMessage && <p className="qc-reset-status" role="status">{resetMessage}</p>}
       <section className="qc-tech-summary" aria-label="My QC totals">
-        <a className="qc-summary-card qc-summary-rejected" href="/profile?view=rejected"><FileWarning size={19}/><span>My rejected QCs</span><strong>{qcCounts?.rejected ?? "—"}</strong><ChevronRight size={17}/></a>
+        <a className="qc-summary-card qc-summary-rejected" href="/profile?view=rejected" aria-label={`My rejected QCs ${qcCounts?.rejected ?? "loading"}${rejectedDeadlineHours === null ? "" : `, nearest deadline ${rejectedDeadlineHours} hours`}`}><FileWarning size={19}/><span>My rejected QCs</span><strong>{qcCounts?.rejected ?? "—"}</strong><ChevronRight size={17}/>{rejectedDeadlineHours !== null && <em className="qc-summary-deadline-badge" aria-hidden="true">{rejectedDeadlineHours}</em>}</a>
         <a className="qc-summary-card" href="/profile?view=captured"><span>Captured QCs</span><strong>{qcCounts?.captured ?? "—"}</strong></a>
         <a className="qc-summary-card" href="/profile?view=uploaded"><span>Uploaded to Catalyst</span><strong>{qcCounts?.uploaded ?? "—"}</strong></a>
       </section>
