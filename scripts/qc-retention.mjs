@@ -39,18 +39,19 @@ export function pruneExpiredQcs({ dataDirectory, now = new Date(), logger = cons
     if (!hasQcs) return { deletedQcs, deletedPhotos, cutoff };
 
     while (true) {
-      const rows = database.prepare("SELECT id, screenshot_id, photo_ids FROM qc_submissions WHERE submitted_at < ? ORDER BY submitted_at LIMIT 100").all(cutoff);
+      const rows = database.prepare("SELECT id, COALESCE(root_submission_id, id) AS root_submission_id, screenshot_id, photo_ids FROM qc_submissions WHERE submitted_at < ? ORDER BY submitted_at LIMIT 100").all(cutoff);
       if (!rows.length) break;
 
       const removable = [];
       for (const row of rows) {
-        const ids = photoIds(row);
-        if (!ids) {
+        const archived = database.prepare("SELECT screenshot_id, photo_ids FROM qc_submission_attempts WHERE tenant_id = (SELECT tenant_id FROM qc_submissions WHERE id = ?) AND root_submission_id = ?").all(row.id, row.root_submission_id);
+        const idGroups = [row, ...archived].map(photoIds);
+        if (idGroups.some((ids) => !ids)) {
           logger.error(`Retention skipped QC ${row.id}: invalid photo references.`);
           continue;
         }
         try {
-          for (const id of ids) {
+          for (const id of new Set(idGroups.flat())) {
             const path = join(directory, "captures", id);
             try { unlinkSync(path); deletedPhotos += 1; }
             catch (error) {
@@ -65,8 +66,16 @@ export function pruneExpiredQcs({ dataDirectory, now = new Date(), logger = cons
 
       if (!removable.length) break;
       const placeholders = removable.map(() => "?").join(",");
-      const result = database.prepare(`DELETE FROM qc_submissions WHERE submitted_at < ? AND id IN (${placeholders})`).run(cutoff, ...removable);
-      deletedQcs += Number(result.changes);
+      database.exec("BEGIN");
+      try {
+        database.prepare(`DELETE FROM qc_submission_attempts WHERE root_submission_id IN (SELECT COALESCE(root_submission_id, id) FROM qc_submissions WHERE submitted_at < ? AND id IN (${placeholders}))`).run(cutoff, ...removable);
+        const result = database.prepare(`DELETE FROM qc_submissions WHERE submitted_at < ? AND id IN (${placeholders})`).run(cutoff, ...removable);
+        deletedQcs += Number(result.changes);
+        database.exec("COMMIT");
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
     }
   } finally {
     database.close();

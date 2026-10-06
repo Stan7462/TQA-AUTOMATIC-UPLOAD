@@ -89,4 +89,5 @@ reconcileRuntimeMigration("0009_shared_domain_login.sql", "20260930000000_shared
 reconcileRuntimeMigration("0010_admin_first_login.sql", "20260930010000_admin_first_login", "technicians", ["must_change_credentials", "credential_fingerprint"]);
 reconcileRuntimeMigration("0011_global_login_id_unique.sql", "20260930020000_global_login_id_unique", "technicians", [], ["technicians_admin_credential_fingerprint_key", "technicians_tech_login_key"]);
 reconcileRuntimeMigration("0012_company_scoped_technicians.sql", "20260930030000_company_scoped_technicians", "technicians", [], ["idx_technicians_global_tech_id", "technicians_admin_credential_fingerprint_key", "technicians_tech_login_key"]);
+reconcileRuntimeMigration("0013_qc_attempts.sql", "20261005000000_qc_attempts", "qc_submissions", ["root_submission_id", "attempt_number", "correction_pending"], ["idx_qc_submissions_tenant_corrections"]);
 runPrisma("migrate", "deploy");

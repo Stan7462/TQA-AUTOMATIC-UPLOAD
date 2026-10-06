@@ -22,7 +22,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const reviewedAt = Date.now();
     const range = fiscalMonthBounds(fiscalMonthKey());
-    const result = await env.DB.prepare("UPDATE qc_submissions SET status = ?, reviewed_at = ?, review_note = ? WHERE tenant_id = ? AND id = ? AND submitted_at >= ? AND submitted_at < ?").bind(status, reviewedAt, status === "rejected" ? (reviewNote as string).trim() : null, user!.tenantId, id, range.start, range.end).run();
+    const result = await env.DB.prepare("UPDATE qc_submissions SET status = ?, correction_pending = 0, reviewed_at = ?, review_note = ? WHERE tenant_id = ? AND id = ? AND submitted_at >= ? AND submitted_at < ? AND (status = 'pending' OR (status = 'rejected' AND correction_pending = 1))").bind(status, reviewedAt, status === "rejected" ? (reviewNote as string).trim() : null, user!.tenantId, id, range.start, range.end).run();
     if (!result.meta.changes) return Response.json({ error: "This QC is in view-only history." }, { status: 409 });
     return Response.json({ id, status, reviewedAt }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

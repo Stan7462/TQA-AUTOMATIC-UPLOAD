@@ -247,6 +247,8 @@ body:has(.qc-dark-shell){background:#080e12}
 .profile-view-links a{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:52px;padding:10px 15px;border:1px solid #405361;border-radius:14px;background:#1b2934;color:#dce8f1;text-decoration:none;font-size:14px;font-weight:700}
 .profile-view-links a:hover,.profile-view-links a.active{background:#29404d;border-color:#6b8798;color:#fff}
 .profile-view-links strong{font-size:18px}
+.profile-tab-values{display:inline-flex;align-items:center;gap:7px}.profile-urgent-badge{display:inline-grid;place-items:center;min-width:34px;height:24px;padding:0 7px;border:2px solid #782d39;border-radius:999px;background:#dd4e60;color:#fff;font-size:11px;font-style:normal;font-weight:850;line-height:1;box-shadow:0 3px 9px #0005}.profile-urgent-badge.overdue{background:#b92237;border-color:#ff7e8e}
+.profile-deadline-banner{padding:15px 17px;border:1px solid #a84b59;border-radius:14px;background:linear-gradient(145deg,#49252c,#392229);color:#ffdbe0;box-shadow:inset 0 1px #ffffff15}.profile-deadline-banner strong{display:block;margin-bottom:5px;color:#fff;font-size:16px}.profile-deadline-banner p{margin:0;font-size:13px;line-height:1.45}.profile-deadline-banner b{color:#fff}
 .profile-dark{--profile-page:#0b141b;--profile-panel:#17232d;--profile-raised:#21303b;--profile-input:#25343f;--profile-line:#405362;--profile-text:#f2f6fb;--profile-muted:#b5c4d0;min-height:100vh;background:radial-gradient(circle at 0% 0%,#1b2b39 0%,transparent 31%),var(--profile-page);color:var(--profile-text);color-scheme:dark}
 body:has(.profile-dark){background:#0b141b}
 .profile-dark .management-head .kicker{color:#b7c8d7;letter-spacing:.27em}
@@ -484,6 +486,8 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 /* The five overview cards filter the QC queue in place. */
 .status-metrics,.admin-dark .status-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
 .status-metric{width:100%;font:inherit;text-align:left;cursor:pointer}
+.status-metric{position:relative}.status-metric-notification{position:absolute;top:-9px;right:-9px;display:grid!important;place-items:center;min-width:25px;height:25px;padding:0 7px;border:2px solid #0b1821;border-radius:999px;background:#ff5c6b;color:#fff!important;font-size:12px!important;font-weight:850!important;line-height:1;box-shadow:0 3px 10px #0007}
+.qc-status.correction-ready{background:#5b2630;color:#ffd0d5;border:1px solid #a94c5b}
 .status-metric.active{border-color:#718ca0;box-shadow:0 5px 18px #12344b1f}
 .admin-dark .status-metric.active{background:linear-gradient(145deg,#2a4050,#223441);border-color:#718ca0;box-shadow:inset 0 1px #ffffff24,0 8px 24px #0004}
 .admin-dark .status-metric:focus-visible{outline:3px solid #d8e9ff;outline-offset:3px}
@@ -572,6 +576,7 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .profile-qc-row{padding:14px 18px;background:linear-gradient(145deg,#1e2c37,#17232d);border:1px solid #405362;border-radius:16px;min-width:0}
 .profile-qc-toggle{display:flex;align-items:center;gap:14px;width:100%;padding:0 0 12px;border:0;background:transparent;color:#f2f6fb;cursor:pointer;text-align:left;font:inherit}
 .profile-qc-toggle>span:first-child{display:grid;gap:5px;margin-right:auto}
+.profile-qc-state{display:flex;align-items:flex-end;flex-direction:column;gap:6px}.qc-deadline{display:inline-flex;align-items:center;justify-content:center;min-height:25px;padding:4px 9px;border:1px solid #d35e6d;border-radius:999px;background:#552a32;color:#ffc0c8;font-size:11px;font-weight:850;white-space:nowrap}.qc-deadline.overdue{background:#7b2633;border-color:#ff7c8d;color:#fff}
 .profile-qc-toggle small{font-size:12px;color:#b5c4d0}
 .profile-qc-toggle[aria-expanded=true]>svg{transform:rotate(180deg)}
 .profile-qc-row .qc-record-photos{max-width:100%;justify-content:flex-start}
@@ -637,6 +642,7 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .qc-focus-heading h3{margin:0 0 5px;color:#f2f6fb;font-size:20px}
 .qc-focus-heading p{margin:0;color:#aebfcb;font-size:12px;line-height:1.45}
 .qc-focus-facts{display:grid;gap:9px;margin:0;padding:13px 0;border-top:1px solid #405362;border-bottom:1px solid #405362}
+.qc-attempt-tabs{display:flex;gap:7px;overflow-x:auto;padding:2px}.qc-attempt-tabs button{flex:none;padding:8px 10px;border:1px solid #4b6171;border-radius:9px;background:#223541;color:#b8c9d4;font:inherit;font-size:12px;font-weight:750;cursor:pointer}.qc-attempt-tabs button.active{background:#d8e9ff;border-color:#d8e9ff;color:#102534}
 .qc-focus-facts>div{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
 .qc-focus-facts dt{color:#aebfcb;font-size:12px}
 .qc-focus-facts dd{margin:0;color:#f2f6fb;font-size:12px;font-weight:700;text-align:right}

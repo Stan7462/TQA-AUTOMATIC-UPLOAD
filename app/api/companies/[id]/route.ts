@@ -42,9 +42,12 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   if (typeof body?.confirmation !== "string" || body.confirmation.trim() !== company.name) return Response.json({ error: "Type the complete company name to confirm deletion." }, { status: 400 });
 
   try {
-    const rows = await env.DB.prepare("SELECT screenshot_id AS screenshotId, photo_ids AS photoIds FROM qc_submissions WHERE tenant_id=?").bind(id).all<{ screenshotId: string; photoIds: string }>();
+    const [currentRows, attemptRows] = await Promise.all([
+      env.DB.prepare("SELECT screenshot_id AS screenshotId, photo_ids AS photoIds FROM qc_submissions WHERE tenant_id=?").bind(id).all<{ screenshotId: string; photoIds: string }>(),
+      env.DB.prepare("SELECT screenshot_id AS screenshotId, photo_ids AS photoIds FROM qc_submission_attempts WHERE tenant_id=?").bind(id).all<{ screenshotId: string; photoIds: string }>(),
+    ]);
     const photoKeys = new Set<string>();
-    for (const row of rows.results) {
+    for (const row of [...currentRows.results, ...attemptRows.results]) {
       const live = JSON.parse(row.photoIds) as unknown;
       const ids = [row.screenshotId, ...(Array.isArray(live) ? live : [])];
       if (!ids.every((value) => typeof value === "string" && photoIdPattern.test(value))) throw new Error("Company has invalid photo references");
@@ -55,6 +58,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
 
     const results = await env.DB.batch([
       env.DB.prepare("DELETE FROM qc_upload_photos WHERE tenant_id=?").bind(id),
+      env.DB.prepare("DELETE FROM qc_submission_attempts WHERE tenant_id=?").bind(id),
       env.DB.prepare("DELETE FROM qc_submissions WHERE tenant_id=?").bind(id),
       env.DB.prepare("DELETE FROM trust_api_keys WHERE tenant_id=?").bind(id),
       env.DB.prepare("DELETE FROM technician_removals WHERE tenant_id=?").bind(id),
@@ -63,7 +67,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       env.DB.prepare("DELETE FROM tenant_domains WHERE tenant_id=?").bind(id),
       env.DB.prepare("DELETE FROM tenants WHERE id=?").bind(id),
     ]);
-    if (!results[7].meta.changes) return Response.json({ error: "Company not found." }, { status: 404 });
+    if (!results[8].meta.changes) return Response.json({ error: "Company not found." }, { status: 404 });
     return Response.json({ deleted: true, id, deletedPictures: keys.length }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Company deletion failed", error);

@@ -11,6 +11,7 @@ const MAX_LIVE_PHOTO_BYTES = 200 * 1024;
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 const PAGE_SIZE = 25;
 const statuses = new Set(["all", "pending", "approved", "rejected"]);
+type ArchivedAttemptRow = { id: string; attemptNumber: number; techId: string; jobNumber: string; screenshotId: string; photoIds: string; status: string; submittedAt: number; reviewedAt: number | null; reviewNote: string | null; trustUploadStatus: string; locationStatus: string | null; locationLatitude: number | null; locationLongitude: number | null; locationAccuracy: number | null; locationCapturedAt: number | null };
 
 function validJpeg(file: FormDataEntryValue | null, maxBytes: number): file is File {
   return file instanceof File && file.type === "image/jpeg" && file.size >= 500 && file.size <= maxBytes;
@@ -72,8 +73,8 @@ export async function POST(request: Request) {
       uploaded.push(key);
     }
     const inserted = await env.DB.prepare(
-      "INSERT INTO qc_submissions (id, tenant_id, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at) SELECT ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM technician_removals WHERE tenant_id = ? AND tech_id = ?)"
-    ).bind(submissionId, session.tenantId, techId, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, location?.status ?? "unavailable", location?.status === "verified" ? location.latitude : null, location?.status === "verified" ? location.longitude : null, location?.status === "verified" ? location.accuracy : null, location?.capturedAt ?? now, session.tenantId, techId).run();
+      "INSERT INTO qc_submissions (id, tenant_id, root_submission_id, attempt_number, correction_pending, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at) SELECT ?, ?, ?, 1, 0, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM technician_removals WHERE tenant_id = ? AND tech_id = ?)"
+    ).bind(submissionId, session.tenantId, submissionId, techId, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, location?.status ?? "unavailable", location?.status === "verified" ? location.latitude : null, location?.status === "verified" ? location.longitude : null, location?.status === "verified" ? location.accuracy : null, location?.capturedAt ?? now, session.tenantId, techId).run();
     if (!inserted.meta.changes) throw new Error("removed-technician");
     return Response.json({ id: submissionId, status: "pending" }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
@@ -110,20 +111,26 @@ export async function GET(request: Request) {
     if (hasRange) { conditions.push("submitted_at >= ? AND submitted_at < ?"); bindings.push(start, end); }
     if (match) { conditions.push("(submitted_at < ? OR (submitted_at = ? AND id < ?))"); bindings.push(Number(match[1]), Number(match[1]), match[2]); }
     const where = conditions.length ? " WHERE " + conditions.join(" AND ") : "";
-    const query = env.DB.prepare("SELECT id, tech_id AS techId, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, status, submitted_at AS submittedAt, reviewed_at AS reviewedAt, review_note AS reviewNote, trust_upload_status AS trustUploadStatus, trust_uploaded_at AS trustUploadedAt, trust_external_reference AS trustExternalReference, trust_upload_error AS trustUploadError, location_status AS locationStatus, location_latitude AS locationLatitude, location_longitude AS locationLongitude, location_accuracy AS locationAccuracy, location_captured_at AS locationCapturedAt FROM qc_submissions" + where + " ORDER BY submitted_at DESC, id DESC LIMIT ?").bind(...bindings, pageSize + 1);
-    const [result, totals] = await Promise.all([
+    const query = env.DB.prepare("SELECT id, COALESCE(root_submission_id, id) AS rootSubmissionId, attempt_number AS attemptNumber, correction_pending AS correctionPending, tech_id AS techId, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, status, submitted_at AS submittedAt, reviewed_at AS reviewedAt, review_note AS reviewNote, trust_upload_status AS trustUploadStatus, trust_uploaded_at AS trustUploadedAt, trust_external_reference AS trustExternalReference, trust_upload_error AS trustUploadError, location_status AS locationStatus, location_latitude AS locationLatitude, location_longitude AS locationLongitude, location_accuracy AS locationAccuracy, location_captured_at AS locationCapturedAt FROM qc_submissions" + where + " ORDER BY submitted_at DESC, id DESC LIMIT ?").bind(...bindings, pageSize + 1);
+    const attemptsQuery = selectedId
+      ? env.DB.prepare("SELECT submission_id AS id, attempt_number AS attemptNumber, tech_id AS techId, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, status, submitted_at AS submittedAt, reviewed_at AS reviewedAt, review_note AS reviewNote, trust_upload_status AS trustUploadStatus, location_status AS locationStatus, location_latitude AS locationLatitude, location_longitude AS locationLongitude, location_accuracy AS locationAccuracy, location_captured_at AS locationCapturedAt FROM qc_submission_attempts WHERE tenant_id = ? AND root_submission_id = (SELECT COALESCE(root_submission_id, id) FROM qc_submissions WHERE tenant_id = ? AND id = ?) ORDER BY attempt_number").bind(user!.tenantId, user!.tenantId, selectedId)
+      : null;
+    const [result, totals, attempts] = await Promise.all([
       query.all(),
-      env.DB.prepare("SELECT status, trust_upload_status AS trustUploadStatus, COUNT(*) AS total FROM qc_submissions WHERE tenant_id = ?" + (hasRange ? " AND submitted_at >= ? AND submitted_at < ?" : "") + " GROUP BY status, trust_upload_status").bind(user!.tenantId, ...(hasRange ? [start, end] : [])).all<{ status: string; trustUploadStatus: string; total: number }>(),
+      env.DB.prepare("SELECT status, trust_upload_status AS trustUploadStatus, correction_pending AS correctionPending, COUNT(*) AS total FROM qc_submissions WHERE tenant_id = ?" + (hasRange ? " AND submitted_at >= ? AND submitted_at < ?" : "") + " GROUP BY status, trust_upload_status, correction_pending").bind(user!.tenantId, ...(hasRange ? [start, end] : [])).all<{ status: string; trustUploadStatus: string; correctionPending: number; total: number }>(),
+      attemptsQuery ? attemptsQuery.all<ArchivedAttemptRow>() : Promise.resolve({ results: [] as ArchivedAttemptRow[] }),
     ]);
-    const counts = { pending: 0, approved: 0, uploaded: 0, rejected: 0 };
+    const counts = { pending: 0, approved: 0, uploaded: 0, rejected: 0, corrected: 0 };
     for (const row of totals.results) {
       if (row.status === "pending" || row.status === "approved" || row.status === "rejected") counts[row.status] += row.total;
       if (row.status === "approved" && row.trustUploadStatus === "uploaded") counts.uploaded += row.total;
+      if (row.status === "rejected" && row.correctionPending === 1) counts.corrected += row.total;
     }
     const rows = result.results as Array<{ id: string; techId: string; screenshotId: string; photoIds: string; status: string; submittedAt: number; reviewedAt: number | null }>;
     const page = rows.slice(0, pageSize);
     const last = page.at(-1);
-    return Response.json({ submissions: page.map((row) => ({ ...row, photoIds: JSON.parse(row.photoIds) as string[] })), nextCursor: rows.length > pageSize && last ? `${last.submittedAt}:${last.id}` : null, counts }, { headers: { "Cache-Control": "private, no-store" } });
+    const previousAttempts = attempts.results.map((row) => ({ ...row, photoIds: JSON.parse(row.photoIds) as string[] }));
+    return Response.json({ submissions: page.map((row) => ({ ...row, photoIds: JSON.parse(row.photoIds) as string[], previousAttempts: selectedId ? previousAttempts : undefined })), nextCursor: rows.length > pageSize && last ? `${last.submittedAt}:${last.id}` : null, counts }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     console.error("QC list failed", error);
     return Response.json({ error: "Could not load QC submissions" }, { status: 503 });
