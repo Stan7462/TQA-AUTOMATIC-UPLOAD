@@ -120,7 +120,7 @@ export default function Home() {
   }, []);
   useEffect(()=>{const controller=new AbortController();void load(controller.signal);return ()=>controller.abort();},[load]);
   useAutoRefresh(load);
-  const matches = (q: Qc, status: string) => status === 'all' ||
+  const matches = (q: Qc, status: string) => status === 'all' ? q.correctionPending !== 1 :
     (status === 'uploaded' ? q.status === 'approved' && q.trustUploadStatus === 'uploaded' :
       status === 'approved' ? q.status === 'approved' && q.trustUploadStatus !== 'uploaded' :
         q.status === status);

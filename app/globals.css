@@ -486,7 +486,7 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .status-metrics,.admin-dark .status-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
 .status-metric{width:100%;font:inherit;text-align:left;cursor:pointer}
 .status-metric{position:relative}.status-metric-notification{position:absolute;top:-9px;right:-9px;display:grid!important;place-items:center;min-width:25px;height:25px;padding:0 7px;border:2px solid #0b1821;border-radius:999px;background:#ff5c6b;color:#fff!important;font-size:12px!important;font-weight:850!important;line-height:1;box-shadow:0 3px 10px #0007}
-.qc-status.correction-ready{background:#5b2630;color:#ffd0d5;border:1px solid #a94c5b}
+.qc-status.correction-ready,.admin-dark .qc-status.correction-ready,.profile-dark .qc-status.correction-ready{background:#21483e;color:#a6ecd3;border:1px solid #3d8a72}
 .status-metric.active{border-color:#718ca0;box-shadow:0 5px 18px #12344b1f}
 .admin-dark .status-metric.active{background:linear-gradient(145deg,#2a4050,#223441);border-color:#718ca0;box-shadow:inset 0 1px #ffffff24,0 8px 24px #0004}
 .admin-dark .status-metric:focus-visible{outline:3px solid #d8e9ff;outline-offset:3px}
