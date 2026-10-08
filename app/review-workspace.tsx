@@ -7,10 +7,16 @@ import { useQcFilters } from "@/lib/use-qc-filters";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
-type Qc = { id: string; techId: string; jobNumber: string; status: string; trustUploadStatus: string; submittedAt: number; photoIds: string[]; attemptNumber: number; correctionPending: number };
+type Qc = { id: string; techId: string; jobNumber: string; status: string; trustUploadStatus: string; submittedAt: number; correctionDeadlineAt: number | null; photoIds: string[]; attemptNumber: number; correctionPending: number };
 type SnapshotStat = { techId: string; uploaded: number };
 const statuses = [["pending", "Needs review"], ["all", "All records"], ["approved", "Approved"], ["uploaded", "Uploaded to Catalyst"], ["rejected", "Rejected"]];
 const metricStatuses = statuses.filter(([value]) => value !== "pending");
+function adminDeadline(q: Qc, now: number) {
+  if (q.correctionPending === 1) return { label: "Fixed", state: "ready" };
+  if (!q.correctionDeadlineAt) return { label: "Not set", state: "missing" };
+  const hours = Math.ceil((q.correctionDeadlineAt - now) / (60 * 60 * 1000));
+  return hours > 0 ? { label: `${hours} hours left`, state: "active" } : { label: "Overdue", state: "overdue" };
+}
 
 function snapshotPng(stats: SnapshotStat[], range: { start: number; end: number }) {
   const dense = stats.length > 10;
@@ -89,7 +95,9 @@ export default function Home() {
   const [snapshotError, setSnapshotError] = useState("");
   const [snapshotSharing, setSnapshotSharing] = useState(false);
   const [snapshotShareNote, setSnapshotShareNote] = useState("");
+  const [clock, setClock] = useState(() => Date.now());
   const {filters, setFilters, ready} = useQcFilters("tqa-dashboard-filters", "all", false);
+  useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 60000); return () => window.clearInterval(timer); }, []);
   useEffect(() => {
     if (!ready) return;
     const params = new URLSearchParams(location.search);
@@ -162,7 +170,7 @@ export default function Home() {
     <section className="admin-page-content"><QcFilterBar value={filters} onChange={setFilters} techIds={items.map(q=>q.techId)} currentMonthOnly/>
     {error && <p className="form-error" role="alert">{error} <button className="button light" onClick={()=>void load()}>Retry</button></p>}
     <div className="list-panel"><div className="panel-heading"><h2>{statuses.find(([v])=>v===filters.status)?.[1] || 'All records'}</h2><span>{visible.length} shown</span></div>
-    {loading || !ready ? <p className="no-results">Loading QCs…</p> : visible.length ? <div className="table-wrap"><table className="qc-data-table"><thead><tr><th>Job</th><th>Tech ID</th><th>Submitted</th><th>Status</th><th><span className="sr-only">Open QC</span></th></tr></thead><tbody>{visible.map(q=>{const returnParams=new URLSearchParams({restore:'1',status:filters.status});if(filters.tech)returnParams.set('tech',filters.tech);if(filters.search)returnParams.set('search',filters.search);const detailParams=new URLSearchParams({qc:q.id,return:`/?${returnParams.toString()}`});if(q.correctionPending===1)detailParams.set('fixed','1');else detailParams.set('readonly','1');const destination=`/captures?${detailParams.toString()}`;const open=()=>window.location.assign(destination);return <tr className="qc-clickable-row" key={q.id} role="link" tabIndex={0} aria-label={`Open job ${q.jobNumber}`} onClick={open} onKeyDown={(event)=>{if(event.key==='Enter')open();}}><td><strong>{q.jobNumber}</strong><small>{q.photoIds.length+1} pictures</small></td><td>{q.techId}</td><td>{new Date(q.submittedAt).toLocaleDateString()}<small>{new Date(q.submittedAt).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</small></td><td><span className={`qc-status ${q.status}${q.correctionPending===1?' correction-ready':''}`}>{q.correctionPending===1?`Fixed · Attempt ${q.attemptNumber}`:q.status==='pending'?'Needs review':q.status==='approved'?'Approved':'Rejected'}</span>{q.status==='approved' && <small>{q.trustUploadStatus==='uploaded'?'Uploaded to Catalyst':q.trustUploadStatus==='failed'?'Catalyst upload needs retry':'Ready for Catalyst'}</small>}</td><td><span className="open-row" aria-hidden="true"><ChevronRight size={18}/></span></td></tr>})}</tbody></table></div> : <p className="no-results">{items.length?'No QCs match these filters.':'No QCs submitted yet.'}</p>}
+    {loading || !ready ? <p className="no-results">Loading QCs…</p> : visible.length ? <div className="table-wrap"><table className="qc-data-table"><thead><tr><th>Job</th><th>Tech ID</th><th>Submitted</th><th>Status</th>{filters.status==='rejected'&&<th className="qc-deadline-heading">Time left</th>}<th><span className="sr-only">Open QC</span></th></tr></thead><tbody>{visible.map(q=>{const returnParams=new URLSearchParams({restore:'1',status:filters.status});if(filters.tech)returnParams.set('tech',filters.tech);if(filters.search)returnParams.set('search',filters.search);const detailParams=new URLSearchParams({qc:q.id,return:`/?${returnParams.toString()}`});if(q.correctionPending===1)detailParams.set('fixed','1');else detailParams.set('readonly','1');const destination=`/captures?${detailParams.toString()}`;const open=()=>window.location.assign(destination);const deadline=adminDeadline(q,clock);return <tr className="qc-clickable-row" key={q.id} role="link" tabIndex={0} aria-label={`Open job ${q.jobNumber}`} onClick={open} onKeyDown={(event)=>{if(event.key==='Enter')open();}}><td><strong>{q.jobNumber}</strong><small>{q.photoIds.length+1} pictures</small></td><td>{q.techId}</td><td>{new Date(q.submittedAt).toLocaleDateString()}<small>{new Date(q.submittedAt).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</small></td><td><span className={`qc-status ${q.status}${q.correctionPending===1?' correction-ready':''}`}>{q.correctionPending===1?`Fixed · Attempt ${q.attemptNumber}`:q.status==='pending'?'Needs review':q.status==='approved'?'Approved':'Rejected'}</span>{q.status==='approved' && <small>{q.trustUploadStatus==='uploaded'?'Uploaded to Catalyst':q.trustUploadStatus==='failed'?'Catalyst upload needs retry':'Ready for Catalyst'}</small>}</td>{filters.status==='rejected'&&<td className="qc-deadline-cell"><span className={`qc-admin-deadline ${deadline.state}`}>{deadline.label}</span></td>}<td><span className="open-row" aria-hidden="true"><ChevronRight size={18}/></span></td></tr>})}</tbody></table></div> : <p className="no-results">{items.length?'No QCs match these filters.':'No QCs submitted yet.'}</p>}
     </div></section>
   </AdminShell>;
 }
