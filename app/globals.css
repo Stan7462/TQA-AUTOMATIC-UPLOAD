@@ -773,3 +773,11 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .catalyst-grid td{padding:3px 0;border:0;background:transparent}
 .catalyst-grid th{letter-spacing:normal;text-transform:none;border:0;background:transparent}
 .catalyst-grid tbody tr:hover td{background:transparent}
+
+/* Keep push status attached to its technician, including narrow phone layouts. */
+.tech-identity-line{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px}
+.tech-push-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid;border-radius:999px;font-size:11px;font-weight:700;line-height:1.35;white-space:nowrap}
+.tech-push-dot{width:6px;height:6px;flex:none;border-radius:50%;background:currentColor}
+.tech-push-badge.green{background:#173e31;color:#a5ecc9;border-color:#397e60}
+.tech-push-badge.red{background:#4c2830;color:#ffc1c9;border-color:#a84b5d}
+.tech-push-badge.yellow{background:#413821;color:#ffe2a0;border-color:#9e8140}
