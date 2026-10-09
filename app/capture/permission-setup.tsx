@@ -1,8 +1,8 @@
 "use client";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Camera, MapPin, Bell, Check } from "lucide-react";
 import NotificationSettings from "@/app/notifications/settings";
-import { allPermissionsEnabled, enableCamera, enableLocation, notificationPermission, permissionState, type RequiredPermissions } from "@/lib/required-permissions";
+import { allPermissionsEnabled, cameraPermission, enableCamera, enableLocation, notificationPermission, permissionState, type RequiredPermissions } from "@/lib/required-permissions";
 
 export default function PermissionSetup({ techId, children }: { techId: string; children: ReactNode }) {
   const [permissions, setPermissions] = useState<RequiredPermissions>({ camera: false, location: false, notifications: false });
@@ -11,10 +11,17 @@ export default function PermissionSetup({ techId, children }: { techId: string; 
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const cameraVerified = useRef(false);
+  const refreshing = useRef(false);
   const refresh = useCallback(async () => {
-    const [camera, location, notifications] = await Promise.all([permissionState("camera"), permissionState("geolocation"), notificationPermission().catch(() => false)]);
-    setPermissions(previous => ({ camera: camera === null ? previous.camera : camera === "granted", location: location === null ? previous.location : location === "granted", notifications }));
-    setChecked(true);
+    if (refreshing.current) return;
+    refreshing.current = true;
+    try {
+      const [camera, location, notifications] = await Promise.all([cameraPermission(cameraVerified.current), permissionState("geolocation"), notificationPermission().catch(() => false)]);
+      cameraVerified.current = camera;
+      setPermissions(previous => ({ camera, location: location === null ? previous.location : location === "granted", notifications }));
+      setChecked(true);
+    } finally { refreshing.current = false; }
   }, []);
   useEffect(() => {
     void refresh();
@@ -27,6 +34,7 @@ export default function PermissionSetup({ techId, children }: { techId: string; 
     setBusy(kind); setError("");
     try {
       await (kind === "camera" ? enableCamera() : enableLocation());
+      if (kind === "camera") cameraVerified.current = true;
       setPermissions(previous => ({ ...previous, [kind]: true }));
     } catch { setError(`Could not enable ${kind}. Allow access in your browser or phone settings, then try again.${kind === "location" ? " Make sure Location Services are on and try where GPS is available." : ""}`); }
     finally { setBusy(""); }

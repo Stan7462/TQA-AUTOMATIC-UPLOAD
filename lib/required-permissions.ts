@@ -13,8 +13,35 @@ export async function permissionState(name: string): Promise<PermissionState | n
 }
 
 export async function enableCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
-  stream.getTracks().forEach(track => track.stop());
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+    stream.getTracks().forEach(track => track.stop());
+    rememberCameraSetup(true);
+  } catch (error) {
+    rememberCameraSetup(false);
+    throw error;
+  }
+}
+
+const cameraSetupKey = "tqa.camera-setup.v1";
+function rememberCameraSetup(enabled: boolean) {
+  try {
+    if (enabled) localStorage.setItem(cameraSetupKey, "enabled");
+    else localStorage.removeItem(cameraSetupKey);
+  } catch { /* Access still works when browser storage is unavailable. */ }
+}
+
+export async function cameraPermission(alreadyVerified = false): Promise<boolean> {
+  const state = await permissionState("camera");
+  if (state === "granted") { rememberCameraSetup(true); return true; }
+  if (state === "denied") { rememberCameraSetup(false); return false; }
+  // Safari may report prompt or not support camera queries even after access
+  // succeeded. Revalidate remembered setup with the real camera on reopening.
+  if (alreadyVerified) return true;
+  try { if (localStorage.getItem(cameraSetupKey) !== "enabled") return false; }
+  catch { return false; }
+  try { await enableCamera(); return true; }
+  catch { return false; }
 }
 
 export async function enableLocation() {
