@@ -17,7 +17,8 @@ export async function importSqlite(source,client) {
   for(const table of tables) {
     const columns=source.prepare(`PRAGMA table_info("${table}")`).all().map(r=>r.name);
     const target=(await client.query('SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=$1',[table])).rows.map(r=>r.column_name);
-    if(columns.length!==target.length || columns.some(c=>!target.includes(c))) throw new Error(`Column mismatch for ${table}`);
+    const extras={push_accounts:['supervisor_summary','escalation','device_status','device_checked_at'],push_watches:['upload_enabled','fixed_enabled']};
+    if(columns.some(c=>!target.includes(c)) || target.some(c=>!columns.includes(c)&&!extras[table]?.includes(c))) throw new Error(`Column mismatch for ${table}`);
     const rows=source.prepare(`SELECT * FROM "${table}"`).all();
     const sql=`INSERT INTO "${table}" (${columns.map(c=>`"${c}"`).join(',')}) VALUES (${columns.map((_,i)=>`$${i+1}`).join(',')})`;
     for(const row of rows) await client.query(sql,columns.map(c=>row[c] instanceof Uint8Array?Buffer.from(row[c]):row[c]));
@@ -27,6 +28,11 @@ export async function importSqlite(source,client) {
     report[table]={count:rows.length,sha256:sourceDigest};
   }
   return report;
+}
+async function upgradeNotifications(client) {
+  if ((await client.query("SELECT 1 FROM tqa_postgres_migrations WHERE version='0002'")).rows.length) return;
+  if (!(await client.query("SELECT 1 FROM information_schema.columns WHERE table_name='push_accounts' AND column_name='supervisor_summary'")).rows.length) await client.query(readFileSync(new URL('../postgres/migrations/0002_notification_summaries.sql',import.meta.url),'utf8'));
+  await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)', ['0002', Date.now(), '{}']);
 }
 export async function migratePostgres() {
   const directory=resolve(process.env.TQA_DATA_DIR || '.tqa-data');
@@ -40,6 +46,7 @@ export async function migratePostgres() {
     if(present.includes('tqa_postgres_migrations')) {
       const applied=(await client.query("SELECT version FROM tqa_postgres_migrations WHERE version='0001'")).rows;
       if(!applied.length) throw new Error('Unrecognized PostgreSQL migration state.');
+      await upgradeNotifications(client);
       await client.query('COMMIT');
       console.log('PostgreSQL schema is current. SQLite is no longer used by the app.');
       return;
@@ -56,9 +63,11 @@ export async function migratePostgres() {
     source.close();
     source=new DatabaseSync(join(backupDirectory,'tqa.sqlite'),{readOnly:true});
     await client.query(readFileSync(new URL('../postgres/migrations/0001_baseline.sql',import.meta.url),'utf8'));
+    if(source.prepare("PRAGMA table_info(push_accounts)").all().some(c=>c.name==='supervisor_summary')) await client.query(readFileSync(new URL('../postgres/migrations/0002_notification_summaries.sql',import.meta.url),'utf8'));
     const report=await importSqlite(source,client);
     await client.query('CREATE TABLE tqa_postgres_migrations(version TEXT PRIMARY KEY, applied_at BIGINT NOT NULL, verification TEXT NOT NULL)');
     await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)',['0001',Date.now(),JSON.stringify(report)]);
+    await upgradeNotifications(client);
     await client.query('COMMIT');
     writeFileSync(join(backupDirectory,'verification.json'),JSON.stringify(report,null,2),{mode:0o600});
     console.log('PostgreSQL migration verified (row counts and SHA-256 of every column):',JSON.stringify(Object.fromEntries(Object.entries(report).map(([t,v])=>[t,v.count]))));

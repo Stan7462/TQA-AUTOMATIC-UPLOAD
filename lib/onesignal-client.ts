@@ -31,3 +31,8 @@ export function loadOneSignal(appId: string): Promise<OneSignalSdk> {
 }
 
 export function pushOriginSupported() { return location.protocol === "https:"; }
+
+export async function reportPushDevice(sdk: OneSignalSdk) {
+  const status=!sdk.Notifications.isPushSupported()?"unsupported":typeof Notification!=="undefined"&&Notification.permission==="denied"?"blocked":sdk.User.PushSubscription.optedIn?"connected":"not_subscribed";
+  await fetch("/api/notifications/device",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})}).catch(()=>undefined);
+}

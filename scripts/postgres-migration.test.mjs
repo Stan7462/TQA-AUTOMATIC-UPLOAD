@@ -18,12 +18,12 @@ test('all SQLite records and binary data preserve exact values in PostgreSQL',as
  const source=new DatabaseSync(join(directory,'source.sqlite')),pg=new PGlite();
  const account=source.prepare('SELECT tenant_id,tech_id FROM technicians LIMIT 1').get();
  source.prepare('INSERT INTO qc_upload_photos(tenant_id,submission_id,tech_id,slot,image,created_at) VALUES(?,?,?,?,?,?)').run(account.tenant_id,'migration-test-binary',account.tech_id,0,new Uint8Array([0,1,127,128,255]),Date.now());
- try {await pg.exec(schema);await pg.exec('BEGIN');const result=await importSqlite(source,pg);assert.equal(Object.keys(result).length,tables.length);await pg.exec('ROLLBACK');}
+ try {await pg.exec(schema);await pg.exec(readFileSync('postgres/migrations/0002_notification_summaries.sql','utf8'));await pg.exec('BEGIN');const result=await importSqlite(source,pg);assert.equal(Object.keys(result).length,tables.length);await pg.exec('ROLLBACK');}
  finally{source.close();await pg.close();rmSync(directory,{recursive:true,force:true});}
 });
 test('PostgreSQL preserves company isolation, login guards, PIN uniqueness and notification logic',async()=>{
  const pg=new PGlite();try{
- await pg.exec(schema);
+ await pg.exec(schema);await pg.exec(readFileSync('postgres/migrations/0002_notification_summaries.sql','utf8'));
  await pg.exec("INSERT INTO tenants(id,name,created_at) VALUES('a','A',1),('b','B',1),('c','C',1)");
  const add=(tenant,id,admin,fingerprint)=>pg.query("INSERT INTO technicians(tenant_id,tech_id,pin_salt,pin_hash,is_admin,credential_fingerprint,created_at) VALUES($1,$2,'salt','hash',$3,$4,1)",[tenant,id,admin,fingerprint]);
  await add('a','1111',0,'pin-a');await add('b','1111',0,'pin-b');
@@ -39,7 +39,7 @@ test('PostgreSQL preserves company isolation, login guards, PIN uniqueness and n
  await pg.query("INSERT INTO push_accounts(tenant_id,tech_id,external_id,enabled,enabled_at) VALUES('a','1111','a-1111',1,$1)",[now-3600000]);
  await pg.query("INSERT INTO qc_submissions(id,tenant_id,tech_id,screenshot_id,photo_ids,job_number,status,submitted_at,reviewed_at,correction_deadline_at) VALUES('q','a','1111','photo','[]','123456','rejected',$1,$1,$2)",[now,now+72*3600000]);
  const sends=[];await processNotifications(db,{now,config:{sendingEnabled:true,apiKey:'test'},send:async e=>sends.push(e)});await processNotifications(db,{now:now+1000,config:{sendingEnabled:true,apiKey:'test'},send:async e=>sends.push(e)});
- assert.equal(sends.length,1);assert.equal(sends[0].message,'Job 123456 needs fixing. You have 72 hours.');
+ assert.equal(sends.length,1);assert.equal(sends[0].message,'Job 123456 rejected. You have 72 hours to fix it.');
  const alias=await db.prepare('SELECT COUNT(*) AS qcCount FROM qc_submissions WHERE tenant_id=?').get('b');assert.equal(alias.qcCount,0);
  }finally{await pg.close();}
 });
@@ -48,7 +48,7 @@ test('all literal API database queries parse against the PostgreSQL schema',asyn
  const {default:ts}=await import('typescript');const {readdirSync}=await import('node:fs');
  function files(dir){return readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?files(`${dir}/${e.name}`):/\.ts$/.test(e.name)?[`${dir}/${e.name}`]:[]);}
  const pg=new PGlite();let checked=0;
- try{await pg.exec(schema);for(const file of [...files('app/api'),...files('lib').filter(f=>!f.endsWith('local-env.ts'))]){
+ try{await pg.exec(schema);await pg.exec(readFileSync('postgres/migrations/0002_notification_summaries.sql','utf8'));for(const file of [...files('app/api'),...files('lib').filter(f=>!f.endsWith('local-env.ts'))]){
  const ast=ts.createSourceFile(file,readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true);
  const queries=[];function visit(n){if(ts.isCallExpression(n)&&ts.isPropertyAccessExpression(n.expression)&&n.expression.name.text==='prepare'&&n.arguments[0]&&(ts.isStringLiteral(n.arguments[0])||ts.isNoSubstitutionTemplateLiteral(n.arguments[0])))queries.push(n.arguments[0].text);ts.forEachChild(n,visit);}visit(ast);
  for(const sql of queries){const text=postgresSql(sql);const parameters=[...text.matchAll(/\$(\d+)/g)].map(m=>Number(m[1]));try{await pg.query(`EXPLAIN ${text}`,Array(Math.max(0,...parameters)).fill(null));checked++;}catch(e){throw new Error(`${file}: ${e.message}\n${text}`);}}

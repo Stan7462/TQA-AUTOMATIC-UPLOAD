@@ -1,4 +1,4 @@
-import { loadOneSignal, pushOriginSupported } from "./onesignal-client";
+import { loadOneSignal, reportPushDevice, pushOriginSupported } from "./onesignal-client";
 
 export type RequiredPermissions = { camera: boolean; location: boolean; notifications: boolean };
 export const allPermissionsEnabled = (value: RequiredPermissions) => value.camera && value.location && value.notifications;
@@ -55,6 +55,7 @@ export async function notificationPermission() {
   if (!response.ok || !config.account || !config.configured || !config.sendingEnabled) return false;
   const sdk = await loadOneSignal(config.appId);
   await sdk.login(config.account.externalId);
+  await reportPushDevice(sdk);
   return Boolean(config.account.enabled && sdk.Notifications.permission && sdk.User.PushSubscription.optedIn);
 }
 

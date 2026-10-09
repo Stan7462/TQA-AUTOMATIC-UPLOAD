@@ -1,6 +1,6 @@
 "use client";
 import { useEffect } from "react";
-import { loadOneSignal, pushOriginSupported } from "@/lib/onesignal-client";
+import { loadOneSignal, reportPushDevice, pushOriginSupported } from "@/lib/onesignal-client";
 
 // Rebind the device after account changes; public login pages detach previous users.
 export default function NotificationSession() {
@@ -15,6 +15,7 @@ export default function NotificationSession() {
       if (cancelled) return;
       if (data.account) {
         await sdk.login(data.account.externalId);
+        await reportPushDevice(sdk);
         if (!data.account.enabled) await sdk.User.PushSubscription.optOut();
       } else {
         await sdk.User.PushSubscription.optOut();
