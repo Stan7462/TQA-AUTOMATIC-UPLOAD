@@ -34,7 +34,7 @@ export default function NotificationSettings({ supervisor, embedded = false }: {
       if (pushOriginSupported()) {
         const service = await loadOneSignal(result.appId);
         await service.login(result.account.externalId);
-        if (active) { setSdk(service); setDeviceEnabled(Boolean(service.User.PushSubscription.optedIn)); }
+        if (active) { setSdk(() => service); setDeviceEnabled(Boolean(service.User.PushSubscription.optedIn)); }
       }
     }
     void load().catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "Could not load notification settings."); });
