@@ -1,0 +1,7 @@
+CREATE TABLE push_company_preferences (
+  tenant_id TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+  rejected INTEGER NOT NULL DEFAULT 1,
+  deadline INTEGER NOT NULL DEFAULT 1,
+  overdue INTEGER NOT NULL DEFAULT 1,
+  monthly INTEGER NOT NULL DEFAULT 1
+);

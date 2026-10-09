@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import PhotoLightbox from "./photo-lightbox";
+import NotificationSession from "./notification-session";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -31,7 +32,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}<PhotoLightbox /></body>
+      <body className="antialiased">{children}<PhotoLightbox /><NotificationSession /></body>
     </html>
   );
 }

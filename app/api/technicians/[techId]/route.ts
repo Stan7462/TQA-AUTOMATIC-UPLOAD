@@ -5,6 +5,25 @@ import { normalizeTechId, sameOrigin } from "@/lib/tech-auth";
 
 export const dynamic = "force-dynamic";
 
+export async function PATCH(request: Request, context: { params: Promise<{ techId: string }> }) {
+  if (!sameOrigin(request)) return Response.json({ error: "Invalid origin" }, { status: 403 });
+  const user = await getChatGPTUser();
+  if (!isOwner(user)) return Response.json({ error: "Forbidden" }, { status: 403 });
+  const techId = normalizeTechId((await context.params).techId);
+  if (!techId) return Response.json({ error: "Invalid Tech ID" }, { status: 400 });
+  const body = await request.json().catch(() => null) as { monthlyGoal?: unknown } | null;
+  const goal = body?.monthlyGoal;
+  if (goal !== null && (typeof goal !== "number" || !Number.isInteger(goal) || goal < 1 || goal > 99)) return Response.json({ error: "Enter a whole number from 1 to 99, or use the company goal." }, { status: 400 });
+  try {
+    const result = await env.DB.prepare("UPDATE technicians SET monthly_qc_goal = ? WHERE tenant_id = ? AND tech_id = ? AND is_admin = 0").bind(goal as number | null, user!.tenantId, techId).run();
+    if (!result.meta.changes) return Response.json({ error: "Technician not found." }, { status: 404 });
+    return Response.json({ monthlyGoal: goal }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("Technician monthly goal update failed", error);
+    return Response.json({ error: "Could not save the monthly goal." }, { status: 503 });
+  }
+}
+
 export async function DELETE(request: Request, context: { params: Promise<{ techId: string }> }) {
   if (!sameOrigin(request)) return Response.json({ error: "Invalid origin" }, { status: 403 });
   const user = await getChatGPTUser();

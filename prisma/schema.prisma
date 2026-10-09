@@ -10,6 +10,7 @@ model Technician {
   pinCiphertext  String?       @map("pin_ciphertext")
   active         Int           @default(1)
   isAdmin        Int           @default(0) @map("is_admin")
+  monthlyQcGoal  Int?          @map("monthly_qc_goal")
   mustSetup      Int           @default(0) @map("must_change_credentials")
   credentialFingerprint String? @map("credential_fingerprint")
   failedAttempts Int           @default(0) @map("failed_attempts")
@@ -136,13 +137,65 @@ model TrustApiKey {
   @@map("trust_api_keys")
 }
 
+model PushCompanyPreferences {
+  tenantId String @id @map("tenant_id")
+  rejected Int @default(1)
+  deadline Int @default(1)
+  overdue Int @default(1)
+  monthly Int @default(1)
+  @@map("push_company_preferences")
+}
+
 model Tenant {
-  id        String @id
-  name      String
-  active    Int    @default(1)
-  createdAt BigInt @map("created_at")
+  id            String @id
+  name          String
+  active        Int    @default(1)
+  monthlyQcGoal Int    @default(5) @map("monthly_qc_goal")
+  createdAt     BigInt @map("created_at")
 
   @@map("tenants")
+}
+
+model PushAccount {
+  tenantId String @map("tenant_id")
+  techId String @map("tech_id")
+  externalId String @unique @map("external_id")
+  enabled Int @default(0)
+  rejected Int @default(1)
+  deadline Int @default(1)
+  overdue Int @default(1)
+  monthly Int @default(1)
+  enabledAt BigInt @default(0) @map("enabled_at")
+  @@id([tenantId, techId])
+  @@map("push_accounts")
+}
+
+model PushWatch {
+  tenantId String @map("tenant_id")
+  supervisorId String @map("supervisor_id")
+  techId String @map("tech_id")
+  enabledAt BigInt @map("enabled_at")
+  @@id([tenantId, supervisorId, techId])
+  @@map("push_watches")
+}
+
+model PushOutbox {
+  id String @id
+  eventKey String @unique @map("event_key")
+  tenantId String @map("tenant_id")
+  techId String @map("tech_id")
+  kind String
+  submissionId String? @map("submission_id")
+  revision BigInt?
+  message String
+  url String
+  expiresAt BigInt @map("expires_at")
+  attempts Int @default(0)
+  nextAttemptAt BigInt @default(0) @map("next_attempt_at")
+  sentAt BigInt? @map("sent_at")
+  lastError String? @map("last_error")
+  @@index([sentAt, nextAttemptAt], map: "idx_push_outbox_due")
+  @@map("push_outbox")
 }
 
 model TenantDomain {

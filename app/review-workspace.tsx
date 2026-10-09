@@ -8,7 +8,7 @@ import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 type Qc = { id: string; techId: string; jobNumber: string; status: string; trustUploadStatus: string; submittedAt: number; correctionDeadlineAt: number | null; photoIds: string[]; attemptNumber: number; correctionPending: number };
-type SnapshotStat = { techId: string; uploaded: number };
+type SnapshotStat = { techId: string; uploaded: number; monthlyGoal: number };
 const statuses = [["pending", "Needs review"], ["all", "All records"], ["approved", "Approved"], ["uploaded", "Uploaded to Catalyst"], ["rejected", "Rejected"]];
 const metricStatuses = statuses.filter(([value]) => value !== "pending");
 function adminDeadline(q: Qc, now: number) {
@@ -18,7 +18,7 @@ function adminDeadline(q: Qc, now: number) {
   return hours > 0 ? { label: `${hours} hours left`, state: "active" } : { label: "Overdue", state: "overdue" };
 }
 
-function snapshotPng(stats: SnapshotStat[], range: { start: number; end: number }) {
+function snapshotPng(stats: SnapshotStat[], range: { start: number; end: number }, monthlyGoal: number) {
   const dense = stats.length > 10;
   const columns = dense ? 2 : 1;
   const rows = Math.max(1, Math.ceil(stats.length / columns));
@@ -74,7 +74,7 @@ function snapshotPng(stats: SnapshotStat[], range: { start: number; end: number 
     context.fillText(String(stat.uploaded), x + columnWidth - 82, y + rowHeight / 2 + 10);
     context.fillStyle = "#bed0dc";
     context.font = `600 ${dense ? 18 : 21}px system-ui, sans-serif`;
-    context.fillText("of 5", x + columnWidth - 20, y + rowHeight / 2 + 9);
+    context.fillText(`of ${stat.monthlyGoal ?? monthlyGoal}`, x + columnWidth - 20, y + rowHeight / 2 + 9);
     context.textAlign = "left";
   });
   context.fillStyle = "#91a7b6";
@@ -91,6 +91,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [snapshotOpen, setSnapshotOpen] = useState(false);
   const [snapshotStats, setSnapshotStats] = useState<SnapshotStat[]>([]);
+  const [snapshotMonthlyGoal, setSnapshotMonthlyGoal] = useState(5);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [snapshotError, setSnapshotError] = useState("");
   const [snapshotSharing, setSnapshotSharing] = useState(false);
@@ -139,16 +140,17 @@ export default function Home() {
     setSnapshotOpen(true); setSnapshotLoading(true); setSnapshotError(""); setSnapshotShareNote("");
     try {
       const response = await fetch(`/api/qc-stats?start=${snapshotRange.start}&end=${snapshotRange.end}`, { cache: "no-store" });
-      const data = await response.json() as { error?: string; technicians?: SnapshotStat[] };
+      const data = await response.json() as { error?: string; technicians?: SnapshotStat[]; monthlyGoal?: number };
       if (!response.ok) throw new Error(data.error || "Could not load Catalyst totals.");
       setSnapshotStats((data.technicians ?? []).sort((a, b) => b.uploaded - a.uploaded || a.techId.localeCompare(b.techId, undefined, { numeric: true })));
+      setSnapshotMonthlyGoal(Number.isInteger(data.monthlyGoal) && (data.monthlyGoal ?? 0) >= 1 && (data.monthlyGoal ?? 0) <= 99 ? data.monthlyGoal! : 5);
     } catch (cause) { setSnapshotError(cause instanceof Error ? cause.message : "Could not load Catalyst totals."); }
     finally { setSnapshotLoading(false); }
   }
   async function shareSnapshot() {
     setSnapshotSharing(true); setSnapshotShareNote("");
     try {
-      const file = snapshotPng(snapshotStats, snapshotRange);
+      const file = snapshotPng(snapshotStats, snapshotRange, snapshotMonthlyGoal);
       if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
         await navigator.share({ title: "Uploaded to Catalyst", text: "Current technician QC progress", files: [file] });
       } else {
@@ -165,7 +167,7 @@ export default function Home() {
   }
   return <AdminShell active="records">
     <section className="intro"><div><h1>All records</h1><p>Review progress and track uploads to Catalyst.</p></div><div className="intro-actions"><button type="button" className="button light" onClick={() => void openSnapshot()}><UsersRound size={18}/>Catalyst snapshot</button><a className="button light" href="/records/approved">Export approved QCs</a></div></section>
-    {snapshotOpen && <div className="qc-confirm-overlay qc-snapshot-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSnapshotOpen(false); }}><section className={`qc-team-snapshot${snapshotStats.length>10?' is-dense':''}`} role="dialog" aria-modal="true" aria-labelledby="qc-snapshot-title"><button type="button" className="qc-snapshot-close" aria-label="Close Catalyst snapshot" onClick={() => setSnapshotOpen(false)}><X size={22}/></button><span className="kicker">TQA AUTOMATIC UPLOAD</span><h2 id="qc-snapshot-title">Uploaded to Catalyst</h2><p className="qc-snapshot-period">{new Date(snapshotRange.start).toLocaleDateString(undefined,{month:"short",day:"numeric"})} – {new Date(snapshotRange.end-1).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})}</p>{snapshotLoading ? <p className="qc-snapshot-empty">Loading totals…</p> : snapshotError ? <p className="form-error" role="alert">{snapshotError}</p> : snapshotStats.length ? <div className="qc-snapshot-table" role="table" aria-label="Technician Catalyst upload progress"><div className="qc-snapshot-table-head" role="row"><span role="columnheader">Technician</span><span role="columnheader">Uploaded</span></div>{snapshotStats.map(stat => <div className="qc-snapshot-row" role="row" key={stat.techId}><strong role="cell">Tech {stat.techId}</strong><span role="cell"><b>{stat.uploaded}</b> of 5</span></div>)}</div> : <p className="qc-snapshot-empty">No active technicians.</p>}<div className="qc-snapshot-footer"><button type="button" className="qc-snapshot-share" disabled={snapshotLoading || !!snapshotError || !snapshotStats.length || snapshotSharing} onClick={() => void shareSnapshot()}><Share2 size={15}/>{snapshotSharing ? "Preparing…" : "Share snapshot"}</button><small>Updated {new Date().toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</small></div>{snapshotShareNote && <p className="qc-snapshot-share-note" role="status">{snapshotShareNote}</p>}</section></div>}
+    {snapshotOpen && <div className="qc-confirm-overlay qc-snapshot-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSnapshotOpen(false); }}><section className={`qc-team-snapshot${snapshotStats.length>10?' is-dense':''}`} role="dialog" aria-modal="true" aria-labelledby="qc-snapshot-title"><button type="button" className="qc-snapshot-close" aria-label="Close Catalyst snapshot" onClick={() => setSnapshotOpen(false)}><X size={22}/></button><span className="kicker">TQA AUTOMATIC UPLOAD</span><h2 id="qc-snapshot-title">Uploaded to Catalyst</h2><p className="qc-snapshot-period">{new Date(snapshotRange.start).toLocaleDateString(undefined,{month:"short",day:"numeric"})} – {new Date(snapshotRange.end-1).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})}</p>{snapshotLoading ? <p className="qc-snapshot-empty">Loading totals…</p> : snapshotError ? <p className="form-error" role="alert">{snapshotError}</p> : snapshotStats.length ? <div className="qc-snapshot-table" role="table" aria-label="Technician Catalyst upload progress"><div className="qc-snapshot-table-head" role="row"><span role="columnheader">Technician</span><span role="columnheader">Uploaded</span></div>{snapshotStats.map(stat => <div className="qc-snapshot-row" role="row" key={stat.techId}><strong role="cell">Tech {stat.techId}</strong><span role="cell"><b>{stat.uploaded}</b> of {stat.monthlyGoal ?? snapshotMonthlyGoal}</span></div>)}</div> : <p className="qc-snapshot-empty">No active technicians.</p>}<div className="qc-snapshot-footer"><button type="button" className="qc-snapshot-share" disabled={snapshotLoading || !!snapshotError || !snapshotStats.length || snapshotSharing} onClick={() => void shareSnapshot()}><Share2 size={15}/>{snapshotSharing ? "Preparing…" : "Share snapshot"}</button><small>Updated {new Date().toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</small></div>{snapshotShareNote && <p className="qc-snapshot-share-note" role="status">{snapshotShareNote}</p>}</section></div>}
     <section className="metrics status-metrics" aria-label="Filter QC records by status">{metricStatuses.map(([value,label]) => { const active = filters.status === value && !filters.tech && !filters.search; const corrected=value==='rejected'?items.filter(q=>q.status==='rejected'&&q.correctionPending===1).length:0; return <button key={value} className={`metric status-metric${active?' active':''}`} aria-pressed={active} onClick={()=>setFilters({month:"",tech:"",status:value,search:""})}><span>{label}</span><strong>{loading ? '—' : items.filter(q=>matches(q,value)).length}</strong>{corrected>0&&<span className="status-metric-notification" aria-label={`${corrected} fixed ${corrected===1?'QC':'QCs'} ready to review`}>{corrected}</span>}</button>; })}</section>
     <section className="admin-page-content"><QcFilterBar value={filters} onChange={setFilters} techIds={items.map(q=>q.techId)} currentMonthOnly/>
     {error && <p className="form-error" role="alert">{error} <button className="button light" onClick={()=>void load()}>Retry</button></p>}

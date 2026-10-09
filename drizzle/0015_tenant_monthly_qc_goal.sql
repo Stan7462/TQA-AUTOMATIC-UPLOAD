@@ -1,0 +1,1 @@
+ALTER TABLE tenants ADD COLUMN monthly_qc_goal INTEGER NOT NULL DEFAULT 5;

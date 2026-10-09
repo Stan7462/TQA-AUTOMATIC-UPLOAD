@@ -91,4 +91,8 @@ reconcileRuntimeMigration("0011_global_login_id_unique.sql", "20260930020000_glo
 reconcileRuntimeMigration("0012_company_scoped_technicians.sql", "20260930030000_company_scoped_technicians", "technicians", [], ["idx_technicians_global_tech_id", "technicians_admin_credential_fingerprint_key", "technicians_tech_login_key"]);
 reconcileRuntimeMigration("0013_qc_attempts.sql", "20261005000000_qc_attempts", "qc_submissions", ["root_submission_id", "attempt_number", "correction_pending"], ["idx_qc_submissions_tenant_corrections"]);
 reconcileRuntimeMigration("0014_rejection_deadline.sql", "20261005010000_rejection_deadline", "qc_submissions", ["correction_deadline_at"]);
+reconcileRuntimeMigration("0015_tenant_monthly_qc_goal.sql", "20261008000000_tenant_monthly_qc_goal", "tenants", ["monthly_qc_goal"]);
+reconcileRuntimeMigration("0016_technician_monthly_qc_goal.sql", "20261008010000_technician_monthly_qc_goal", "technicians", ["monthly_qc_goal"]);
+reconcileRuntimeMigration("0017_push_notifications.sql", "20261008020000_push_notifications", "push_accounts", ["external_id", "enabled"]);
+reconcileRuntimeMigration("0018_company_notification_policy.sql", "20261008030000_company_notification_policy", "push_company_preferences", ["rejected", "deadline", "overdue", "monthly"]);
 runPrisma("migrate", "deploy");

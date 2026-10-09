@@ -11,7 +11,7 @@ const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
 const MAX_SCREENSHOT_OUTPUT_BYTES = 250 * 1024;
 const MAX_LIVE_PHOTO_BYTES = 200 * 1024;
 const MAX_PHOTOS = 7;
-const MONTHLY_QC_GOAL = 5;
+const DEFAULT_MONTHLY_QC_GOAL = 5;
 const MAX_CAMERA_ZOOM = 5;
 type QcCounts = { captured: number; uploaded: number; rejected: number; urgentRejectedAt: number | null };
 
@@ -204,12 +204,12 @@ async function sendQcStep(body: Record<string, unknown>): Promise<void> {
   }
 }
 
-function QcRequirements() {
+function QcRequirements({ monthlyGoal }: { monthlyGoal: number }) {
   return <details className="qc-requirements">
     <summary><FileText size={20}/><span>QC Requirements and rules.</span><ChevronRight className="qc-requirements-chevron" size={19}/></summary>
     <div className="qc-requirements-content">
       <h2>📸 QC PHOTO REQUIREMENTS</h2>
-      <p><strong>Each technician must submit 5 QCs per month.</strong></p>
+      <p><strong>Each technician must submit {monthlyGoal} approved QCs per month.</strong></p>
       <section>
         <h3>🏠 SINGLE DWELLING UNIT — 5 PHOTOS REQUIRED</h3>
         <ol>
@@ -275,7 +275,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [today, setToday] = useState<Date | null>(null);
-  const [progress, setProgress] = useState<{ techId: string; month: string; approved: number } | null>(null);
+  const [progress, setProgress] = useState<{ techId: string; month: string; approved: number; monthlyGoal: number } | null>(null);
   const [progressError, setProgressError] = useState("");
   const [qcCounts, setQcCounts] = useState<QcCounts | null>(null);
   const [flash, setFlash] = useState(0);
@@ -415,8 +415,10 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const deadline = today ? fiscalDeadline(today) : null;
   const validTechId = /^[A-Z0-9_-]{3,32}$/.test(techId);
   const month = today ? fiscalMonthKey(today) : null;
-  const approvedQcs = progress?.techId === techId && progress.month === month ? progress.approved : null;
-  const remainingQcs = approvedQcs === null ? null : Math.max(0, MONTHLY_QC_GOAL - approvedQcs);
+  const hasCurrentProgress = progress?.techId === techId && progress.month === month;
+  const approvedQcs = hasCurrentProgress ? progress.approved : null;
+  const monthlyGoal = hasCurrentProgress ? progress.monthlyGoal : DEFAULT_MONTHLY_QC_GOAL;
+  const remainingQcs = approvedQcs === null ? null : Math.max(0, monthlyGoal - approvedQcs);
   const rejectedDeadlineHours = qcCounts?.urgentRejectedAt && today ? remainingDeadlineHours(qcCounts.urgentRejectedAt, today.getTime()) : null;
   const validJobNumber = /^\d{1,6}$/.test(jobNumber);
   const redoNeedsChange = !!draftRef.current?.redoSourceId && !draftRef.current.redoChanged;
@@ -448,9 +450,10 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       const { start, end } = fiscalMonthBounds(month!);
       try {
         const response = await fetch(`/api/qc-progress?techId=${encodeURIComponent(techId)}&start=${start}&end=${end}`, { cache: "no-store", signal: current.signal });
-        const result = await response.json() as { approved?: number; error?: string };
+        const result = await response.json() as { approved?: number; monthlyGoal?: number; error?: string };
         if (!response.ok) throw new Error(result.error || "Could not load approved QC progress.");
-        if (!current.signal.aborted) { setProgress({ techId, month: month!, approved: result.approved ?? 0 }); setProgressError(""); }
+        const monthlyGoal = Number.isInteger(result.monthlyGoal) && (result.monthlyGoal ?? 0) >= 1 && (result.monthlyGoal ?? 0) <= 99 ? result.monthlyGoal! : DEFAULT_MONTHLY_QC_GOAL;
+        if (!current.signal.aborted) { setProgress({ techId, month: month!, approved: result.approved ?? 0, monthlyGoal }); setProgressError(""); }
       } catch (cause) {
         if (!current.signal.aborted) setProgressError(cause instanceof Error ? cause.message : "Could not load approved QC progress.");
       }
@@ -733,13 +736,14 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         </div>
       </dialog>
       {resetMessage && <p className="qc-reset-status" role="status">{resetMessage}</p>}
+      <a className="profile-link" href="/notifications">Notification settings</a>
       <section className="qc-tech-summary" aria-label="My QC totals">
         <a className="qc-summary-card qc-summary-rejected" href="/profile?view=rejected" aria-label={`Rejected QCs ${qcCounts?.rejected ?? "loading"}${rejectedDeadlineHours === null ? "" : `, nearest deadline ${rejectedDeadlineHours} hours`}`}><span>Rejected QCs</span><strong>{qcCounts?.rejected ?? "—"}</strong>{rejectedDeadlineHours !== null && <em className="qc-summary-deadline-badge" aria-hidden="true">{rejectedDeadlineHours}</em>}</a>
         <a className="qc-summary-card" href="/profile?view=captured"><span>Captured QCs</span><strong>{qcCounts?.captured ?? "—"}</strong></a>
         <a className="qc-summary-card" href="/profile?view=uploaded"><span>Uploaded to Catalyst</span><strong>{qcCounts?.uploaded ?? "—"}</strong></a>
       </section>
       {logoutError && <p className="form-error" role="alert">{logoutError}</p>}
-      <div className="qc-deadline" role="status"><div className="qc-progress-ring" aria-hidden="true" style={{ background: `conic-gradient(#d7e9ff ${approvedQcs === null ? 0 : Math.min(100, approvedQcs / MONTHLY_QC_GOAL * 100)}%, #394b5a 0)` }}/><div className="qc-deadline-message"><strong>{remainingQcs === 0 ? "Monthly goal complete" : deadline ? deadline.daysLeft === 0 ? "Due today" : `${deadline.daysLeft} ${deadline.daysLeft === 1 ? "day" : "days"} left` : "Monthly QC deadline"}</strong><span>{!validTechId ? "Sign in again to see QCs remaining" : progressError ? "Approved QC progress is unavailable. Try again shortly." : remainingQcs === null ? "Checking approved QC progress…" : remainingQcs === 0 ? `${approvedQcs} of 5 approved · 0 remaining` : `${approvedQcs} of 5 approved · ${remainingQcs} remaining`}</span></div><small>Due <b>{deadline ? deadline.date.toLocaleDateString(undefined, { month: "long", day: "numeric" }) : "on the 21st"}</b></small></div>
+      <div className="qc-deadline" role="status"><div className="qc-progress-ring" aria-hidden="true" style={{ background: `conic-gradient(#d7e9ff ${approvedQcs === null ? 0 : Math.min(100, approvedQcs / monthlyGoal * 100)}%, #394b5a 0)` }}/><div className="qc-deadline-message"><strong>{remainingQcs === 0 ? "Monthly goal complete" : deadline ? deadline.daysLeft === 0 ? "Due today" : `${deadline.daysLeft} ${deadline.daysLeft === 1 ? "day" : "days"} left` : "Monthly QC deadline"}</strong><span>{!validTechId ? "Sign in again to see QCs remaining" : progressError ? "Approved QC progress is unavailable. Try again shortly." : remainingQcs === null ? "Checking approved QC progress…" : remainingQcs === 0 ? `${approvedQcs} of ${monthlyGoal} approved · 0 remaining` : `${approvedQcs} of ${monthlyGoal} approved · ${remainingQcs} remaining`}</span></div><small>Due <b>{deadline ? deadline.date.toLocaleDateString(undefined, { month: "long", day: "numeric" }) : "on the 21st"}</b></small></div>
       {submitted ? <div className="qc-success" role="status"><Check size={34}/><h2>Sent for review</h2><p>Your QC was submitted for approval.</p><button className="button dark" onClick={() => setSubmitted(false)}>Start another QC</button></div> : <>
         <div className="qc-step-timeline">
         <section className="qc-step qc-live-step">
@@ -767,7 +771,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         <button aria-describedby={submitHint ? "qc-submit-hint" : undefined} className="button dark qc-submit" onClick={submit} disabled={!ready || busy || taking || processingScreenshot || cameraOn}><Send size={18}/>{busy ? "Submitting…" : "Submit QC for approval"}</button>
         {uploadProgress !== null && <div className="qc-upload-progress" role="status"><div><strong>{uploadLabel}</strong><span>{uploadProgress}%</span></div><progress max={100} value={uploadProgress} aria-label="QC picture upload progress" /></div>}
         <p className="camera-note camera-note-desktop">The account screenshot is the only saved image selected from your phone. QC photos use the live camera. Pictures are optimized for clear details and quick upload. An unfinished QC stays in this browser until you submit it.</p>
-        <QcRequirements />
+        <QcRequirements monthlyGoal={monthlyGoal} />
       </>}
     </div>
   </main>;

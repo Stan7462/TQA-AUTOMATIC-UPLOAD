@@ -4,6 +4,8 @@ const root = resolve(import.meta.dirname, "..");
 process.chdir(root);
 await import("./migrate.mjs");
 await import("./bootstrap-admin.mjs");
+const { startNotificationWorker } = await import("./push-notifications.mjs");
+startNotificationWorker();
 const { pruneExpiredQcs } = await import("./qc-retention.mjs");
 try { pruneExpiredQcs({ dataDirectory: process.env.TQA_DATA_DIR }); }
 catch (error) { console.error("QC retention cleanup failed", error); }
