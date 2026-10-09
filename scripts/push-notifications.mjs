@@ -108,10 +108,12 @@ export async function notificationStillRelevant(db,event,now){
 }
 
 export async function sendNotification(event, account, config) {
+  if (!account.is_admin && !account.active_subscription_id) throw new Error("Technician must select an active notification phone.");
+  const target = account.is_admin ? {include_aliases: {external_id: [account.external_id]}} : {include_subscription_ids: [account.active_subscription_id]};
   const response = await fetch("https://api.onesignal.com/notifications", {
     method: "POST", signal: AbortSignal.timeout(10000),
     headers: { "Content-Type": "application/json", Authorization: `Key ${config.apiKey}` },
-    body: JSON.stringify({ app_id: config.appId, include_aliases: { external_id: [account.external_id] }, target_channel: "push", headings: { en: "TQA QC notifications" }, contents: { en: event.message }, url: new URL(event.url, config.origin).href, idempotency_key: event.id, ttl: Math.max(0, Math.min(86400, Math.floor((event.expires_at - Date.now()) / 1000))) }),
+    body: JSON.stringify({ app_id: config.appId, ...target, target_channel: "push", headings: { en: "TQA QC notifications" }, contents: { en: event.message }, url: new URL(event.url, config.origin).href, idempotency_key: event.id, ttl: Math.max(0, Math.min(86400, Math.floor((event.expires_at - Date.now()) / 1000))) }),
   });
   const result = await response.json().catch(() => null);
   if (!response.ok || !result?.id) throw new Error(`OneSignal notification failed (${response.status}). Check subscription and provider settings.`);

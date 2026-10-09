@@ -55,8 +55,8 @@ export async function notificationPermission() {
   if (!response.ok || !config.account || !config.configured || !config.sendingEnabled) return false;
   const sdk = await loadOneSignal(config.appId);
   await sdk.login(config.account.externalId);
-  await reportPushDevice(sdk);
-  return Boolean(config.account.enabled && sdk.Notifications.permission && sdk.User.PushSubscription.optedIn);
+  const active = await reportPushDevice(sdk);
+  return Boolean(active && config.account.enabled && sdk.Notifications.permission && sdk.User.PushSubscription.optedIn);
 }
 
 export async function verifySubmissionPermissions(): Promise<boolean> {

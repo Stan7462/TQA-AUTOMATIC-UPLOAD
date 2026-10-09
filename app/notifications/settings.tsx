@@ -34,8 +34,8 @@ export default function NotificationSettings({ supervisor, embedded = false }: {
       if (pushOriginSupported()) {
         const service = await loadOneSignal(result.appId);
         await service.login(result.account.externalId);
-        await reportPushDevice(service);
-        if (active) { setSdk(() => service); setDeviceEnabled(Boolean(service.User.PushSubscription.optedIn)); }
+        const selected = await reportPushDevice(service);
+        if (active) { setSdk(() => service); setDeviceEnabled(Boolean(selected && service.User.PushSubscription.optedIn)); }
       }
     }
     void load().catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "Could not load notification settings."); });
@@ -55,13 +55,13 @@ export default function NotificationSettings({ supervisor, embedded = false }: {
       if (!sdk.Notifications.permission) throw new Error("Notifications were not allowed. Enable them in your phone's notification settings and try again.");
       await sdk.User.PushSubscription.optIn();
       // Token registration can finish after optIn resolves, especially on iPhone.
-      for (let attempt = 0; attempt < 40 && !sdk.User.PushSubscription.optedIn; attempt++) {
+      for (let attempt = 0; attempt < 40 && (!sdk.User.PushSubscription.optedIn || !sdk.User.PushSubscription.id); attempt++) {
         await new Promise(resolve => window.setTimeout(resolve, 250));
       }
-      if (!sdk.User.PushSubscription.optedIn) throw new Error("The device did not subscribe. Please try again.");
+      if (!sdk.User.PushSubscription.optedIn || !sdk.User.PushSubscription.id) throw new Error("The device did not subscribe. Please try again.");
       await save({ ...prefs, enabled: true });
-      await reportPushDevice(sdk);
-      setDeviceEnabled(true); setNotice("This device is subscribed to QC notifications.");
+      await reportPushDevice(sdk, true);
+      setDeviceEnabled(true); setNotice(supervisor ? "This device is subscribed to QC notifications." : "This is now your active phone. Your previous phone will no longer receive QC notifications.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not subscribe."); }
     finally { setBusy(false); }
   }
@@ -81,6 +81,7 @@ export default function NotificationSettings({ supervisor, embedded = false }: {
     <div className="notification-heading"><div className="notification-icon"><Bell size={24}/></div><div><h2>QC notifications</h2><p>{supervisor ? "Manage alerts for your team and this device." : "Stay on top of QC fixes and monthly deadlines."}</p></div><span className={`notification-device-status${deviceEnabled ? " subscribed" : ""}`}>{deviceEnabled ? "Device connected" : "Not connected"}</span></div>
     <div className="notification-device"><Smartphone size={22}/><div><h3>Connect your phone</h3><p>Add the app to your Home Screen in Safari. Open it from that icon, then tap Enable notifications and choose Allow.</p></div></div>
     {!https ? <div className="notification-preview">Local preview · Phone notifications will be available on the live HTTPS app.</div> : config && !config.sendingEnabled && <div className="notification-preview">Notification delivery has not been activated yet.</div>}
+    {!supervisor && <p>Only one phone receives your QC notifications. Enabling notifications here replaces your previous phone.</p>}
     <div className="notification-actions"><button className="button dark" disabled={!sdk || busy} onClick={() => void subscribe()}><Bell size={16}/>{busy ? "Working…" : "Enable notifications"}</button>{supervisor && <button className="button light" disabled={!config || busy || !prefs.enabled} onClick={() => void disable()}>Pause my notifications</button>}</div>
     {supervisor ? <><div className="notification-section-head"><h3>Technician alerts</h3><p>Choose which alerts your company&apos;s technicians receive.</p></div><div className="notification-options">{options.map(([key, label, example], index) => {
       const Icon = [CircleAlert, Clock, CircleAlert, Target][index];

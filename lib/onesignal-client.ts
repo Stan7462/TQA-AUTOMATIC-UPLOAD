@@ -3,7 +3,7 @@ export type OneSignalSdk = {
   login(externalId: string): Promise<void>;
   logout(): Promise<void>;
   Notifications: { permission: boolean; isPushSupported(): boolean; requestPermission(): Promise<void> };
-  User: { PushSubscription: { optedIn: boolean; optIn(): Promise<void>; optOut(): Promise<void> } };
+  User: { PushSubscription: { id?: string | null; optedIn: boolean; optIn(): Promise<void>; optOut(): Promise<void> } };
 };
 declare global {
   interface Window { OneSignalDeferred?: ((sdk: OneSignalSdk) => void)[]; }
@@ -32,7 +32,11 @@ export function loadOneSignal(appId: string): Promise<OneSignalSdk> {
 
 export function pushOriginSupported() { return location.protocol === "https:"; }
 
-export async function reportPushDevice(sdk: OneSignalSdk) {
+export async function reportPushDevice(sdk: OneSignalSdk, activate = false): Promise<boolean> {
   const status=!sdk.Notifications.isPushSupported()?"unsupported":typeof Notification!=="undefined"&&Notification.permission==="denied"?"blocked":sdk.User.PushSubscription.optedIn?"connected":"not_subscribed";
-  await fetch("/api/notifications/device",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})}).catch(()=>undefined);
+  const response = await fetch("/api/notifications/device",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,subscriptionId:sdk.User.PushSubscription.id || null,activate})});
+  const result = await response.json() as {active?: boolean; error?: string};
+  if (!response.ok) throw new Error(result.error || "Could not confirm this phone's notification connection. Try again.");
+  if (!activate && !result.active && sdk.User.PushSubscription.optedIn) await sdk.User.PushSubscription.optOut();
+  return Boolean(result.active);
 }
