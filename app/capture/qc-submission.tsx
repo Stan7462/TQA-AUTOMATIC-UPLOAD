@@ -729,7 +729,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
 
   return <main className={`capture-shell qc-dark-shell qc-reference${cameraOn ? " qc-camera-active" : ""}`}>
     <div className="camera-app qc-form">
-      <header className="camera-header qc-reference-header"><div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>New QC submission</h1></div><div className="qc-header-actions"><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => { setResetError(""); setResetConfirmation(true); }}><RotateCcw size={17}/>Start new QC</button><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => void logOut()}><LogOut size={17}/>{logoutBusy ? "Logging out…" : "Log out"}</button></div><p>Signed in as Tech {techId}. Take live photos or add the job screenshot in either order, then check the job number.</p></header>
+      <header className="camera-header qc-reference-header"><div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>New QC submission</h1></div><div className="qc-header-actions"><a className="button light qc-logout qc-notification-settings" href="/notifications">Notification settings</a><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => { setResetError(""); setResetConfirmation(true); }}><RotateCcw size={17}/>Start new QC</button><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => void logOut()}><LogOut size={17}/>{logoutBusy ? "Logging out…" : "Log out"}</button></div><p>Signed in as Tech {techId}. Take live photos or add the job screenshot in either order, then check the job number.</p></header>
       <dialog ref={resetDialog} className="qc-reset-dialog" aria-labelledby="qc-reset-title" aria-describedby="qc-reset-description" onCancel={(event) => { event.preventDefault(); if (!clearingDraft.current) setResetConfirmation(false); }}>
         <div className="qc-reset-icon" aria-hidden="true"><RotateCcw size={24}/></div>
         <h2 id="qc-reset-title">Start a new QC?</h2>
@@ -742,7 +742,6 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         </div>
       </dialog>
       {resetMessage && <p className="qc-reset-status" role="status">{resetMessage}</p>}
-      <a className="profile-link" href="/notifications">Notification settings</a>
       <section className="qc-tech-summary" aria-label="My QC totals">
         <a className="qc-summary-card qc-summary-rejected" href="/profile?view=rejected" aria-label={`Rejected QCs ${qcCounts?.rejected ?? "loading"}${rejectedDeadlineHours === null ? "" : `, nearest deadline ${rejectedDeadlineHours} hours`}`}><span>Rejected QCs</span><strong>{qcCounts?.rejected ?? "—"}</strong>{rejectedDeadlineHours !== null && <em className="qc-summary-deadline-badge" aria-hidden="true">{rejectedDeadlineHours}</em>}</a>
         <a className="qc-summary-card" href="/profile?view=captured"><span>Captured QCs</span><strong>{qcCounts?.captured ?? "—"}</strong></a>
