@@ -6,6 +6,7 @@ import { sixDigitJobNumber } from "@/lib/job-number-ocr";
 import { fiscalDeadline, fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 import { deleteQcDraft, readQcDraft, writeQcDraft, type QcDraft } from "@/lib/qc-draft";
 import type { QcLocation } from "@/lib/qc-location";
+import { verifySubmissionPermissions } from "@/lib/required-permissions";
 
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
 const MAX_SCREENSHOT_OUTPUT_BYTES = 250 * 1024;
@@ -666,6 +667,11 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     if (!ready || !screenshot || busy || taking || screenshotProcessing.current) return;
     stopCamera(); setBusy(true); setError(""); setUploadProgress(0); setUploadLabel("Preparing pictures…");
     try {
+      try {
+        if (!await verifySubmissionPermissions()) throw new Error("Notifications are not enabled.");
+      } catch {
+        throw new Error("Camera, location, and push notifications must all be enabled before submitting. Check your phone permissions and notification subscription, then try again. Your QC stays on this page.");
+      }
       if (draftTimer.current !== null) { window.clearTimeout(draftTimer.current); draftTimer.current = null; }
       const images = [screenshot, ...photos];
       const prepared: Blob[] = [];

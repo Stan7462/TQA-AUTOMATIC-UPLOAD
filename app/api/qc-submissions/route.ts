@@ -45,6 +45,8 @@ export async function POST(request: Request) {
   if (!techId) return Response.json({ error: "Enter a valid Tech ID." }, { status: 400 });
   const session = await getTechSessionContext(request, env.DB);
   if (!session || session.techId !== techId) return Response.json({ error: "Sign in with this Tech ID and PIN before submitting." }, { status: 401 });
+  const subscribed = await env.DB.prepare("SELECT 1 FROM push_accounts WHERE tenant_id = ? AND tech_id = ? AND enabled = 1").bind(session.tenantId, techId).first();
+  if (!subscribed) return Response.json({ error: "Enable push notifications on your phone before submitting a QC." }, { status: 403 });
   const removal = await env.DB.prepare("SELECT state FROM technician_removals WHERE tenant_id = ? AND tech_id = ?").bind(session.tenantId, techId).first();
   if (removal) return Response.json({ error: "This Tech ID is no longer available. Contact your supervisor." }, { status: 403 });
   if (!/^\d{1,6}$/.test(jobNumber)) return Response.json({ error: "Enter a job number using 1 to 6 digits." }, { status: 400 });

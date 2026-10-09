@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Building2, Copy, KeyRound, UserX, UsersRound } from "lucide-react";
 import AdminShell from "@/app/admin-shell";
-import TrustIntegrationSettings from "@/app/settings/trust-integration-settings";
+import NotificationSettings from "@/app/notifications/settings";
 import CompanySettings from "@/app/settings/company-settings";
 import TechnicianWatch from "@/app/settings/technician-watch";
 import TechnicianGoal from "@/app/settings/technician-goal";
@@ -23,13 +23,17 @@ export default function TechnicianSettings({ canManageCompanies = false }: { can
   const [disableBusy, setDisableBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [section, setSection] = useState<"technicians" | "api" | "companies">("technicians");
+  const [section, setSection] = useState<"technicians" | "notifications" | "companies">("technicians");
   const [search, setSearch] = useState("");
   useEffect(() => {
-    const sync = () => setSection(location.hash === "#api-settings" ? "api" : location.hash === "#companies-settings" && canManageCompanies ? "companies" : "technicians");
+    const sync = () => setSection(location.hash === "#notifications-settings" ? "notifications" : location.hash === "#companies-settings" && canManageCompanies ? "companies" : "technicians");
     sync(); window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, [canManageCompanies]);
+  function selectSection(next: "technicians" | "notifications" | "companies") {
+    history.replaceState(null, "", `#${next}-settings`);
+    setSection(next);
+  }
   const visibleTechnicians = technicians.filter(tech => tech.techId.toLowerCase().includes(search.trim().toLowerCase())).sort((a,b) => Number(a.state === "disabled") - Number(b.state === "disabled") || a.techId.localeCompare(b.techId, undefined, {numeric:true}));
   async function copyLogin(tech: Technician) {
     try {
@@ -73,8 +77,8 @@ export default function TechnicianSettings({ canManageCompanies = false }: { can
   }
 
   return <AdminShell active="settings">
-    <section className="intro"><div><h1>Settings</h1><p>{canManageCompanies ? "Manage technicians, companies, and the Catalyst extension." : "Manage technicians and the Catalyst extension."}</p></div></section>
-    <nav className="settings-tabs" aria-label="Settings sections"><a className="button light" href="/notifications">Notifications</a><button type="button" aria-pressed={section === "technicians"} onClick={() => { location.hash = "technicians-settings"; setSection("technicians"); }}>Technicians</button><button type="button" aria-pressed={section === "api"} onClick={() => { location.hash = "api-settings"; setSection("api"); }}>API and documentation</button>{canManageCompanies && <button type="button" aria-pressed={section === "companies"} onClick={() => { location.hash = "companies-settings"; setSection("companies"); }}><Building2 size={16}/>Companies</button>}</nav>
+    <section className="intro"><div><h1>Settings</h1><p>{canManageCompanies ? "Manage technicians, notifications, and companies." : "Manage technicians and notifications."}</p></div></section>
+    <nav className="settings-tabs" aria-label="Settings sections"><button type="button" aria-pressed={section === "notifications"} onClick={() => selectSection("notifications")}>Notifications</button><button type="button" aria-pressed={section === "technicians"} onClick={() => selectSection("technicians")}>Technicians</button>{canManageCompanies && <button type="button" aria-pressed={section === "companies"} onClick={() => selectSection("companies")}><Building2 size={16}/>Companies</button>}</nav>
     <div className="admin-page-content settings-page">
     <div className="settings-content">
     <div hidden={section !== "technicians"}>
@@ -82,7 +86,7 @@ export default function TechnicianSettings({ canManageCompanies = false }: { can
       <section id="technicians-settings" className="qc-pin-panel settings-panel"><div className="settings-section-title"><KeyRound size={21}/><h2>Add technician</h2></div><p>Enter a new Tech ID to create a technician and issue a private 5-digit PIN. Existing Tech IDs in this company cannot be added again. Use the technician list below to reset a PIN or reactivate a profile.</p><form onSubmit={issuePin}><input aria-label="Tech ID for PIN" placeholder="Tech ID" value={techId} maxLength={32} onChange={(event) => setTechId(event.target.value.toUpperCase())} required/><button className="button dark" disabled={pinBusy}>{pinBusy ? "Creating…" : "Create technician"}</button></form>{issued && <div className="issued-pin" role="status"><strong>Private PIN for Tech {issued.techId}</strong><span>{issued.pin}</span><p>This PIN is also shown in the technician list below whenever you open Settings.</p></div>}</section>
       <section className="qc-pin-panel settings-panel"><div className="settings-section-title"><UsersRound size={21}/><h2>Technicians</h2></div><p>Disabling a technician prevents login and new submissions while keeping their QC records and pictures. Issue a new PIN to reactivate the same Tech ID. Every submitted QC is retained for at least three full months.</p><label className="settings-tech-search">Find a technician<input type="search" placeholder="Search Tech ID" value={search} onChange={e => setSearch(e.target.value)}/></label>{loading ? <p>Loading technicians…</p> : visibleTechnicians.length ? <div className="qc-tech-rows">{visibleTechnicians.map((tech) => <div className="qc-tech-manage-row" key={tech.techId}><div><strong>Tech {tech.techId}{tech.isAdmin ? " · Admin" : ""}</strong><small>{tech.state === "disabled" ? `Disabled · ${tech.qcCount} QCs this month` : `${tech.qcCount} QCs this month · ${tech.hasPin ? "PIN active" : "No profile PIN"}`}</small>{tech.state === "active" && tech.pin && <span className="qc-tech-pin">Private PIN <strong>{tech.pin}</strong></span>}{tech.state === "active" && tech.hasPin && !tech.pin && <span className="qc-tech-legacy">Previous PIN cannot be displayed. Reset it to issue a visible 5-digit PIN.</span>}</div><div className="technician-preferences"><TechnicianGoal techId={tech.techId} monthlyGoal={tech.monthlyGoal} onSaved={load}/><TechnicianWatch techId={tech.techId} enabled={watchedIds.includes(tech.techId)} onSaved={load}/></div><div className="qc-tech-manage-actions">{tech.state === "active" && tech.pin && <button type="button" className="button light" onClick={() => void copyLogin(tech)}><Copy size={16}/>Copy login</button>}{!tech.isAdmin && <button type="button" className="button light" disabled={pinBusy || !!disableBusy} onClick={() => void issuePin(undefined, tech.techId)}><KeyRound size={16}/>{tech.state === "disabled" ? "Reactivate" : tech.pin ? "Reset PIN" : "Issue 5-digit PIN"}</button>}{tech.state === "active" && !tech.isAdmin && <button type="button" className="button light qc-remove-button" disabled={pinBusy || !!disableBusy} onClick={() => { setConfirmTechId(tech.techId); setConfirmation(""); }}><UserX size={16}/>Disable</button>}</div></div>)}</div> : <p>{search ? "No technicians match your search." : "No technicians yet."}</p>}{confirmTechId && <div className="qc-delete-confirm"><strong>Disable Tech {confirmTechId}?</strong><p>They will be signed out and unable to submit new QCs. Their QC records and pictures will be kept. Type the Tech ID to confirm.</p><input aria-label="Confirm Tech ID to disable" autoComplete="off" placeholder={confirmTechId} value={confirmation} onChange={(event) => setConfirmation(event.target.value.toUpperCase())}/><div><button type="button" className="button light" onClick={() => { setConfirmTechId(null); setConfirmation(""); }} disabled={!!disableBusy}>Cancel</button><button type="button" className="button danger" disabled={confirmation !== confirmTechId || !!disableBusy} onClick={() => void disableTechnician(confirmTechId)}>{disableBusy ? "Disabling…" : "Disable technician"}</button></div></div>}</section>
       </div>
-      <div hidden={section !== "api"}><TrustIntegrationSettings/></div>
+      {section === "notifications" && <NotificationSettings supervisor/>}
       {canManageCompanies && <div hidden={section !== "companies"}><CompanySettings/></div>}
       {notice && <p className="qc-notice" role="status">{notice}</p>}{error && <p className="form-error" role="alert">{error}</p>}
     </div>

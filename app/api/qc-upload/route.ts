@@ -56,6 +56,9 @@ export async function POST(request: Request) {
     ? Response.json({ complete: true }, { headers: { "Cache-Control": "no-store" } })
     : Response.json({ error: "Submission ID already used." }, { status: 409 });
 
+  const subscribed = await env.DB.prepare("SELECT 1 FROM push_accounts WHERE tenant_id = ? AND tech_id = ? AND enabled = 1").bind(session.tenantId, techId).first();
+  if (!subscribed) return Response.json({ error: "Enable push notifications on your phone before submitting a QC." }, { status: 403 });
+
   if (body?.action === "photo") {
     if (!Number.isInteger(body.slot) || (body.slot as number) < 0 || (body.slot as number) > 7 || typeof body.image !== "string" || body.image.length > 350_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(body.image)) {
       return Response.json({ error: "The picture could not be read. Retake it and try again." }, { status: 400 });

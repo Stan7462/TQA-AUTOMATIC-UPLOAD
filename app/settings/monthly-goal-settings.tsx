@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { Target } from "lucide-react";
-import NotificationSettings from "@/app/notifications/settings";
 
 const DEFAULT_MONTHLY_QC_GOAL = 5;
 
@@ -77,6 +76,5 @@ export default function MonthlyGoalSettings() {
     <small>Current setting: <strong>{savedGoal}</strong> approved QCs per technician.</small>
     {notice && <p className="qc-notice" role="status">{notice}</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    <details className="notification-general"><summary>General notification settings</summary><NotificationSettings supervisor embedded/></details>
   </section>;
 }
