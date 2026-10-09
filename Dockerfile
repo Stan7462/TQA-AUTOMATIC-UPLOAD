@@ -9,7 +9,7 @@ COPY . .
 
 # Keep build-time database files out of the application image.
 ENV TQA_DATA_DIR=/tmp/tqa-build-data
-RUN npm run build
+RUN DATABASE_URL= npm run build
 
 FROM node:24-bookworm-slim AS runtime
 

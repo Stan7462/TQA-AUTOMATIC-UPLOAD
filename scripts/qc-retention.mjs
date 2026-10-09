@@ -1,3 +1,4 @@
+import { createDatabase } from "../lib/database.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { existsSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -23,28 +24,29 @@ function photoIds(row) {
   return ids.every((id) => typeof id === "string" && PHOTO_ID.test(id)) ? ids : null;
 }
 
-export function pruneExpiredQcs({ dataDirectory, now = new Date(), logger = console } = {}) {
+export async function pruneExpiredQcs({ dataDirectory, now = new Date(), logger = console } = {}) {
   const directory = resolve(dataDirectory || process.env.TQA_DATA_DIR || ".tqa-data");
   const databasePath = join(directory, "tqa.sqlite");
-  if (!existsSync(databasePath)) return { deletedQcs: 0, deletedPhotos: 0, cutoff: qcRetentionCutoff(now) };
+  if (!process.env.DATABASE_URL && !existsSync(databasePath)) return { deletedQcs: 0, deletedPhotos: 0, cutoff: qcRetentionCutoff(now) };
 
-  const database = new DatabaseSync(databasePath);
-  database.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000");
+  const sqlite = process.env.DATABASE_URL ? null : new DatabaseSync(databasePath);
+  sqlite?.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000");
+  const database = createDatabase({sqlite});
   const cutoff = qcRetentionCutoff(now);
   let deletedQcs = 0;
   let deletedPhotos = 0;
 
   try {
-    const hasQcs = database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'qc_submissions'").get();
-    if (!hasQcs) return { deletedQcs, deletedPhotos, cutoff };
+    const hasQcs = sqlite?.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'qc_submissions'").get();
+    if (sqlite && !hasQcs) return { deletedQcs, deletedPhotos, cutoff };
 
     while (true) {
-      const rows = database.prepare("SELECT id, COALESCE(root_submission_id, id) AS root_submission_id, screenshot_id, photo_ids FROM qc_submissions WHERE submitted_at < ? ORDER BY submitted_at LIMIT 100").all(cutoff);
+      const rows = await database.prepare("SELECT id, COALESCE(root_submission_id, id) AS root_submission_id, screenshot_id, photo_ids FROM qc_submissions WHERE submitted_at < ? ORDER BY submitted_at LIMIT 100").all(cutoff);
       if (!rows.length) break;
 
       const removable = [];
       for (const row of rows) {
-        const archived = database.prepare("SELECT screenshot_id, photo_ids FROM qc_submission_attempts WHERE tenant_id = (SELECT tenant_id FROM qc_submissions WHERE id = ?) AND root_submission_id = ?").all(row.id, row.root_submission_id);
+        const archived = await database.prepare("SELECT screenshot_id, photo_ids FROM qc_submission_attempts WHERE tenant_id = (SELECT tenant_id FROM qc_submissions WHERE id = ?) AND root_submission_id = ?").all(row.id, row.root_submission_id);
         const idGroups = [row, ...archived].map(photoIds);
         if (idGroups.some((ids) => !ids)) {
           logger.error(`Retention skipped QC ${row.id}: invalid photo references.`);
@@ -66,19 +68,14 @@ export function pruneExpiredQcs({ dataDirectory, now = new Date(), logger = cons
 
       if (!removable.length) break;
       const placeholders = removable.map(() => "?").join(",");
-      database.exec("BEGIN");
-      try {
-        database.prepare(`DELETE FROM qc_submission_attempts WHERE root_submission_id IN (SELECT COALESCE(root_submission_id, id) FROM qc_submissions WHERE submitted_at < ? AND id IN (${placeholders}))`).run(cutoff, ...removable);
-        const result = database.prepare(`DELETE FROM qc_submissions WHERE submitted_at < ? AND id IN (${placeholders})`).run(cutoff, ...removable);
-        deletedQcs += Number(result.changes);
-        database.exec("COMMIT");
-      } catch (error) {
-        database.exec("ROLLBACK");
-        throw error;
-      }
+      const results = await database.batch([
+        database.prepare(`DELETE FROM qc_submission_attempts WHERE (tenant_id, root_submission_id) IN (SELECT tenant_id, COALESCE(root_submission_id, id) FROM qc_submissions WHERE submitted_at < ? AND id IN (${placeholders}))`).bind(cutoff, ...removable),
+        database.prepare(`DELETE FROM qc_submissions WHERE submitted_at < ? AND id IN (${placeholders})`).bind(cutoff, ...removable),
+      ]);
+      deletedQcs += results[1].meta.changes;
     }
   } finally {
-    database.close();
+    await database.close();
   }
 
   if (deletedQcs) logger.log(`QC retention removed ${deletedQcs} expired QCs and ${deletedPhotos} pictures.`);

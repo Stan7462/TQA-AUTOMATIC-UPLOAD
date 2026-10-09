@@ -77,6 +77,10 @@ function reconcileRuntimeMigration(runtimeName, prismaName, table, columns, inde
   }
 }
 
+if (process.env.DATABASE_URL) {
+  const { migratePostgres } = await import("./migrate-postgres.mjs");
+  await migratePostgres();
+} else {
 mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
 const existing = inspectExistingDatabase();
 if (existing.hasSchema && !existing.hasPrismaHistory) {
@@ -96,3 +100,5 @@ reconcileRuntimeMigration("0016_technician_monthly_qc_goal.sql", "20261008010000
 reconcileRuntimeMigration("0017_push_notifications.sql", "20261008020000_push_notifications", "push_accounts", ["external_id", "enabled"]);
 reconcileRuntimeMigration("0018_company_notification_policy.sql", "20261008030000_company_notification_policy", "push_company_preferences", ["rejected", "deadline", "overdue", "monthly"]);
 runPrisma("migrate", "deploy");
+
+}

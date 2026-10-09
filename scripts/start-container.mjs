@@ -3,14 +3,14 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 process.chdir(root);
 await import("./migrate.mjs");
-await import("./bootstrap-admin.mjs");
+if (!process.env.DATABASE_URL) await import("./bootstrap-admin.mjs");
 const { startNotificationWorker } = await import("./push-notifications.mjs");
 startNotificationWorker();
 const { pruneExpiredQcs } = await import("./qc-retention.mjs");
-try { pruneExpiredQcs({ dataDirectory: process.env.TQA_DATA_DIR }); }
+try { await pruneExpiredQcs({ dataDirectory: process.env.TQA_DATA_DIR }); }
 catch (error) { console.error("QC retention cleanup failed", error); }
-const retentionTimer = setInterval(() => {
-  try { pruneExpiredQcs({ dataDirectory: process.env.TQA_DATA_DIR }); }
+const retentionTimer = setInterval(async () => {
+  try { await pruneExpiredQcs({ dataDirectory: process.env.TQA_DATA_DIR }); }
   catch (error) { console.error("QC retention cleanup failed", error); }
 }, 6 * 60 * 60 * 1000);
 retentionTimer.unref();

@@ -1,6 +1,6 @@
 # TQA Automatic Upload
 
-Production runs as one Coolify deployment with one SQLite database and captured photos in the persistent `/data` volume. Every company uses the same public domain. The submitted ID and PIN or password are matched together to determine the company, and every session, QC, staged photo, and integration key remains scoped to that company. A repeated technician ID is safe because the app issues a different PIN for that ID in every company and refuses any ambiguous login instead of selecting a company. A local preview can run at `http://127.0.0.1:3000` with its own data under `.tqa-data/`.
+Production runs as one Coolify deployment. When `DATABASE_URL` is set, records use PostgreSQL; captured photos and application encryption secrets stay in the persistent `/data` volume. Without `DATABASE_URL`, the local preview uses SQLite. Every company uses the same public domain. The submitted ID and PIN or password are matched together to determine the company, and every session, QC, staged photo, and integration key remains scoped to that company. A repeated technician ID is safe because the app issues a different PIN for that ID in every company and refuses any ambiguous login instead of selecting a company. A local preview can run at `http://127.0.0.1:3000` with its own data under `.tqa-data/`.
 
 Share the same public root URL with admins and technicians. Technicians sign in with the Tech ID and private 5-digit PIN issued in Settings. A new company receives a one-time setup login; its supervisor then creates a globally unique Admin ID of at least four characters and a password of at least eight characters containing letters and numbers. The Admin ID opens the review workspace. Administrative pages and photos require the admin session. Technicians submit a job number, one saved account screenshot, and 3–7 live camera photos. The upload API also checks their PIN session and Tech ID. The technician profile shows rejected QCs and review notes. A browser page cannot prove a camera image came from a live scene against a modified client.
 
@@ -39,3 +39,16 @@ Example (enter it as one line in Coolify):
 The first Prisma migration is a full baseline. A new empty volume receives the complete schema. An existing TQA database is verified and marked with that baseline without recreating its tables or deleting data. If an existing database does not match the expected baseline, startup stops instead of applying an unsafe partial migration.
 
 For a future schema change, update `prisma/schema.prisma`, run `npm run db:generate -- --name descriptive_change`, review the generated SQL under `prisma/migrations`, and commit it. Coolify will run the committed migration during its next deployment. Back up the `/data` volume before deploying schema changes.
+
+
+## PostgreSQL migration and operation
+
+Set `DATABASE_URL` as a runtime secret to the PostgreSQL service on the private Docker network. The web app, notification worker, and retention job all select the same backend. An unreachable PostgreSQL database fails startup rather than falling back to SQLite.
+
+Before the first PostgreSQL deployment, stop the previous app container so no SQLite writes can occur during or after the snapshot. Back up the whole `/data` volume (including photos and `secrets.json`) outside that volume. Deploy the PostgreSQL-capable app only after that backup succeeds. Startup runs `scripts/migrate-postgres.mjs`: it refuses a nonempty destination, checks SQLite integrity and foreign keys, creates a private SQLite snapshot and secrets backup, imports all application tables in a single PostgreSQL transaction, and verifies row counts plus SHA-256 hashes of every column before committing. A version marker prevents importing stale SQLite data again on subsequent starts.
+
+PostgreSQL schema SQL is in `postgres/migrations/0001_baseline.sql`; the existing Prisma and Drizzle SQLite history is retained for local previews. Do not use the SQLite `db:generate` workflow for PostgreSQL changes. Add reviewed, versioned PostgreSQL migrations and update the PostgreSQL runner for subsequent schema changes.
+
+Existing passwords, PINs, sessions, correction deadlines, archived QC attempts, upload history, goals, and push subscriptions retain their values. Keep the original encryption secrets and picture volume attached. SQLite engine migration metadata remains available in the original backup; it is not needed by PostgreSQL.
+
+Before PostgreSQL receives new writes, rollback can restart the previous SQLite app and original volume. After new PostgreSQL writes, do not restart a stale SQLite copy: restore or repair PostgreSQL, or explicitly migrate the newer data back first. Configure regular PostgreSQL backups and separate photo/secrets backups; the retained SQLite snapshot is only a cutover backup.

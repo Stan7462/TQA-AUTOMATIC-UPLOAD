@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     if (String(error).includes("LOGIN_ID_NOT_AVAILABLE")) {
       return Response.json({ error: "This Tech ID is not available. Change it and try again." }, { status: 409 });
     }
-    if (String(error).includes("UNIQUE constraint failed: technicians.tenant_id, technicians.tech_id")) {
+    if (String(error).includes("UNIQUE constraint failed: technicians.tenant_id, technicians.tech_id") || (error as { code?: string; constraint?: string })?.code === "23505" && (error as { constraint?: string }).constraint === "technicians_pkey") {
       return Response.json({ error: "This Tech ID already exists in your company." }, { status: 409 });
     }
     return Response.json({ error: "Could not issue PIN. Try again shortly." }, { status: 503 });
