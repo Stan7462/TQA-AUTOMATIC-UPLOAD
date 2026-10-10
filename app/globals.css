@@ -799,3 +799,64 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .qc-milestones-footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:12px;color:#afbfca;font-size:13px;line-height:1.4}
 .qc-camera-active .qc-monthly-milestones{display:none}
 @media(max-width:450px){.qc-monthly-milestones{padding:16px;border-radius:16px;margin-bottom:20px}.qc-milestone{height:30px}.qc-milestones-title{font-size:19px}}
+
+/* Phone layout: compact empty form, naturally expands for photos and messages. */
+.qc-compact-step-number{display:none}
+@media(max-width:600px){
+  .qc-reference .qc-form{padding:12px 14px calc(10px + env(safe-area-inset-bottom))}
+  .qc-reference .qc-reference-header{gap:8px;padding-bottom:15px}
+  .qc-reference .kicker{font-size:10px;letter-spacing:.2em}
+  .qc-reference .camera-header h1{font-size:25px;line-height:1.2;margin:6px 0 2px}
+  .qc-reference .qc-reference-header>p{font-size:12px;line-height:1.4}
+  .qc-reference .qc-reference-header .qc-header-actions{grid-template-columns:1.2fr 1.1fr .85fr;gap:6px}
+  .qc-reference .qc-header-actions .qc-logout.button.light{min-height:44px;padding:6px 4px;font-size:12px;border-radius:10px;gap:5px}
+  .qc-reference .qc-header-actions svg{width:14px;height:14px}
+  .qc-reference .qc-tech-summary{margin-bottom:10px;gap:6px}
+  .qc-reference .qc-summary-card{min-height:52px;padding:8px;border-radius:12px;gap:5px}
+  .qc-reference .qc-summary-card span{font-size:11px;line-height:1.25}
+  .qc-reference .qc-summary-card strong{font-size:21px}
+  .qc-reference .qc-monthly-milestones{padding:11px 12px;margin-bottom:10px;border-radius:13px}
+  .qc-reference .qc-milestones-heading{font-size:12px;gap:6px}
+  .qc-reference .qc-milestones-heading>span:last-child{font-size:11px}
+  .qc-reference .qc-milestones-title{font-size:16px;line-height:1.3;margin:7px 0}
+  .qc-reference .qc-milestones-grid{gap:5px}
+  .qc-reference .qc-milestone{height:22px;border-radius:5px;font-size:12px}
+  .qc-reference .qc-milestone svg{width:14px;height:14px}
+  .qc-reference .qc-milestones-footer{font-size:11px;margin-top:5px;gap:6px}
+  .qc-reference .qc-step-timeline{gap:10px;margin-bottom:8px}
+  .qc-reference .qc-step-timeline::before,.qc-reference .qc-step-marker{display:none}
+  .qc-reference .qc-step{grid-template-columns:minmax(0,1fr);gap:0}
+  .qc-reference .qc-step-card{padding:11px 12px;border-radius:13px;box-shadow:inset 0 1px #ffffff12}
+  .qc-reference .qc-step-heading,.qc-reference .qc-screenshot-step .qc-step-heading{margin-bottom:7px}
+  .qc-reference .qc-step-heading h2{display:flex;align-items:center;gap:7px;font-size:15px;line-height:1.3;margin:0 0 5px}
+  .qc-reference .qc-compact-step-number{display:grid;place-items:center;flex:none;width:20px;height:20px;background:#324753;color:#cfe5ff;border-radius:6px;font-size:12px;font-weight:650}
+  .qc-reference .qc-step-heading p{font-size:12px;line-height:1.4}
+  .qc-reference .qc-camera-entry{height:44px;min-height:44px;border-radius:9px;box-shadow:none}
+  .qc-reference .qc-camera-entry .camera-placeholder{flex-direction:row;gap:9px;padding:6px}
+  .qc-reference .qc-camera-entry .camera-placeholder svg{width:20px;height:20px}
+  .qc-reference .qc-camera-entry .camera-placeholder>span{font-size:14px}
+  .qc-reference .qc-screenshot-button{flex-direction:row;gap:9px;min-height:44px;padding:8px;border-width:1px;border-radius:9px;font-size:14px}
+  .qc-reference .qc-screenshot-button svg{width:20px;height:20px}
+  .qc-reference .qc-job-field{border-radius:9px}
+  .qc-reference .qc-job-field>span{width:38px;font-size:20px}
+  .qc-reference .qc-job-field .qc-tech-id{height:44px;min-height:44px;padding:0 8px;font-size:16px}
+  .qc-reference .qc-submit-hint{font-size:11px;line-height:1.4;margin:7px 0}
+  .qc-reference .qc-submit.button.dark,.qc-reference .qc-form .qc-submit:not(:disabled){min-height:44px;padding:8px 12px;font-size:14px;border-radius:11px;box-shadow:none}
+  .qc-reference .qc-requirements{margin-top:10px;border-radius:11px;box-shadow:none}
+  .qc-reference .qc-requirements summary{min-height:44px;padding:9px 12px;font-size:12px;grid-template-columns:17px minmax(0,1fr) 16px;gap:8px}
+  .qc-reference .qc-requirements summary svg{width:17px;height:17px}
+}
+@media(max-width:600px){
+  .qc-reference .qc-form{padding-top:calc(10px + env(safe-area-inset-top))}
+  .qc-reference .qc-reference-header{gap:6px;padding-bottom:10px}
+  .qc-reference .kicker{display:block;line-height:12px}
+  .qc-reference .qc-step-timeline{gap:8px}
+  .qc-reference .qc-step-card{padding:8px 12px}
+  .qc-reference .qc-step-heading,.qc-reference .qc-screenshot-step .qc-step-heading{margin-bottom:5px}
+  .qc-reference .qc-form .qc-camera-entry.viewfinder{height:44px;min-height:44px;margin:0}
+  .qc-reference .qc-monthly-milestones{padding:9px 12px}
+  .qc-reference .qc-milestones-heading{line-height:16px}
+  .qc-reference .qc-milestones-title{margin:5px 0}
+  .qc-reference .qc-milestone{height:18px}
+  .qc-reference .qc-milestones-footer{line-height:13px}
+}
