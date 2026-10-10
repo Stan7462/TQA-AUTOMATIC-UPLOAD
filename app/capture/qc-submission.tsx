@@ -139,6 +139,8 @@ async function recognizeJobNumber(file: File, onProgress: (progress: number) => 
   let worker: import("tesseract.js").Worker | undefined;
   let ended = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let partial: { jobNumber: string | null; address: string | null } | null = null;
   let rejectWorkerError: (error: Error) => void = () => {};
   const workerFailure = new Promise<never>((_, reject) => { rejectWorkerError = reject; });
   const scan = async () => {
@@ -160,17 +162,40 @@ async function recognizeJobNumber(file: File, onProgress: (progress: number) => 
     });
     if (ended) { await worker.terminate(); return null; }
     const result = await worker.recognize(file);
-    return { jobNumber: sixDigitJobNumber(result.data.text, result.data.confidence), address: screenshotAddress(result.data.text, result.data.confidence) };
+    const extracted = { jobNumber: sixDigitJobNumber(result.data.text, result.data.confidence), address: screenshotAddress(result.data.text, result.data.confidence) };
+    partial = extracted;
+    if (!extracted.address && !ended) {
+      // Account screenshots place the service address above the account/contact
+      // fields. Retry that region with sparse-text segmentation for dark screens.
+      const image = new Image();
+      const url = URL.createObjectURL(file);
+      try {
+        image.src = url;
+        await image.decode();
+        await worker.setParameters({ tessedit_pageseg_mode: "11" as import("tesseract.js").PSM });
+        const retry = await Promise.race([
+          worker.recognize(file, { rectangle: { left: 0, top: 0, width: image.naturalWidth, height: Math.ceil(image.naturalHeight * 0.6) } }),
+          new Promise<null>(resolve => { retryTimer = setTimeout(() => resolve(null), 8_000); }),
+        ]);
+        if (retry) {
+          extracted.address = screenshotAddress(retry.data.text, retry.data.confidence);
+          extracted.jobNumber ||= sixDigitJobNumber(retry.data.text, retry.data.confidence);
+        }
+      } catch { /* Keep the first scan; address detection never blocks uploading. */ }
+      finally { URL.revokeObjectURL(url); clearTimeout(retryTimer); }
+    }
+    return extracted;
   };
   try {
     return await Promise.race([
       scan(),
       workerFailure,
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Job-number scan timed out.")), 30_000); }),
+      new Promise<{ jobNumber: string | null; address: string | null }>((resolve, reject) => { timer = setTimeout(() => partial ? resolve(partial) : reject(new Error("Job-number scan timed out.")), 30_000); }),
     ]);
   } finally {
     ended = true;
     clearTimeout(timer);
+    clearTimeout(retryTimer);
     if (worker) await worker.terminate();
   }
 }

@@ -11,8 +11,8 @@ import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 type Qc = { id: string; techId: string; jobNumber: string; address: string | null; status: string; trustUploadStatus: string; submittedAt: number; correctionDeadlineAt: number | null; photoIds: string[]; attemptNumber: number; correctionPending: number };
 type SnapshotStat = { techId: string; uploaded: number; monthlyGoal: number };
-const statuses = [["pending", "Needs review"], ["all", "All records"], ["approved", "Approved"], ["uploaded", "Uploaded to Catalyst"], ["rejected", "Rejected"]];
-const metricStatuses = statuses.filter(([value]) => value !== "pending");
+const statuses = [["pending", "Needs review"], ["all", "All records"], ["approved", "Approved"], ["uploaded", "Uploaded to Catalyst"], ["rejected", "Rejected"], ["fixed", "Fixed"]];
+const metricStatuses = statuses.filter(([value]) => value !== "pending" && value !== "fixed");
 function adminDeadline(q: Qc, now: number) {
   if (q.correctionPending === 1) return { label: "Fixed", state: "ready" };
   if (!q.correctionDeadlineAt) return { label: "Not set", state: "missing" };
@@ -115,7 +115,7 @@ export default function Home() {
     setFilters({
       month: "",
       tech: params.get("tech") || "",
-      status: ["all", "pending", "approved", "rejected", "uploaded"].includes(requestedStatus) ? requestedStatus : "all",
+      status: ["all", "pending", "approved", "rejected", "fixed", "uploaded"].includes(requestedStatus) ? requestedStatus : "all",
       search: params.get("search") || "",
     });
     history.replaceState(null, "", "/");
@@ -138,7 +138,7 @@ export default function Home() {
   useEffect(()=>{const controller=new AbortController();void load(controller.signal);return ()=>controller.abort();},[load]);
   useAutoRefresh(load);
   const matches = (q: Qc, status: string) => status === 'all' ? q.correctionPending !== 1 :
-    (status === 'uploaded' ? q.status === 'approved' && q.trustUploadStatus === 'uploaded' :
+    (status === 'fixed' ? q.status === 'rejected' && q.correctionPending === 1 : status === 'uploaded' ? q.status === 'approved' && q.trustUploadStatus === 'uploaded' :
       status === 'approved' ? q.status === 'approved' && q.trustUploadStatus !== 'uploaded' :
         q.status === status);
   const visible = items.filter(q => (!activitySelection?.day || activityDay(q.submittedAt) === activitySelection.day) && (!filters.tech || q.techId === filters.tech) && matches(q,filters.status) && `${q.techId} ${q.jobNumber} ${q.address ?? ""}`.toLowerCase().includes(filters.search.trim().toLowerCase()));

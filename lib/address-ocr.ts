@@ -19,7 +19,7 @@ export function screenshotAddress(text: string, confidence = 100): string | null
     // Stop at unrelated fields instead of incorporating account/phone numbers.
     value = value.split(/\s+(?:phone|account|job\s*#|customer\s*(?:name|id))\s*[:#]/i)[0].trim();
     if (/^(?:apt|unit|suite|ste)\s*#?\s*[A-Za-z0-9-]+$/i.test(lines[last + 1] || "")) value += " " + lines[++last];
-    if (cityStateZip.test(lines[last + 1] || "")) value += ", " + lines[last + 1];
+    if (cityStateZip.test(lines[last + 1] || "")) value = value.replace(/[,;]+$/, "") + ", " + lines[last + 1];
     const address = normalizeAddress(value);
     if (address) candidates.add(address);
   }

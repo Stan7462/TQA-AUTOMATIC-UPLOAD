@@ -12,7 +12,7 @@ export function useQcFilters(key: string, initialStatus = "all", persist = true)
     }
     try {
       const saved = JSON.parse(sessionStorage.getItem(key) || "null");
-      if (saved) setFilters({ month: /^\d{4}-\d{2}$/.test(saved.month) ? saved.month : "", tech: typeof saved.tech === "string" ? saved.tech : "", search: typeof saved.search === "string" ? saved.search : "", status: ["all", "pending", "approved", "rejected", "uploaded"].includes(saved.status) ? saved.status : initialStatus });
+      if (saved) setFilters({ month: /^\d{4}-\d{2}$/.test(saved.month) ? saved.month : "", tech: typeof saved.tech === "string" ? saved.tech : "", search: typeof saved.search === "string" ? saved.search : "", status: ["all", "pending", "approved", "rejected", "fixed", "uploaded"].includes(saved.status) ? saved.status : initialStatus });
     } catch { /* Storage is optional. */ }
     setReady(true);
   }, [key, initialStatus, persist]);
