@@ -865,3 +865,15 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .qc-camera-torch.is-on{background:#f5df83;color:#26220e;border-color:#ffeca6}
 .qc-camera-torch:disabled{opacity:.65;cursor:wait}
 .qc-camera-torch:focus-visible{outline:3px solid #66d7d1;outline-offset:4px}
+
+/* Actual photo magnification, with touch pinch, mouse wheel and bounded panning. */
+.qc-lightbox-image{touch-action:none;user-select:none;cursor:zoom-in}
+.qc-lightbox-image.is-zoomed{cursor:grab}.qc-lightbox-image.is-zoomed:active{cursor:grabbing}
+.qc-lightbox-image img{flex-shrink:0;transform-origin:center;pointer-events:none;will-change:transform}
+.qc-lightbox-tools{position:absolute;bottom:max(12px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center;gap:5px;max-width:calc(100% - 20px);padding:5px;background:#172a39;border:1px solid #526779;border-radius:16px;color:#fff}
+.qc-lightbox-tools button{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:40px;height:44px;padding:0;border:0;border-radius:10px;background:#263c4d;color:#fff;cursor:pointer}
+.qc-lightbox-tools button:disabled{opacity:.4;cursor:default}
+.qc-lightbox-tools output{min-width:48px;font-size:13px;text-align:center;font-variant-numeric:tabular-nums}
+.qc-lightbox-tools .qc-lightbox-fit{width:54px;gap:4px;font-size:12px}
+.qc-lightbox-tools>span{font-size:12px;min-width:25px;text-align:center}
+@media(max-width:380px){.qc-lightbox-tools{gap:3px}.qc-lightbox-tools button{width:32px}.qc-lightbox-tools .qc-lightbox-fit{width:48px}.qc-lightbox-tools output{min-width:42px}}
