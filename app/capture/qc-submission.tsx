@@ -14,7 +14,8 @@ import MonthlyGoalProgress from "./monthly-goal-progress";
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
 const MAX_SCREENSHOT_OUTPUT_BYTES = 250 * 1024;
 const MAX_LIVE_PHOTO_BYTES = 200 * 1024;
-const MAX_PHOTOS = 7;
+const MAX_INITIAL_PHOTOS = 7;
+const MAX_CORRECTION_PHOTOS = 10;
 const DEFAULT_MONTHLY_QC_GOAL = 5;
 const MAX_CAMERA_ZOOM = 5;
 type QcCounts = { captured: number; uploaded: number; rejected: number; urgentRejectedAt: number | null };
@@ -454,8 +455,11 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const rejectedDeadlineHours = qcCounts?.urgentRejectedAt && today ? remainingDeadlineHours(qcCounts.urgentRejectedAt, today.getTime()) : null;
   const validJobNumber = /^\d{1,6}$/.test(jobNumber);
   const redoNeedsChange = !!draftRef.current?.redoSourceId && !draftRef.current.redoChanged;
+  const correctionMode = Boolean(draftRef.current?.redoSourceId);
+  const minPhotos = correctionMode ? 1 : 2;
+  const maxPhotos = correctionMode ? MAX_CORRECTION_PHOTOS : MAX_INITIAL_PHOTOS;
   const submitHint = processingScreenshot ? "Reading your screenshot…" : !screenshot ? "Add your account screenshot." : !validJobNumber ? "Check or enter the job number." : taking ? "Finishing your photo…" : cameraOn ? "Close the camera to submit." : redoNeedsChange ? "Change the job number or at least one picture before resubmitting." : "";
-  const ready = validTechId && validJobNumber && !!screenshot && photos.length >= 2 && photos.length <= MAX_PHOTOS && !redoNeedsChange;
+  const ready = validTechId && validJobNumber && !!screenshot && photos.length >= minPhotos && photos.length <= maxPhotos && !redoNeedsChange;
 
   useEffect(() => {
     if (!draftReady || !month || draftRef.current?.fiscalMonth === month) return;
@@ -697,7 +701,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   }
 
   async function takePhoto() {
-    if (Date.now() < pinchCooldownUntil.current || !video.current?.videoWidth || !stream.current || taking || torchChanging.current || screenshotProcessing.current || photos.length >= MAX_PHOTOS) return;
+    if (Date.now() < pinchCooldownUntil.current || !video.current?.videoWidth || !stream.current || taking || torchChanging.current || screenshotProcessing.current || photos.length >= maxPhotos) return;
     if (!draftRef.current!.location && !locationRequest.current) void captureQcLocation();
     setTaking(true); setError(""); setCaptured(null); setFlash((current) => current + 1);
     try {
@@ -721,7 +725,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       setCaptured({ blob: photo, number: photos.length + 1 });
       navigator.vibrate?.(35);
       await queueDraftSave({ ...draftRef.current!, photos: nextPhotos, redoChanged: draftRef.current!.redoChanged || !!draftRef.current!.redoSourceId });
-      if (nextPhotos.length >= MAX_PHOTOS) window.setTimeout(stopCamera, 820);
+      if (nextPhotos.length >= maxPhotos) window.setTimeout(stopCamera, 820);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "The photo could not be captured."); }
     finally { setTaking(false); }
   }
@@ -823,7 +827,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         <div className="qc-step-timeline">
         <section className="qc-step qc-live-step">
           <div className="qc-step-marker"><span>1</span></div><div className="qc-step-card"><div className="qc-step-heading"><h2><span className="qc-compact-step-number">1</span>Live QC photos</h2><p>Take the required live photos.</p></div>
-          <button type="button" className="viewfinder qc-viewfinder is-off qc-camera-entry" onClick={() => void startCamera()} disabled={busy || processingScreenshot || photos.length >= MAX_PHOTOS} aria-label={photos.length >= MAX_PHOTOS ? "Maximum of seven live photos reached" : "Open live camera"}><span className="camera-placeholder"><Camera size={32}/><span>{photos.length >= MAX_PHOTOS ? "7 photos ready. Remove one to retake." : "Tap to take live photos"}</span></span></button>
+          <button type="button" className="viewfinder qc-viewfinder is-off qc-camera-entry" onClick={() => void startCamera()} disabled={busy || processingScreenshot || photos.length >= maxPhotos} aria-label={photos.length >= maxPhotos ? `Maximum of ${maxPhotos} live photos reached` : "Open live camera"}><span className="camera-placeholder"><Camera size={32}/><span>{photos.length >= maxPhotos ? `${maxPhotos} photos ready. Remove one to retake.` : correctionMode ? "Take the corrected-area photos needed for this follow-up" : "Tap to take live photos"}</span></span></button>
           {(screenshot || photos.length > 0) && <div className="qc-photo-grid qc-photo-gallery" data-photo-gallery>{screenshot && <div className="qc-photo qc-screenshot-photo"><ImagePreview blob={screenshot} alt="Account screenshot"/><span>Account</span></div>}{photos.map((photo, index) => <div className="qc-photo" key={index}><ImagePreview blob={photo} alt={`Live QC photo ${index + 1}`}/><button type="button" className="qc-remove-photo" aria-label={`Remove photo ${index + 1}`} disabled={busy || taking || processingScreenshot} onClick={() => removePhoto(index)}><Trash2 size={16}/></button><span>{index + 1}</span></div>)}</div>}
           {(photos.length > 0 || locationChecking) && <div className={`qc-location-capture ${location?.status ?? "checking"}`} role="status"><MapPin size={15}/><span>{locationChecking ? "Checking location…" : location?.status === "verified" ? `Location captured · ±${Math.round(location.accuracy)} m` : "Location unavailable"}</span>{location?.status === "unavailable" && !locationChecking && <button type="button" disabled={busy || taking} onClick={() => void captureQcLocation(true)}>Retry</button>}</div>}
           </div></section>
@@ -839,7 +843,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
           {error && cameraOn && <p className="qc-camera-error" role="alert">{error}</p>}
           <div className="qc-camera-bottom">
             <output className="qc-camera-zoom-value" aria-label={`Camera zoom ${cameraZoom.toFixed(1)} times`}>{cameraZoom.toFixed(1)}×</output>
-            <div className="qc-camera-controls"><div className="qc-camera-last-photo" aria-label={photos.length ? `Latest photo, ${photos.length} taken` : "No photos yet"}>{photos.length > 0 && <ImagePreview blob={photos[photos.length - 1]} alt="Latest photo" interactive={false}/>}</div><button type="button" className="qc-camera-shutter" onClick={() => void takePhoto()} disabled={!cameraReady || taking || torchBusy || busy || processingScreenshot || photos.length >= MAX_PHOTOS} aria-label={taking ? "Capturing photo" : "Take live QC photo"}/><span className="qc-camera-photo-count" aria-live="polite">{photos.length}/7</span></div>
+            <div className="qc-camera-controls"><div className="qc-camera-last-photo" aria-label={photos.length ? `Latest photo, ${photos.length} taken` : "No photos yet"}>{photos.length > 0 && <ImagePreview blob={photos[photos.length - 1]} alt="Latest photo" interactive={false}/>}</div><button type="button" className="qc-camera-shutter" onClick={() => void takePhoto()} disabled={!cameraReady || taking || torchBusy || busy || processingScreenshot || photos.length >= maxPhotos} aria-label={taking ? "Capturing photo" : "Take live QC photo"}/><span className="qc-camera-photo-count" aria-live="polite">{photos.length}/{maxPhotos}</span></div>
           </div>
         </div>
         {error && <p className="form-error" role="alert">{error}</p>}

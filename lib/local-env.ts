@@ -40,6 +40,7 @@ if (sqlite) {
     "0019_notification_summaries.sql",
     "0020_single_push_phone.sql",
     "0021_qc_address.sql",
+    "0022_catalyst_failure_workflow.sql",
   ]) {
     if (sqlite.prepare("SELECT 1 FROM local_migrations WHERE name = ?").get(name)) continue;
     const sql = readFileSync(join(process.cwd(), "drizzle", name), "utf8").replaceAll("--> statement-breakpoint", "");

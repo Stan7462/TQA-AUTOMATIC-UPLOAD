@@ -7,23 +7,25 @@ import QcFilterBar from "@/app/qc-filter-bar";
 import { useQcFilters } from "@/lib/use-qc-filters";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
-type Attempt={id:string;attemptNumber:number;techId:string;jobNumber:string;address:string|null;screenshotId:string;photoIds:string[];status:string;submittedAt:number;reviewNote:string|null;trustUploadStatus:string;locationStatus:string|null;locationLatitude:number|null;locationLongitude:number|null;locationAccuracy:number|null;locationCapturedAt:number|null};
+import { catalystQcCategories, suggestCatalystFailures, type CatalystFailure } from "@/lib/catalyst-qc";
+type Attempt={id:string;attemptNumber:number;techId:string;jobNumber:string;address:string|null;screenshotId:string;photoIds:string[];status:string;submittedAt:number;reviewNote:string|null;catalystFailures:CatalystFailure[];trustUploadStatus:string;locationStatus:string|null;locationLatitude:number|null;locationLongitude:number|null;locationAccuracy:number|null;locationCapturedAt:number|null};
 type Submission=Attempt&{rootSubmissionId:string;correctionPending:number;previousAttempts?:Attempt[]};
-const reasons = [
-  'Required tag(s) are missing.',
-  'All TAP ports must be used or properly terminated.',
-  'Photo is unclear. Retake a clear photo showing the required details.',
-  'TAP photo is incomplete. Make sure all TAP ports are visible.',
-  'Required house box is missing.',
-  'Connectors are not properly crimped. Recrimp or replace them.',
-  'Replace all old or black connectors.',
-  'Required photo(s) are missing. Add them to the QC.',
-  'Grounding or bonding attachment is incorrect. Fix the attachment.',
-];
-const rejectionClosing = 'Please correct this QC and submit new pictures within 72 hours.';
 
-type FocusReviewCardProps={item:Submission;readOnly?:boolean;backHref?:string;note?:string;busy?:boolean;onNoteChange?:(value:string)=>void;onDecide?:(status:'approved'|'rejected')=>Promise<boolean>};
-function FocusReviewCard({item,readOnly=false,backHref='/',note='',busy=false,onNoteChange,onDecide}:FocusReviewCardProps){
+function FailurePicker({note,value,onChange,busy}:{note:string;value:CatalystFailure[];onChange:(next:CatalystFailure[])=>void;busy:boolean}){
+ const suggested=useMemo(()=>suggestCatalystFailures(note),[note]);
+ const selected=(failure:CatalystFailure)=>value.some(item=>item.code===failure.code&&item.reason===failure.reason);
+ const toggle=(failure:CatalystFailure)=>onChange(selected(failure)?value.filter(item=>item.code!==failure.code||item.reason!==failure.reason):[...value.filter(item=>item.code!==failure.code),failure]);
+ return <section className="qc-failure-picker" aria-label="Catalyst failure reasons">
+  <div className="qc-failure-heading"><strong>Catalyst failure reasons</strong><span>{value.length} selected</span></div>
+  <p>Type the supervisor comment first. Matching Catalyst reasons appear below.</p>
+  {suggested.length>0&&<div className="qc-failure-suggestions"><small>Suggested from your comment</small>{suggested.map(failure=><button type="button" className={selected(failure)?'selected':''} disabled={busy} key={`${failure.code}-${failure.reason}`} onClick={()=>toggle(failure)}><b>{failure.code}</b>{failure.reason}</button>)}</div>}
+  {value.length>0&&<div className="qc-failure-selected">{value.map(failure=><button type="button" disabled={busy} key={`${failure.code}-${failure.reason}`} onClick={()=>toggle(failure)} aria-label={`Remove ${failure.code} ${failure.reason}`}><b>{failure.code}</b>{failure.reason}<X size={14}/></button>)}</div>}
+  <div className="qc-failure-topics">{catalystQcCategories.map(category=><details key={category.code}><summary><b>{category.code}</b><span>{category.title}</span></summary><div>{category.reasons.map(reason=>{const failure={code:category.code,reason};return <label key={reason}><input type="checkbox" checked={selected(failure)} disabled={busy} onChange={()=>toggle(failure)}/><span>{reason}</span></label>})}</div></details>)}</div>
+ </section>;
+}
+
+type FocusReviewCardProps={item:Submission;readOnly?:boolean;backHref?:string;note?:string;failures?:CatalystFailure[];busy?:boolean;onNoteChange?:(value:string)=>void;onFailuresChange?:(value:CatalystFailure[])=>void;onDecide?:(status:'approved'|'rejected')=>Promise<boolean>};
+function FocusReviewCard({item,readOnly=false,backHref='/',note='',failures=[],busy=false,onNoteChange,onFailuresChange,onDecide}:FocusReviewCardProps){
  const attempts=useMemo(()=>[...(item.previousAttempts??[]),item].sort((a,b)=>a.attemptNumber-b.attemptNumber),[item]);
  const [selectedAttempt,setSelectedAttempt]=useState(item.attemptNumber);
  const displayed=attempts.find(attempt=>attempt.attemptNumber===selectedAttempt)??item;
@@ -70,18 +72,11 @@ function FocusReviewCard({item,readOnly=false,backHref='/',note='',busy=false,on
     <div className="qc-focus-heading"><div><h3>Job {displayed.jobNumber}</h3><p>Tech {displayed.techId} · {new Date(displayed.submittedAt).toLocaleString()}</p></div><span className={`qc-status ${statusClass}`}>{statusLabel}</span></div>
     {attempts.length>1&&<div className="qc-attempt-tabs" aria-label="QC attempts">{attempts.map(attempt=><button type="button" key={attempt.attemptNumber} className={selectedAttempt===attempt.attemptNumber?'active':''} aria-pressed={selectedAttempt===attempt.attemptNumber} onClick={()=>setSelectedAttempt(attempt.attemptNumber)}>Attempt {attempt.attemptNumber}</button>)}</div>}
     <dl className="qc-focus-facts"><div className="qc-address-fact"><dt>Address</dt><dd>{displayed.address || "Address not detected"}</dd></div><div><dt>Pictures</dt><dd>{photos.length}</dd></div><div><dt>Current picture</dt><dd>{photos[activePhoto].label}</dd></div><div><dt>Location</dt><dd>{location?<a href={`https://www.google.com/maps?q=${displayed.locationLatitude},${displayed.locationLongitude}`} target="_blank" rel="noreferrer">Verified{displayed.locationAccuracy!==null?` · ±${Math.round(displayed.locationAccuracy)} m`:''}</a>:displayed.locationStatus==='unavailable'?'Unavailable':'Not recorded'}</dd></div></dl>
-    {readOnly||!reviewingCurrent?<div className="qc-focus-readonly"><strong>{reviewingCurrent?'QC details':`Attempt ${displayed.attemptNumber}`}</strong><p>{displayed.status==='pending'?'This QC is waiting for supervisor review.':isUploaded?'This QC was uploaded to Catalyst.':displayed.status==='approved'?'This QC is approved and ready for Catalyst.':'This attempt was rejected.'}</p>{displayed.reviewNote&&<><strong>Review note</strong><p>{displayed.reviewNote}</p></>}</div>:<>
+    {readOnly||!reviewingCurrent?<div className="qc-focus-readonly"><strong>{reviewingCurrent?'QC details':`Attempt ${displayed.attemptNumber}`}</strong><p>{displayed.status==='pending'?'This QC is waiting for supervisor review.':isUploaded?'This QC was uploaded to Catalyst.':displayed.status==='approved'?'This QC is approved and ready for Catalyst.':'This attempt was rejected.'}</p>{displayed.reviewNote&&<><strong>Supervisor comment</strong><p>{displayed.reviewNote}</p></>}{displayed.catalystFailures?.length>0&&<div className="qc-readonly-failures">{displayed.catalystFailures.map(failure=><span key={`${failure.code}-${failure.reason}`}><b>{failure.code}</b> {failure.reason}</span>)}</div>}</div>:<>
     <button className="button dark qc-focus-approve" disabled={busy||!!decisionEffect} onClick={()=>void submitDecision('approved')}><Check size={18}/>Approve QC</button>
-    <label className="qc-focus-note">Rejection note<textarea aria-label={`Rejection note for job ${item.jobNumber}`} placeholder="Explain what needs fixing" value={note} maxLength={1000} onChange={event=>onNoteChange?.(event.target.value)}/></label>
-    <label className="qc-reason-picker">Add a reason<select aria-label={`Add rejection reason for job ${item.jobNumber}`} value="" disabled={busy} onChange={event=>{
-     const reason=event.target.value;if(!reason)return;
-     const existing=note.trim();
-     const withoutClosing=existing.endsWith(rejectionClosing)?existing.slice(0,-rejectionClosing.length).trim():existing;
-     if(withoutClosing.includes(reason))return;
-     const selected=[withoutClosing,reason].filter(Boolean).join(' ');
-     onNoteChange?.(`${selected} ${rejectionClosing}`.trim().slice(0,1000));
-    }}><option value="">Choose a reason…</option>{reasons.map(reason=><option key={reason} value={reason}>{reason}</option>)}</select></label>
-    <button className="button light qc-focus-reject" disabled={busy||!!decisionEffect||!note.trim()} onClick={()=>void submitDecision('rejected')}><X size={18}/>Reject with note</button>
+    <label className="qc-focus-note">Supervisor comment<textarea aria-label={`Supervisor comment for job ${item.jobNumber}`} placeholder="Describe what failed, for example: ground wire is not attached to the electrical meter" value={note} maxLength={1000} onChange={event=>onNoteChange?.(event.target.value)}/></label>
+    <FailurePicker note={note} value={failures} busy={busy} onChange={value=>onFailuresChange?.(value)}/>
+    <button className="button light qc-focus-reject" disabled={busy||!!decisionEffect||!note.trim()||failures.length===0} onClick={()=>void submitDecision('rejected')}><X size={18}/>Reject QC</button>
     </>}
     <small className="qc-focus-key-hint">Use the arrow keys or thumbnails to check every picture.</small>
    </aside>
@@ -93,7 +88,7 @@ export default function QcInbox(){
  const {filters,setFilters,ready}=useQcFilters('tqa-approval-filters','pending');
  const [items,setItems]=useState<Submission[]>([]);
  const [loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState('');
- const [decisionBusy,setDecisionBusy]=useState<string|null>(null),[notes,setNotes]=useState<Record<string,string>>({});
+ const [decisionBusy,setDecisionBusy]=useState<string|null>(null),[notes,setNotes]=useState<Record<string,string>>({}),[failures,setFailures]=useState<Record<string,CatalystFailure[]>>({});
  const [selected,setSelected]=useState(''),[readOnly,setReadOnly]=useState(false),[fixedReview,setFixedReview]=useState(false),[returnTo,setReturnTo]=useState('/');
  const generation=useRef(0);
  useEffect(()=>{const params=new URLSearchParams(location.search);setSelected(params.get('qc')||'');setReadOnly(params.get('readonly')==='1');setFixedReview(params.get('fixed')==='1');const requestedReturn=params.get('return');setReturnTo(requestedReturn?.startsWith('/')&&!requestedReturn.startsWith('//')?requestedReturn:'/');if(params.get('queue')==='pending'){setFilters({month:'',tech:'',status:'pending',search:''});history.replaceState(null,'','/captures');}},[setFilters]);
@@ -113,7 +108,7 @@ export default function QcInbox(){
  async function decide(id:string,status:'approved'|'rejected'):Promise<boolean>{
   if(decisionBusy)return false;
   setDecisionBusy(id);setNotice('');setError('');++generation.current;
-  try{const response: Response=await fetch(`/api/qc-submissions/${id}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status,reviewNote:notes[id]||''})});const result=await response.json() as {error?:string};if(!response.ok)throw Error(result.error||'Could not save decision.');await load();setNotice(`Job ${items.find(q=>q.id===id)?.jobNumber || ''} ${status}.`);return true;}
+  try{const response: Response=await fetch(`/api/qc-submissions/${id}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status,reviewNote:notes[id]||'',failureReasons:failures[id]||[]})});const result=await response.json() as {error?:string};if(!response.ok)throw Error(result.error||'Could not save decision.');await load();setNotice(`Job ${items.find(q=>q.id===id)?.jobNumber || ''} ${status}.`);return true;}
   catch(cause){setError(cause instanceof Error?cause.message:'Could not save decision.');return false;}finally{setDecisionBusy(null);}
  }
  const visible=items.filter(q=>selected?q.id===selected:(!filters.tech||q.techId===filters.tech)&&(filters.status==='all'||(filters.status==='fixed'?q.status==='rejected'&&q.correctionPending===1:filters.status==='uploaded'?q.status==='approved'&&q.trustUploadStatus==='uploaded':filters.status==='approved'?q.status==='approved'&&q.trustUploadStatus!=='uploaded':q.status===filters.status))&&`${q.techId} ${q.jobNumber} ${q.address ?? ""}`.toLowerCase().includes(filters.search.trim().toLowerCase()));
@@ -122,7 +117,7 @@ export default function QcInbox(){
  <div className="admin-page-content qc-inbox">{selected?(readOnly||fixedReview)?null:<p className="qc-notice">Reviewing one job. <a href="/captures?queue=pending">Return to approval queue</a></p>:<QcFilterBar value={filters} onChange={setFilters} techIds={items.map(q=>q.techId)} currentMonthOnly/>}
  <div className="qc-inbox-content"><section className="qc-review-panel" aria-label="QC approval queue">
  {notice&&<p className="qc-notice" role="status">{notice}</p>}{error&&<p className="form-error" role="alert">{error}</p>}
- {loading||!ready?<p className="qc-empty">Loading QCs…</p>:!visible.length?<div className="qc-empty">{selected?'This QC is no longer available.':'No QCs match these filters.'}</div>:<div className="qc-submission-list">{groups.map(([techId,group])=><section className="qc-tech-group" key={techId}><h2>Tech {techId} <small>{group?.length} {group?.length === 1 ? "QC" : "QCs"}</small></h2>{group?.map(item=>readOnly?<FocusReviewCard key={item.id} item={item} readOnly backHref={returnTo}/>:item.status==='pending'||item.correctionPending===1?<FocusReviewCard key={item.id} item={item} backHref={returnTo} note={notes[item.id]||''} busy={!!decisionBusy} onNoteChange={value=>setNotes(current=>({...current,[item.id]:value}))} onDecide={status=>decide(item.id,status)}/>:<article id={`qc-${item.id}`} className="qc-approved-row" key={item.id}>
+ {loading||!ready?<p className="qc-empty">Loading QCs…</p>:!visible.length?<div className="qc-empty">{selected?'This QC is no longer available.':'No QCs match these filters.'}</div>:<div className="qc-submission-list">{groups.map(([techId,group])=><section className="qc-tech-group" key={techId}><h2>Tech {techId} <small>{group?.length} {group?.length === 1 ? "QC" : "QCs"}</small></h2>{group?.map(item=>readOnly?<FocusReviewCard key={item.id} item={item} readOnly backHref={returnTo}/>:item.status==='pending'||item.correctionPending===1?<FocusReviewCard key={item.id} item={item} backHref={returnTo} note={notes[item.id]||''} failures={failures[item.id]||[]} busy={!!decisionBusy} onNoteChange={value=>setNotes(current=>({...current,[item.id]:value}))} onFailuresChange={value=>setFailures(current=>({...current,[item.id]:value}))} onDecide={status=>decide(item.id,status)}/>:<article id={`qc-${item.id}`} className="qc-approved-row" key={item.id}>
  <div className="qc-approved-meta"><strong>Job {item.jobNumber}</strong><span>{new Date(item.submittedAt).toLocaleString()}</span><span className={`qc-status ${item.status}`}>{item.status==='pending'?'Needs review':item.status==='approved'?'Approved':'Rejected'}</span>{item.status==='approved'&&<small>{item.trustUploadStatus==='uploaded'?'Uploaded to Catalyst':item.trustUploadStatus==='failed'?'Catalyst upload needs retry':'Ready for Catalyst'}</small>}{item.locationStatus==='verified'&&item.locationLatitude!==null&&item.locationLongitude!==null?<a className="qc-location-link" href={`https://www.google.com/maps?q=${item.locationLatitude},${item.locationLongitude}`} target="_blank" rel="noreferrer"><MapPin size={14}/>Location verified{item.locationAccuracy!==null?` · ±${Math.round(item.locationAccuracy)} m`:''}</a>:<span className="qc-location-missing"><MapPin size={14}/>{item.locationStatus==='unavailable'?'Location unavailable':'Location not recorded'}</span>}</div>
  <div className={`qc-unified-gallery${item.status!=='pending'?' compact':''}`} data-photo-gallery>{[{id:item.screenshotId,label:'Account screenshot'},...item.photoIds.map((id,i)=>({id,label:`QC photo ${i+1}`}))].map(p=><button type="button" key={p.id} aria-label={`Enlarge ${p.label} for job ${item.jobNumber}`}><img src={`/api/captures/${p.id}`} alt={p.label} loading="lazy"/><span>{p.label}</span></button>)}</div>
  {item.reviewNote&&<div className="profile-note"><strong>Review note</strong><p>{item.reviewNote}</p></div>}

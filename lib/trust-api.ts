@@ -15,6 +15,11 @@ export type TrustQcRow = {
   trustExternalReference: string | null;
   trustUploadError: string | null;
   trustUploadAttempts: number;
+  status: "approved" | "rejected";
+  reviewNote: string | null;
+  catalystFailures: string | null;
+  trustUploadKind: "observation" | "follow_up";
+  catalystObservationId: string | null;
 };
 
 export const trustNoStore = { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" };
@@ -66,7 +71,12 @@ export function trustQc(request: Request, row: TrustQcRow) {
     id: row.id,
     jobNumber: row.jobNumber,
     techId: row.techId,
-    reviewStatus: "approved" as const,
+    reviewStatus: row.status,
+    workflow: row.trustUploadKind,
+    outcome: row.status === "rejected" ? "fail" as const : "pass" as const,
+    supervisorComment: row.reviewNote,
+    failureReasons: row.catalystFailures ? JSON.parse(row.catalystFailures) : [],
+    catalystObservationId: row.catalystObservationId,
     uploadStatus: row.trustUploadStatus,
     submittedAt: new Date(row.submittedAt).toISOString(),
     approvedAt: row.reviewedAt ? new Date(row.reviewedAt).toISOString() : null,
@@ -78,4 +88,4 @@ export function trustQc(request: Request, row: TrustQcRow) {
   };
 }
 
-export const trustQcSelect = "id, tech_id AS techId, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, submitted_at AS submittedAt, reviewed_at AS reviewedAt, trust_upload_status AS trustUploadStatus, trust_uploaded_at AS trustUploadedAt, trust_external_reference AS trustExternalReference, trust_upload_error AS trustUploadError, trust_upload_attempts AS trustUploadAttempts";
+export const trustQcSelect = "id, tech_id AS techId, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, status, review_note AS reviewNote, catalyst_failures AS catalystFailures, trust_upload_kind AS trustUploadKind, catalyst_observation_id AS catalystObservationId, submitted_at AS submittedAt, reviewed_at AS reviewedAt, trust_upload_status AS trustUploadStatus, trust_uploaded_at AS trustUploadedAt, trust_external_reference AS trustExternalReference, trust_upload_error AS trustUploadError, trust_upload_attempts AS trustUploadAttempts";

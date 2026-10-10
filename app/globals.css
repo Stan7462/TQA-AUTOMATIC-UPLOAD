@@ -879,3 +879,11 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 @media(max-width:380px){.qc-lightbox-tools{gap:3px}.qc-lightbox-tools button{width:32px}.qc-lightbox-tools .qc-lightbox-fit{width:48px}.qc-lightbox-tools output{min-width:42px}}
 
 .qc-focus-facts .qc-address-fact dd { max-width: 75%; overflow-wrap: anywhere; white-space: normal; }
+
+.qc-failure-picker{display:grid;gap:10px;padding:14px;border:1px solid #486170;border-radius:14px;background:#10212c;color:#d9e7ef}
+.qc-failure-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.qc-failure-heading span{padding:4px 8px;border-radius:999px;background:#294656;color:#bfe8df;font-size:12px}
+.qc-failure-picker>p{margin:0;color:#9eb1be;font-size:13px;line-height:1.45}
+.qc-failure-suggestions{display:flex;flex-wrap:wrap;gap:7px}.qc-failure-suggestions small{flex-basis:100%;color:#8fd4c5}.qc-failure-suggestions button,.qc-failure-selected button{display:flex;align-items:center;gap:6px;padding:7px 9px;border:1px solid #527080;border-radius:9px;background:#1a303d;color:#e8f3f8;text-align:left;cursor:pointer}.qc-failure-suggestions button.selected{border-color:#63d5b3;background:#24493f}.qc-failure-suggestions b,.qc-failure-selected b{color:#8edbd2}
+.qc-failure-selected{display:grid;gap:6px}.qc-failure-selected button{justify-content:flex-start;border-color:#5b8f80;background:#173a32}.qc-failure-selected button svg{margin-left:auto}
+.qc-failure-topics{display:grid;gap:6px}.qc-failure-topics details{border:1px solid #3e5665;border-radius:9px;background:#142936;overflow:hidden}.qc-failure-topics summary{display:flex;gap:8px;padding:10px 12px;cursor:pointer}.qc-failure-topics summary b{color:#91ded5}.qc-failure-topics details>div{display:grid;gap:1px;padding:0 8px 8px}.qc-failure-topics label{display:grid;grid-template-columns:auto 1fr;gap:9px;align-items:start;padding:8px;border-radius:7px;background:#1b313e;font-size:13px;line-height:1.35;cursor:pointer}.qc-failure-topics input{margin-top:2px;accent-color:#53c9a7}
+.qc-readonly-failures{display:grid;gap:5px;margin-top:10px}.qc-readonly-failures span{padding:7px 9px;border-radius:8px;background:#18303c;font-size:13px}.qc-readonly-failures b{color:#8edbd2;margin-right:5px}

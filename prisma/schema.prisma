@@ -72,6 +72,9 @@ model QcSubmission {
   attemptNumber          Int     @default(1) @map("attempt_number")
   correctionPending      Int     @default(0) @map("correction_pending")
   correctionDeadlineAt   BigInt? @map("correction_deadline_at")
+  catalystFailures       String? @map("catalyst_failures")
+  trustUploadKind        String  @default("observation") @map("trust_upload_kind")
+  catalystObservationId  String? @map("catalyst_observation_id")
 
   @@index([status, submittedAt], map: "idx_qc_submissions_status_submitted")
   @@index([techId, submittedAt], map: "idx_qc_submissions_tech_submitted")
@@ -106,6 +109,9 @@ model QcSubmissionAttempt {
   locationLongitude      Float?  @map("location_longitude")
   locationAccuracy       Float?  @map("location_accuracy")
   locationCapturedAt     BigInt? @map("location_captured_at")
+  catalystFailures       String? @map("catalyst_failures")
+  trustUploadKind        String  @default("observation") @map("trust_upload_kind")
+  catalystObservationId  String? @map("catalyst_observation_id")
 
   @@id([tenantId, rootSubmissionId, attemptNumber])
   @@index([tenantId, rootSubmissionId, attemptNumber], map: "idx_qc_submission_attempts_root")

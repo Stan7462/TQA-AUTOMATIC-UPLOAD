@@ -54,7 +54,9 @@ function render() {
     const card = document.createElement("div"); card.className = "qc";
     const meta = document.createElement("div");
     const name = document.createElement("strong"); name.textContent = `Job ${qc.jobNumber}`;
-    const details = document.createElement("small"); details.textContent = `Tech ${qc.techId} · ${qc.photos.length} photos`;
+    const details = document.createElement("small");
+    const workflow = qc.workflow === "follow_up" ? "Correction follow-up" : qc.outcome === "fail" ? "Failed observation" : "Passing observation";
+    details.textContent = `Tech ${qc.techId} · ${qc.photos.length} photos · ${workflow}`;
     const badge = document.createElement("span"); badge.className = `badge ${qc.uploadStatus}`; badge.textContent = qc.uploadStatus === "failed" ? "Retry needed" : qc.uploadStatus === "uploaded" ? "Uploaded" : "Ready";
     meta.append(name, details); card.append(meta, badge); $("queue").append(card);
   }

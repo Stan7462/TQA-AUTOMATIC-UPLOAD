@@ -100,6 +100,7 @@ reconcileRuntimeMigration("0016_technician_monthly_qc_goal.sql", "20261008010000
 reconcileRuntimeMigration("0017_push_notifications.sql", "20261008020000_push_notifications", "push_accounts", ["external_id", "enabled"]);
 reconcileRuntimeMigration("0018_company_notification_policy.sql", "20261008030000_company_notification_policy", "push_company_preferences", ["rejected", "deadline", "overdue", "monthly"]);
 reconcileRuntimeMigration("0021_qc_address.sql", "20261009000000_qc_address", "qc_submissions", ["address"]);
+reconcileRuntimeMigration("0022_catalyst_failure_workflow.sql", "20261010000000_catalyst_failure_workflow", "qc_submissions", ["catalyst_failures", "trust_upload_kind", "catalyst_observation_id"], ["idx_qc_submissions_tenant_workflow"]);
 runPrisma("migrate", "deploy");
 
 }

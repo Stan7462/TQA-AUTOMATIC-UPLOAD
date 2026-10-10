@@ -1,15 +1,15 @@
 # TQA Automatic Upload → Trust extension API
 
-Version: 2 (2026-09-29)
+Version: 3 (2026-10-10)
 
 Base URL: `{{TQA_BASE_URL}}`
 
-This document is the contract for a separate browser extension that uploads approved TQA QCs into Trust. The API runs on the TQA server. Trust login and Trust page automation belong to the extension; this API does not log into Trust or send files to Trust itself.
+This document is the contract for the browser extension that uploads passing observations, failed observations, and corrected follow-ups into Catalyst. The API runs on the TQA server. Catalyst login and page automation belong to the extension.
 
 ## Required extension workflow
 
 1. The supervisor enters only their Admin ID and password. The extension connects to the built-in shared TQA origin, and the server verifies the complete credential pair, identifies exactly one company, and refuses an ambiguous match. The extension receives a 12-hour company-scoped session and immediately discards the password.
-2. On opening, call `GET /api/integrations/trust/qcs` and display the `qcs` list. Only approved QCs from the current fiscal month (22nd through the following 21st) with `uploadStatus` `ready` or `failed` appear by default. The queue starts fresh every 22nd. Follow `nextCursor` for more pages.
+2. On opening, call `GET /api/integrations/trust/qcs` and display the `qcs` list. Passing approved QCs, structured first-attempt failures, and approved correction follow-ups from the current fiscal month appear when their `uploadStatus` is `ready` or `failed`.
 3. On **Start**, process QCs one at a time. Before each QC, call `GET /api/integrations/trust/qcs/{id}` to recheck its status. Fetch every photo with the same bearer key, then upload the screenshot and live photos to the correct Trust job. Show progress in the extension (e.g., 2 of 6 photos and 3 of 10 QCs). The server does not track percentage.
 4. Confirm that Trust saved **all** required photos for that QC. Only then call `PATCH /api/integrations/trust/qcs/{id}/upload` with `{"status":"uploaded"}`. If Trust returns a job or upload ID, include it as `externalReference`.
 5. Remove that QC from the visible extension queue after the API confirms `uploadStatus: "uploaded"`. Refresh the list to reconcile. If Trust upload fails, report `failed` with a short error; it remains available for retry.
@@ -48,7 +48,9 @@ JSON responses use `Cache-Control: private, no-store`. Times are ISO 8601 UTC. I
 
 ## Data and status model
 
-- `reviewStatus`: `approved` for all QCs returned by this integration API. Pending and rejected QCs are inaccessible here.
+- `reviewStatus`: `approved` or `rejected`. A rejected item is returned only for its structured first failed observation.
+- `workflow`: `observation` creates and completes an observation; `follow_up` opens `catalystObservationId` and saves corrected pictures.
+- `outcome`: `pass` or `fail`. Failed observations also contain `supervisorComment` and `failureReasons` (`code` + exact Catalyst reason).
 - `uploadStatus`: `ready` (approved and never reported), `failed` (last Trust attempt failed; retryable), or `uploaded` (Trust upload confirmed; omitted from the default list).
 - A QC remains **Approved** in TQA after it becomes **Uploaded** to Trust. These are separate states.
 - On first approval, the Trust upload state defaults to `ready`. Existing approved QCs also start as `ready` when this API is installed.
@@ -73,6 +75,11 @@ Authorization: Bearer <key>
       "jobNumber": "EXAMPLE-JOB-001",
       "techId": "EXAMPLE-TECH",
       "reviewStatus": "approved",
+      "workflow": "observation",
+      "outcome": "pass",
+      "supervisorComment": null,
+      "failureReasons": [],
+      "catalystObservationId": null,
       "uploadStatus": "ready",
       "submittedAt": "2026-09-18T15:02:08.000Z",
       "approvedAt": "2026-09-18T15:10:00.000Z",

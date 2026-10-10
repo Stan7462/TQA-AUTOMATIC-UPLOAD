@@ -1,4 +1,4 @@
-import { JOBS_URL, TQA_APP_ORIGIN, exactJobMatches, observationTypeAssignments, observationUrl, orderedPhotos, safeError } from "./core.js";
+import { JOBS_URL, OBSERVATIONS_URL, TQA_APP_ORIGIN, completedObservationUrl, exactJobMatches, observationTypeAssignments, observationUrl, orderedPhotos, safeError } from "./core.js";
 
 let activeRun = null;
 let stopRequested = false;
@@ -198,6 +198,19 @@ async function navigate(tabId, url) {
   throw error;
 }
 
+async function waitForObservationId(tabId, timeoutMs = 20000) {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.url?.includes("/TechOps/observation")) {
+      const id = new URL(tab.url).searchParams.get("id");
+      if (/^\d+$/.test(id || "")) return id;
+    }
+    await delay(250);
+  }
+  throw new Error("Catalyst opened the failed observation without a readable observation ID.");
+}
+
 function waitForSuccess(tabId, timeoutMs = 45000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { successWaiters.delete(tabId); reject(new Error("No Observation Saved completion message appeared.")); }, timeoutMs);
@@ -226,10 +239,32 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
     observationType, stage: "loading QC", message: `Loading job ${qcSummary.jobNumber} as ${observationType} (attempt ${attempt} of ${MAX_QC_ATTEMPTS})` });
   try {
     qc = await detail(qcSummary.id);
-    if (qc.reviewStatus !== "approved" || !["ready", "failed"].includes(qc.uploadStatus)) {
+    if (!["approved", "rejected"].includes(qc.reviewStatus) || !["ready", "failed"].includes(qc.uploadStatus)) {
       return { status: "skipped", jobNumber: qc.jobNumber };
     }
-    const photos = orderedPhotos(qc);
+    const photos = qc.workflow === "follow_up" ? orderedPhotos(qc).filter((photo) => photo.kind === "live_photo") : orderedPhotos(qc);
+    if (qc.workflow === "follow_up") {
+      if (!/^\d+$/.test(qc.catalystObservationId || "")) throw new Error("The corrected QC is missing its Catalyst observation ID.");
+      await setRun({ currentQcId: qc.id, jobNumber: qc.jobNumber, techId: qc.techId, photoTotal: photos.length, stage: "opening follow-up", message: `Opening failed Catalyst observation ${qc.catalystObservationId} for job ${qc.jobNumber}` });
+      await navigate(tabId, completedObservationUrl(qc.catalystObservationId));
+      await pageCommand(tabId, "PREPARE_FOLLOW_UP", { jobNumber: qc.jobNumber, techId: qc.techId }, 30000);
+      for (let i = 0; i < photos.length; i++) {
+        if (stopRequested) throw new Error("Stopped by user before completing this follow-up.");
+        await setRun({ stage: "uploading correction", photoIndex: i, message: `Uploading corrected photo ${i + 1} of ${photos.length} for job ${qc.jobNumber}` });
+        const base64 = await photoBase64(photos[i].url);
+        await pageCommand(tabId, "UPLOAD_FOLLOW_UP_PHOTO", { base64, fileName: photos[i].id }, 60000);
+        photoCount = i + 1;
+        await setRun({ photoIndex: photoCount });
+      }
+      await setRun({ stage: "saving follow-up", message: `Saving completed follow-up for job ${qc.jobNumber}` });
+      const success = waitForSuccess(tabId);
+      try { await pageCommand(tabId, "SAVE_FOLLOW_UP", { note: "Issues are fixed." }, 10000); } catch { /* dialog can close before replying */ }
+      const successMessage = await success;
+      const uploaded = await report(qc.id, "uploaded", qc.catalystObservationId);
+      if (uploaded.uploadStatus !== "uploaded") throw new Error("TQA did not confirm follow-up upload status.");
+      await setRun({ stage: "uploaded", message: `Job ${qc.jobNumber} follow-up: ${successMessage}` });
+      return { status: "uploaded", jobNumber: qc.jobNumber };
+    }
     await setRun({ currentQcId: qc.id, jobNumber: qc.jobNumber, techId: qc.techId, photoTotal: photos.length,
       stage: "finding job", message: `Finding job ${qc.jobNumber} (attempt ${attempt} of ${MAX_QC_ATTEMPTS})` });
     await navigate(tabId, JOBS_URL);
@@ -244,7 +279,7 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
     const jobId = matches[0].jobId;
     await setRun({ stage: "opening observation", jobId, message: `Opening Catalyst job ID ${jobId}` });
     await navigate(tabId, observationUrl(jobId));
-    await pageCommand(tabId, "PREPARE", { jobNumber: qc.jobNumber, techId: qc.techId, observationType });
+    const prepared = await pageCommand(tabId, "PREPARE", { jobNumber: qc.jobNumber, techId: qc.techId, observationType });
     for (let i = 0; i < photos.length; i++) {
       if (stopRequested) throw new Error("Stopped by user before completing this QC.");
       await setRun({ stage: "uploading", photoIndex: i, message: `Uploading photo ${i + 1} of ${photos.length} for job ${qc.jobNumber}` });
@@ -254,14 +289,22 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
       await setRun({ photoIndex: photoCount });
     }
     await setRun({ stage: "quality checks", message: `Setting checks for job ${qc.jobNumber}` });
-    await pageCommand(tabId, "SET_CHECKS");
+    await pageCommand(tabId, "SET_CHECKS", { failures: qc.outcome === "fail" ? qc.failureReasons : [], supervisorComment: qc.outcome === "fail" ? qc.supervisorComment : "" });
     if (stopRequested) throw new Error("Stopped by user before completing this QC.");
     await setRun({ stage: "completing", message: `Completing job ${qc.jobNumber}` });
     const success = waitForSuccess(tabId);
     try { await pageCommand(tabId, "COMPLETE", {}, 10000); } catch { /* page can navigate before replying */ }
     const successMessage = await success;
     await setRun({ stage: "reporting", message: `${successMessage}; reporting to TQA` });
-    const uploaded = await report(qc.id, "uploaded", jobId);
+    let externalReference = jobId;
+    if (qc.outcome === "fail") {
+      if (!prepared?.technicianName) throw new Error("Catalyst technician name was not available for locating the completed failed observation.");
+      await setRun({ stage: "locating failed observation", message: `Finding completed failed observation for job ${qc.jobNumber}` });
+      await navigate(tabId, OBSERVATIONS_URL);
+      const found = await pageCommand(tabId, "FIND_COMPLETED_OBSERVATION", { jobNumber: qc.jobNumber, technicianName: prepared.technicianName }, 60000);
+      externalReference = /^\d+$/.test(found?.observationId || "") ? found.observationId : await waitForObservationId(tabId);
+    }
+    const uploaded = await report(qc.id, "uploaded", externalReference);
     if (uploaded.uploadStatus !== "uploaded") throw new Error("TQA did not confirm uploaded status.");
     await setRun({ stage: "uploaded", message: `Job ${qc.jobNumber}: ${successMessage}` });
     return { status: "uploaded", jobNumber: qc.jobNumber };
@@ -289,8 +332,8 @@ async function runQueue() {
     const pending = observationTypeAssignments(queue, percentage);
     const rideAlongCount = pending.filter((item) => item.observationType === "Ride Along").length;
     await setRun({ status: "running", total: queue.length, index: 0, rideAlongPercentage: percentage, rideAlongCount,
-      stage: "starting", message: `${queue.length} approved QCs to process; ${rideAlongCount} randomly selected as Ride Along (${percentage}%).` });
-    if (!queue.length) { await setRun({ status: "done", stage: "done", message: "No approved QCs are ready to upload." }); return; }
+      stage: "starting", message: `${queue.length} Catalyst QCs to process; ${rideAlongCount} observations randomly selected as Ride Along (${percentage}%).` });
+    if (!queue.length) { await setRun({ status: "done", stage: "done", message: "No QCs are ready to upload." }); return; }
     const tab = await chrome.tabs.create({ url: JOBS_URL, active: true });
     tabId = tab.id;
     await setRun({ tabId });
