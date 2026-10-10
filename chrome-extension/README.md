@@ -15,3 +15,5 @@ The popup's **Activity log** keeps the latest 200 timestamped steps, including C
 No match or multiple matches are reported as failed for manual review. If any photos may have reached Catalyst but completion is uncertain, the run stops with **needs review**. Inspect that Catalyst observation. If it fully completed, click **Confirm already uploaded** to report success to TQA. If it did not complete, remove any partial upload before clicking **Retry after cleanup**. A Chrome restart during a run also requires review.
 
 This extension has not been run against a live Catalyst upload during development. Verify one approved QC end to end before running a large queue; Catalyst may change its page structure or upload confirmation UI.
+
+Version 0.7.1 refreshes the queue after successful uploads and picks up newly unlocked approved Fix follow-ups during the same run. Technicians can redo before the first Fail uploads. Only the first Fail and final approved Fix are sent; rejected intermediate attempts remain in TQA history. Reload or update the extension to use this behavior.

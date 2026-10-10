@@ -343,6 +343,16 @@ async function runQueue() {
       const item = pending.shift();
       const result = await processOne(item.qc, tabId, item.index, queue.length, item.attempt, item.observationType);
       if ((await stored()).run?.status === "needs_review") return;
+      if (result.status === "uploaded" && !stopRequested) {
+        // A completed first Fail can unlock its approved Fix during this same run.
+        const unlocked = (await loadQueue()).filter(qc => qc.workflow === "follow_up" && !queue.some(known => known.id === qc.id));
+        for (const qc of unlocked) {
+          const index = queue.length;
+          queue.push(qc);
+          pending.push({ qc, index, attempt: 1, observationType: "After the Fact" });
+        }
+        if (unlocked.length) await setRun({ total: queue.length });
+      }
       if (result.status === "failed" && !stopRequested) {
         if (item.attempt < MAX_QC_ATTEMPTS) {
           pending.push({ ...item, attempt: item.attempt + 1 });

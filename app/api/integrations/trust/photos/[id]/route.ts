@@ -1,5 +1,5 @@
 import { env } from "@/lib/local-env";
-import { photoIdPattern, requireTrustKey, trustError, trustNoStore } from "@/lib/trust-api";
+import { photoIdPattern, requireTrustKey, trustError, trustNoStore, trustQcSource, trustQcEligible } from "@/lib/trust-api";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const { id } = await context.params;
   if (!photoIdPattern.test(id)) return trustError(404, "NOT_FOUND", "Catalyst QC photo not found.");
   try {
-    const owner = await env.DB.prepare("SELECT id FROM qc_submissions WHERE tenant_id = ? AND (status = 'approved' OR (status = 'rejected' AND attempt_number = 1 AND catalyst_failures IS NOT NULL)) AND (screenshot_id = ? OR EXISTS (SELECT 1 FROM json_each(photo_ids) WHERE value = ?)) LIMIT 1").bind(key.tenantId, id, id).first();
+    const owner = await env.DB.prepare(`SELECT id FROM ${trustQcSource} WHERE tenant_id = ? AND ${trustQcEligible} AND (screenshot_id = ? OR EXISTS (SELECT 1 FROM json_each(photo_ids) WHERE value = ?)) LIMIT 1`).bind(key.tenantId, id, id).first();
     if (!owner) return trustError(404, "NOT_FOUND", "Catalyst QC photo not found.");
     const photo = await env.BUCKET.get(`captures/${id}`);
     if (!photo) return trustError(404, "PHOTO_MISSING", "Approved QC photo is missing from storage.");

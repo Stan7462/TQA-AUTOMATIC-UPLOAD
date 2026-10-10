@@ -782,7 +782,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       setUploadProgress(95);
       await sendQcStep({ ...details, action: "finalize", photoCount: preparedPhotos.length, location: submissionLocation });
       setUploadProgress(100); setUploadLabel("Upload complete");
-      setQcCounts((counts) => counts ? redoSourceId ? { ...counts, rejected: Math.max(0, counts.rejected - 1) } : { ...counts, captured: counts.captured + 1 } : counts);
+      setQcCounts((counts) => counts ? redoSourceId ? counts : { ...counts, captured: counts.captured + 1 } : counts);
       ++draftRevision.current;
       const removeDraft = draftWrites.current.then(() => deleteQcDraft(techId));
       draftWrites.current = removeDraft.catch(() => undefined);

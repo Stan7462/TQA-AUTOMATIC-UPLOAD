@@ -14,6 +14,7 @@ type SnapshotStat = { techId: string; uploaded: number; monthlyGoal: number };
 const statuses = [["pending", "Needs review"], ["all", "All records"], ["approved", "Approved"], ["uploaded", "Uploaded to Catalyst"], ["rejected", "Rejected"], ["fixed", "Fixed"]];
 const metricStatuses = statuses.filter(([value]) => value !== "pending" && value !== "fixed");
 function adminDeadline(q: Qc, now: number) {
+  if (q.status === "approved") return { label: "Approved · awaiting upload", state: "ready" };
   if (q.correctionPending === 1) return { label: "Fixed", state: "ready" };
   if (!q.correctionDeadlineAt) return { label: "Not set", state: "missing" };
   const hours = Math.ceil((q.correctionDeadlineAt - now) / (60 * 60 * 1000));
@@ -137,8 +138,8 @@ export default function Home() {
   }, []);
   useEffect(()=>{const controller=new AbortController();void load(controller.signal);return ()=>controller.abort();},[load]);
   useAutoRefresh(load);
-  const matches = (q: Qc, status: string) => status === 'all' ? q.correctionPending !== 1 :
-    (status === 'fixed' ? q.status === 'rejected' && q.correctionPending === 1 : status === 'uploaded' ? q.status === 'approved' && q.trustUploadStatus === 'uploaded' :
+  const matches = (q: Qc, status: string) => status === 'all' ? !(q.attemptNumber > 1 && q.trustUploadStatus !== 'uploaded') && q.correctionPending !== 1 :
+    (status === 'rejected' ? q.status === 'rejected' || (q.attemptNumber > 1 && q.status === 'approved' && q.trustUploadStatus !== 'uploaded') : status === 'fixed' ? q.status === 'rejected' && q.correctionPending === 1 : status === 'uploaded' ? q.status === 'approved' && q.trustUploadStatus === 'uploaded' :
       status === 'approved' ? q.status === 'approved' && q.trustUploadStatus !== 'uploaded' :
         q.status === status);
   const visible = items.filter(q => (!activitySelection?.day || activityDay(q.submittedAt) === activitySelection.day) && (!filters.tech || q.techId === filters.tech) && matches(q,filters.status) && `${q.techId} ${q.jobNumber} ${q.address ?? ""}`.toLowerCase().includes(filters.search.trim().toLowerCase()));

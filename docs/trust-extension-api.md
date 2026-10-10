@@ -10,6 +10,8 @@ This document is the contract for the browser extension that uploads passing obs
 
 1. The supervisor enters only their Admin ID and password. The extension connects to the built-in shared TQA origin, and the server verifies the complete credential pair, identifies exactly one company, and refuses an ambiguous match. The extension receives a 12-hour company-scoped session and immediately discards the password.
 2. On opening, call `GET /api/integrations/trust/qcs` and display the `qcs` list. Passing approved QCs, structured first-attempt failures, and approved correction follow-ups from the current fiscal month appear when their `uploadStatus` is `ready` or `failed`.
+Approved corrections become uploadable only after the original Fail has a confirmed Catalyst observation ID. The first Fail remains readable and uploadable from attempt history after a redo. Technicians can redo immediately and supervisors can approve before any upload. Intermediate rejected attempts are never uploadable. Refresh after each successful upload to collect newly unlocked approved follow-ups in the same run. Each submission chain has one normal Pass, or one first Fail followed by one final approved Fix. The app keeps that chain in Rejected until the Fix upload succeeds.
+
 3. On **Start**, process QCs one at a time. Before each QC, call `GET /api/integrations/trust/qcs/{id}` to recheck its status. Fetch every photo with the same bearer key, then upload the screenshot and live photos to the correct Trust job. Show progress in the extension (e.g., 2 of 6 photos and 3 of 10 QCs). The server does not track percentage.
 4. Confirm that Trust saved **all** required photos for that QC. Only then call `PATCH /api/integrations/trust/qcs/{id}/upload` with `{"status":"uploaded"}`. If Trust returns a job or upload ID, include it as `externalReference`.
 5. Remove that QC from the visible extension queue after the API confirms `uploadStatus: "uploaded"`. Refresh the list to reconcile. If Trust upload fails, report `failed` with a short error; it remains available for retry.
@@ -105,7 +107,7 @@ GET /api/integrations/trust/qcs/{id}
 Authorization: Bearer <key>
 ```
 
-Response `200`: `{ "qc": <QC object in list response> }`. This works for `ready`, `failed`, and `uploaded`, as long as review status is Approved. Missing or non-approved QC: `404`.
+Response `200`: `{ "qc": <QC object in list response> }`. This works for eligible approved QCs and structured first Fail observations, including archived first attempts, with `ready`, `failed`, or `uploaded` status. Intermediate rejected attempts and corrections waiting for their original observation ID return `404`.
 
 ### Download one protected photo
 
@@ -126,7 +128,7 @@ Content-Type: application/json
 {"status":"uploaded","externalReference":"optional Trust job or upload ID"}
 ```
 
-`externalReference` is optional, 1–200 characters if supplied. Mark `uploaded` only after confirming the complete set of images reached the correct Trust job. TQA sets `uploadedAt` using server time and increments `uploadAttempts`. A repeated `uploaded` PATCH returns `200` with `alreadyUploaded: true` and does not change the original timestamp/reference.
+`externalReference` is required and must be the numeric Catalyst observation ID for the first Fail. For other uploads it is optional, 1–200 characters if supplied. Mark `uploaded` only after confirming the complete set of images reached the correct Trust job. TQA sets `uploadedAt` using server time and increments `uploadAttempts`. A repeated `uploaded` PATCH returns `200` with `alreadyUploaded: true` and does not change the original timestamp/reference.
 
 For a failed attempt:
 

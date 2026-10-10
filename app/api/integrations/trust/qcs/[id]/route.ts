@@ -1,5 +1,5 @@
 import { env } from "@/lib/local-env";
-import { qcIdPattern, requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, type TrustQcRow } from "@/lib/trust-api";
+import { qcIdPattern, requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, trustQcSource, trustQcEligible, type TrustQcRow } from "@/lib/trust-api";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!qcIdPattern.test(id)) return trustError(404, "NOT_FOUND", "Approved QC not found.");
   try {
     const range = fiscalMonthBounds(fiscalMonthKey());
-    const row = await env.DB.prepare(`SELECT ${trustQcSelect} FROM qc_submissions WHERE tenant_id = ? AND id = ? AND (status = 'approved' OR (status = 'rejected' AND attempt_number = 1 AND catalyst_failures IS NOT NULL)) AND submitted_at >= ? AND submitted_at < ?`).bind(key.tenantId, id, range.start, range.end).first<TrustQcRow>();
+    const row = await env.DB.prepare(`SELECT ${trustQcSelect} FROM ${trustQcSource} WHERE tenant_id = ? AND id = ? AND ${trustQcEligible} AND submitted_at >= ? AND submitted_at < ?`).bind(key.tenantId, id, range.start, range.end).first<TrustQcRow>();
     if (!row) return trustError(404, "NOT_FOUND", "Approved QC not found.");
     return Response.json({ qc: trustQc(request, row) }, { headers: trustNoStore });
   } catch (error) {

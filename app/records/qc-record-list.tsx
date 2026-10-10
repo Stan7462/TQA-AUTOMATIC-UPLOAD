@@ -11,7 +11,7 @@ import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export type RecordView = "all" | "needs-review" | "approved";
 type Status = "pending" | "approved" | "rejected";
-type Submission = { id: string; techId: string; jobNumber: string; screenshotId: string; photoIds: string[]; status: Status; correctionPending: number; submittedAt: number; reviewedAt: number | null; reviewNote: string | null; trustUploadStatus: "ready" | "failed" | "uploaded"; trustUploadedAt: number | null };
+type Submission = { id: string; techId: string; jobNumber: string; screenshotId: string; photoIds: string[]; status: Status; correctionPending: number; attemptNumber: number; submittedAt: number; reviewedAt: number | null; reviewNote: string | null; trustUploadStatus: "ready" | "failed" | "uploaded"; trustUploadedAt: number | null };
 const pages: Record<RecordView, { title: string; status: "all" | Status; description: string }> = {
   all: { title: "All records", status: "all", description: "Every technician QC, including pending, approved, and rejected submissions." },
   "needs-review": { title: "Needs review", status: "pending", description: "Technician QCs waiting for your decision." },
@@ -76,7 +76,7 @@ export default function QcRecordList({ view, historyMode = false }: { view: Reco
     const filtered = items.filter(item => selectedId ? item.id === selectedId :
       (!range || (item.submittedAt >= range.start && item.submittedAt < range.end)) &&
       (!filters.tech || filters.tech === item.techId) &&
-      (filters.status === "all" || (filters.status === "fixed" ? item.status === "rejected" && item.correctionPending === 1 : filters.status === "uploaded" ? item.status === "approved" && item.trustUploadStatus === "uploaded" : filters.status === "approved" ? item.status === "approved" && item.trustUploadStatus !== "uploaded" : filters.status === item.status)) &&
+      (filters.status === "all" || (filters.status === "rejected" ? item.status === "rejected" || (item.attemptNumber > 1 && item.status === "approved" && item.trustUploadStatus !== "uploaded") : filters.status === "fixed" ? item.status === "rejected" && item.correctionPending === 1 : filters.status === "uploaded" ? item.status === "approved" && item.trustUploadStatus === "uploaded" : filters.status === "approved" ? item.status === "approved" && item.trustUploadStatus !== "uploaded" : filters.status === item.status)) &&
       `${item.techId} ${item.jobNumber}`.toLowerCase().includes(search));
     return Object.entries(Object.groupBy(filtered, item => item.techId)).sort((a,b) => collator.compare(a[0],b[0]));
   }, [items, filters, selectedId]);

@@ -1,5 +1,5 @@
 import { env } from "@/lib/local-env";
-import { qcIdPattern, requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, type TrustQcRow } from "@/lib/trust-api";
+import { qcIdPattern, requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, trustQcSource, trustQcEligible, type TrustQcRow } from "@/lib/trust-api";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export const dynamic = "force-dynamic";
@@ -24,24 +24,34 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (body.status === "uploaded" && errorMessage !== undefined || body.status === "failed" && reference !== undefined) return trustError(400, "INVALID_BODY", "Unexpected field for upload status.");
   try {
     const range = fiscalMonthBounds(fiscalMonthKey());
-    const current = await env.DB.prepare("SELECT status, attempt_number AS attemptNumber, catalyst_failures AS catalystFailures, trust_upload_status AS trustUploadStatus, submitted_at AS submittedAt FROM qc_submissions WHERE tenant_id = ? AND id = ?").bind(key.tenantId, id).first<{ status: string; attemptNumber:number;catalystFailures:string|null;trustUploadStatus: string; submittedAt: number }>();
+    const current = await env.DB.prepare(`SELECT ${trustQcSelect} FROM ${trustQcSource} WHERE tenant_id = ? AND id = ?`).bind(key.tenantId, id).first<TrustQcRow>();
     if (!current) return trustError(404, "NOT_FOUND", "QC not found.");
     if (current.submittedAt < range.start || current.submittedAt >= range.end) return trustError(409, "PREVIOUS_PERIOD", "This QC belongs to a previous fiscal month.");
-    const eligible = current.status === "approved" || current.status === "rejected" && current.attemptNumber === 1 && Boolean(current.catalystFailures);
+    const eligible = await env.DB.prepare(`SELECT id FROM ${trustQcSource} WHERE tenant_id = ? AND id = ? AND ${trustQcEligible}`).bind(key.tenantId, id).first();
     if (!eligible) return trustError(409, "QC_NOT_READY", "This QC is not ready for Catalyst.");
     if (current.trustUploadStatus === "uploaded") {
       if (body.status !== "uploaded") return trustError(409, "ALREADY_UPLOADED", "QC is already marked uploaded.");
-      const existing = await env.DB.prepare(`SELECT ${trustQcSelect} FROM qc_submissions WHERE tenant_id = ? AND id = ?`).bind(key.tenantId, id).first<TrustQcRow>();
-      return Response.json({ qc: trustQc(request, existing!), alreadyUploaded: true }, { headers: trustNoStore });
+      return Response.json({ qc: trustQc(request, current), alreadyUploaded: true }, { headers: trustNoStore });
     }
+    const firstFail = current.status === "rejected" && current.trustUploadKind === "observation";
+    if (firstFail && body.status === "uploaded" && (typeof reference !== "string" || !/^\d+$/.test(reference.trim()))) return trustError(400, "INVALID_REFERENCE", "The first Fail upload must include its Catalyst observation ID.");
     const now = Date.now();
-    const changed = body.status === "uploaded"
-      ? await env.DB.prepare("UPDATE qc_submissions SET trust_upload_status = 'uploaded', trust_uploaded_at = ?, trust_external_reference = ?, catalyst_observation_id = CASE WHEN trust_upload_kind = 'observation' THEN COALESCE(?, catalyst_observation_id) ELSE catalyst_observation_id END, correction_deadline_at = CASE WHEN status = 'rejected' THEN ? ELSE correction_deadline_at END, trust_upload_error = NULL, trust_upload_attempts = trust_upload_attempts + 1, trust_last_attempt_at = ?, trust_uploaded_by_key_id = ? WHERE tenant_id = ? AND id = ? AND trust_upload_status IN ('ready', 'failed')").bind(now, typeof reference === "string" ? reference.trim() : null, typeof reference === "string" ? reference.trim() : null, now + 72 * 60 * 60 * 1000, now, key.id, key.tenantId, id).run()
-      : await env.DB.prepare("UPDATE qc_submissions SET trust_upload_status = 'failed', trust_upload_error = ?, trust_upload_attempts = trust_upload_attempts + 1, trust_last_attempt_at = ? WHERE tenant_id = ? AND id = ? AND trust_upload_status IN ('ready', 'failed')").bind((errorMessage as string).trim(), now, key.tenantId, id).run();
-    const updated = await env.DB.prepare(`SELECT ${trustQcSelect} FROM qc_submissions WHERE tenant_id = ? AND id = ?`).bind(key.tenantId, id).first<TrustQcRow>();
+    const changes = [ ["qc_submissions", "id"], ["qc_submission_attempts", "submission_id"] ].map(([table, idColumn]) =>
+      body.status === "uploaded"
+        ? env.DB.prepare(`UPDATE ${table} SET trust_upload_status = 'uploaded', trust_uploaded_at = ?, trust_external_reference = ?, catalyst_observation_id = CASE WHEN trust_upload_kind = 'observation' THEN COALESCE(?, catalyst_observation_id) ELSE catalyst_observation_id END, trust_upload_error = NULL, trust_upload_attempts = trust_upload_attempts + 1, trust_last_attempt_at = ?, trust_uploaded_by_key_id = ? WHERE tenant_id = ? AND ${idColumn} = ? AND trust_upload_status IN ('ready', 'failed')`)
+          .bind(now, typeof reference === "string" ? reference.trim() : null, typeof reference === "string" ? reference.trim() : null, now, key.id, key.tenantId, id)
+        : env.DB.prepare(`UPDATE ${table} SET trust_upload_status = 'failed', trust_upload_error = ?, trust_upload_attempts = trust_upload_attempts + 1, trust_last_attempt_at = ? WHERE tenant_id = ? AND ${idColumn} = ? AND trust_upload_status IN ('ready', 'failed')`)
+          .bind((errorMessage as string).trim(), now, key.tenantId, id));
+    if (firstFail && body.status === "uploaded") {
+      // Propagate the original observation ID even if a redo moved that Fail to history.
+      for (const table of ["qc_submissions", "qc_submission_attempts"]) changes.push(env.DB.prepare(`UPDATE ${table} SET catalyst_observation_id = ? WHERE tenant_id = ? AND root_submission_id = ? AND catalyst_observation_id IS NULL`).bind((reference as string).trim(), key.tenantId, current.rootSubmissionId));
+    }
+    const results = await env.DB.batch(changes);
+    const updated = await env.DB.prepare(`SELECT ${trustQcSelect} FROM ${trustQcSource} WHERE tenant_id = ? AND id = ?`).bind(key.tenantId, id).first<TrustQcRow>();
     if (!updated) return trustError(409, "QC_NOT_READY", "This QC is not ready for Catalyst.");
-    if (!changed.meta.changes && updated.trustUploadStatus === "uploaded" && body.status === "failed") return trustError(409, "ALREADY_UPLOADED", "QC is already marked uploaded.");
-    return Response.json({ qc: trustQc(request, updated), alreadyUploaded: !changed.meta.changes && updated.trustUploadStatus === "uploaded" }, { headers: trustNoStore });
+    const changed = results.slice(0, 2).some(result => result.meta.changes);
+    if (!changed && updated.trustUploadStatus === "uploaded" && body.status === "failed") return trustError(409, "ALREADY_UPLOADED", "QC is already marked uploaded.");
+    return Response.json({ qc: trustQc(request, updated), alreadyUploaded: !changed && updated.trustUploadStatus === "uploaded" }, { headers: trustNoStore });
   } catch (error) {
     console.error("Trust upload status update failed", error);
     return trustError(503, "UNAVAILABLE", "Could not update upload status.");

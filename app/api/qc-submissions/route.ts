@@ -111,7 +111,8 @@ export async function GET(request: Request) {
       if (!/^[0-9a-f-]{36}$/.test(selectedId)) return Response.json({ error: "Invalid QC" }, { status: 400 });
       conditions.push("id = ?"); bindings.push(selectedId);
     }
-    if (status !== "all") { conditions.push("status = ?"); bindings.push(status); }
+    if (status === "rejected") conditions.push("(status = 'rejected' OR (attempt_number > 1 AND status = 'approved' AND trust_upload_status <> 'uploaded'))");
+    else if (status !== "all") { conditions.push("status = ?"); bindings.push(status); }
     if (hasRange) { conditions.push("submitted_at >= ? AND submitted_at < ?"); bindings.push(start, end); }
     if (match) { conditions.push("(submitted_at < ? OR (submitted_at = ? AND id < ?))"); bindings.push(Number(match[1]), Number(match[1]), match[2]); }
     const where = conditions.length ? " WHERE " + conditions.join(" AND ") : "";
@@ -121,13 +122,14 @@ export async function GET(request: Request) {
       : null;
     const [result, totals, attempts] = await Promise.all([
       query.all(),
-      env.DB.prepare("SELECT status, trust_upload_status AS trustUploadStatus, correction_pending AS correctionPending, COUNT(*) AS total FROM qc_submissions WHERE tenant_id = ?" + (hasRange ? " AND submitted_at >= ? AND submitted_at < ?" : "") + " GROUP BY status, trust_upload_status, correction_pending").bind(user!.tenantId, ...(hasRange ? [start, end] : [])).all<{ status: string; trustUploadStatus: string; correctionPending: number; total: number }>(),
+      env.DB.prepare("SELECT status, trust_upload_status AS trustUploadStatus, correction_pending AS correctionPending, attempt_number AS attemptNumber, COUNT(*) AS total FROM qc_submissions WHERE tenant_id = ?" + (hasRange ? " AND submitted_at >= ? AND submitted_at < ?" : "") + " GROUP BY status, trust_upload_status, correction_pending, attempt_number").bind(user!.tenantId, ...(hasRange ? [start, end] : [])).all<{ status: string; trustUploadStatus: string; correctionPending: number; attemptNumber: number; total: number }>(),
       attemptsQuery ? attemptsQuery.all<ArchivedAttemptRow>() : Promise.resolve({ results: [] as ArchivedAttemptRow[] }),
     ]);
     const counts = { pending: 0, approved: 0, uploaded: 0, rejected: 0, corrected: 0 };
     for (const row of totals.results) {
       if (row.status === "pending" || row.status === "approved" || row.status === "rejected") counts[row.status] += row.total;
       if (row.status === "approved" && row.trustUploadStatus === "uploaded") counts.uploaded += row.total;
+      if (row.status === "approved" && row.attemptNumber > 1 && row.trustUploadStatus !== "uploaded") counts.rejected += row.total;
       if (row.status === "rejected" && row.correctionPending === 1) counts.corrected += row.total;
     }
     const rows = result.results as Array<{ id: string; techId: string; screenshotId: string; photoIds: string; catalystFailures:string|null;status: string; submittedAt: number; reviewedAt: number | null }>;
