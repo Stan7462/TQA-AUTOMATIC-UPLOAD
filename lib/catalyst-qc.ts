@@ -65,12 +65,75 @@ export const catalystQcCategories = [
   ] },
 ] as const;
 
-const aliases: Record<string, string> = {
-  ground: "ground grounding bond bonding electrical meter power", grounding: "ground bonding electrical meter",
-  wire: "wire cable bonding", tap: "tap port ports nap", connector: "connector connectors crimp crimped",
-  tag: "tag tags label", box: "box enclosure ped pedestal lock", drip: "drip loop slack",
-  photo: "picture image visible", pole: "pole aerial underground", cpe: "cpe equipment device",
+// Display labels only. Stored selections and Catalyst uploads retain the original reason.
+const failureLabels: Record<string, Record<string, string>> = {
+  TQA1: {
+    "Proper Bonding Hierarchy followed": "The grounding connection does not follow the required order of preferred connection points.",
+    "25 Ohm resistance test performed": "The required ground resistance test was not done or verified.",
+    "Second Do Not remove tag with bonding validation date": "The extra grounding verification tag or its date is missing.",
+  },
+  TQA2: {
+    "Bond Block Installed": "The grounding block is missing or installed incorrectly.",
+    "Bond Wire Installed, correct gauge": "The grounding wire is missing or is the wrong thickness.",
+    "Approved Bonding Hardware used - not shared": "The grounding clamp is unsuitable or improperly shares another connection.",
+    "Attached to Approved Premise Power Grounding System Point": "The grounding wire connects to the wrong grounding point.",
+    "Bond Wire routed and attached properly; with correct bending radius": "The grounding wire is loose, routed badly, or bent too sharply.",
+    "Do not remove tag in place": "The grounding warning tag is missing.",
+  },
+  TQA3: {
+    "Proper attachment hardware used and clearances maintained at pole": "The pole attachment is wrong, or the cable is too close to other equipment.",
+    "Proper drip / slack loops as required": "The required extra cable loops are missing or incorrect.",
+    "Proper pole to pole or mid span slack maintained": "The cable between poles is too tight or hangs too loosely.",
+    "If required, proper transition from aerial to underground cable": "The change from overhead cable to underground cable is installed incorrectly.",
+    "Drop protected by pole guard at pole": "The protective covering for cable running down the pole is missing or incorrect.",
+  },
+  TQA4: {
+    "Ped or lock box locked / secured": "The outdoor pedestal or connection box is left open or unsecured.",
+    "Ped or lock box damage reported": "Damage to the pedestal or connection box was not reported.",
+    "Proper tags in place": "Required cable identification tags are missing or incorrect.",
+    "Unused ports terminated / NAP ports closed": "Unused connections are left without their required terminators or closures.",
+    "Traps / filters not directly connected to tap port": "A trap or filter is attached directly to the tap where that arrangement is not allowed.",
+    "Approved connector properly installed": "The cable connector at the tap is the wrong type or fitted incorrectly.",
+    "Weather sealing as required": "The tap connection lacks the required protection against water.",
+    "Connectors tightened properly": "A connector at the tap is loose or tightened incorrectly.",
+  },
+  TQA5: {
+    "Proper drop attachment to premise with approved hardware & drip / slack loop": "The incoming cable is not properly anchored, or its required loop is missing.",
+    "Proper use and installation of drop guard as required": "Required cable protection on the building is missing or installed incorrectly.",
+    "Cable properly routed, clearances and bending radius maintained": "The outdoor cable follows a poor route, is too close to something, or bends too sharply.",
+    "Properly attached to premise, clip distance and clip type based on premise material": "The outdoor cable clips are unsuitable for the surface or spaced incorrectly.",
+    "Splicing guidelines followed": "An outdoor cable joint was made incorrectly or where it should not be.",
+  },
+  TQA6: {
+    "POE/POE Bond Block Installed": "The required point-of-entry filter or grounding block arrangement is missing or incorrect.",
+    "Approved Connector Properly Installed": "A connector at the building distribution point is unsuitable or fitted incorrectly.",
+    "Weather sealing as required": "Outdoor distribution connections are not properly protected from water.",
+    "Connectors tightened properly": "Connections at the building distribution point are loose or tightened incorrectly.",
+    "Unused ports terminated": "Unused splitter or equipment ports lack the required terminators.",
+    "Enclosure installed as required, located properly and clearances maintained": "The protective box is missing, positioned badly, or lacks required space around it.",
+    "Correct service Distribution configuration utilized, i.e. passive, MoCA splitter, unity gain.": "The wrong splitter, amplifier, or equipment arrangement was used.",
+    "All hardware, i.e. splitters bond block, amplifiers etc., properly attached": "Splitters, grounding blocks, or amplifiers are loose or hanging.",
+    "Correct excess cable and stored properly": "Too much or too little spare cable was left, or it is stored badly.",
+    "Cable properly routed, clearances, and bending radius maintained": "Cable around the distribution equipment is routed badly or bent too sharply.",
+    "Properly attached to premise, clip distance, and clip type based on premise material": "Cable supports at the distribution point are unsuitable or spaced incorrectly.",
+    "Proper drip loops at entry holes, sealing guidelines followed": "Cable entry holes are not sealed correctly, or the loop that keeps water away is missing.",
+    "Splicing guidelines followed": "A cable joint at the distribution point does not follow the required installation rules.",
+  },
+  TQA7: {
+    "Approved Connector Properly Installed": "An indoor cable connector is unsuitable or fitted incorrectly.",
+    "Cable properly routed, clearances, and bending radius maintained": "Indoor cable is routed badly, too close to something, or bent too sharply.",
+    "Properly attached clip distance, and clip type used base on material attaching to": "Indoor cable clips are unsuitable or spaced incorrectly.",
+    "Cable correctly terminated at CPE location, wall plate installed.": "The cable connection at the equipment is unfinished or incorrect, or a required wall plate is missing.",
+    "CPE correctly located within the premise": "The customer equipment is placed in an unsuitable location.",
+    "Proper Installation and mounting guidelines followed": "The customer equipment is not installed or secured correctly.",
+    "If present, proper location and mounting of ONU, including bonding if required.": "The optical network unit is positioned, mounted, or grounded incorrectly.",
+    "Proper use of plenum or riser cable as required, including firewall penetration sealant.": "The wrong cable type was used in an area requiring special cable, or a fire-rated opening was not properly sealed.",
+  },
 };
+
+export function catalystFailureLabel(failure: CatalystFailure): string {
+  return failureLabels[failure.code]?.[failure.reason] ?? failure.reason;
+}
 
 function words(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter((word) => word.length > 2);
@@ -91,10 +154,10 @@ export function normalizeCatalystFailures(value: unknown): CatalystFailure[] | n
 }
 
 export function suggestCatalystFailures(comment: string, limit = 6): CatalystFailure[] {
-  const input = new Set(words(comment).flatMap((word) => [word, ...words(aliases[word] ?? "")]));
+  const input = new Set(words(comment));
   if (!input.size) return [];
   return catalystQcCategories.flatMap((category) => category.reasons.map((reason) => {
-    const haystack = new Set(words(`${category.title} ${reason}`));
+    const haystack = new Set(words(catalystFailureLabel({ code: category.code, reason })));
     let score = 0;
     for (const word of input) if (haystack.has(word) || [...haystack].some((candidate) => candidate.startsWith(word) || word.startsWith(candidate))) score += word.length > 5 ? 3 : 1;
     return { code: category.code, reason, score };

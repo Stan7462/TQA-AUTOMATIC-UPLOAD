@@ -18,6 +18,7 @@ export default function PhotoLightbox() {
   const pointers=useRef(new Map<number,{x:number;y:number}>());
   const swipe=useRef<{x:number;y:number}|null>(null);
   const pinched=useRef(false);
+  const tapMoved=useRef(false);
   const open=gallery.length>0;
   function update(next:View){
     const zoom=Math.max(1,Math.min(MAX_ZOOM,next.zoom));
@@ -78,12 +79,13 @@ export default function PhotoLightbox() {
   },[open,gallery.length]);
   if(!open)return null;
   const photo=gallery[index];
-  return <div ref={panel} className="qc-lightbox" data-photo-lightbox role="dialog" aria-modal="true" aria-label="QC photo viewer" onClick={e=>{if(e.target===e.currentTarget)close();}}>
+  return <div ref={panel} className="qc-lightbox" data-photo-lightbox role="dialog" aria-modal="true" aria-label="QC photo viewer" onClick={e=>{if(e.target instanceof Element&&!e.target.closest('.qc-lightbox-image,.qc-lightbox-tools,button'))close();}}>
     <div className="qc-lightbox-top"><div><strong>{photo.label}</strong><span>{index+1} of {gallery.length} · Pinch or scroll to zoom. Drag to inspect.</span></div><button ref={closeButton} onClick={close} aria-label="Close enlarged picture"><X size={24}/></button></div>
     <div ref={stage} className={`qc-lightbox-image${view.zoom>1?' is-zoomed':''}`} onDoubleClick={e=>zoomTo(current.current.zoom>1?1:3,e.clientX,e.clientY)}
-      onPointerDown={e=>{if(e.pointerType==='mouse'&&e.button!==0)return;e.currentTarget.setPointerCapture(e.pointerId);pointers.current.set(e.pointerId,{x:e.clientX,y:e.clientY});if(pointers.current.size===1){swipe.current={x:e.clientX,y:e.clientY};pinched.current=false;}else pinched.current=true;}}
+      onPointerDown={e=>{if(e.pointerType==='mouse'&&e.button!==0)return;e.currentTarget.setPointerCapture(e.pointerId);pointers.current.set(e.pointerId,{x:e.clientX,y:e.clientY});if(pointers.current.size===1){swipe.current={x:e.clientX,y:e.clientY};pinched.current=false;tapMoved.current=false;}else pinched.current=true;}}
       onPointerMove={e=>{
         const before=pointers.current.get(e.pointerId);if(!before)return;
+        if(swipe.current&&Math.hypot(e.clientX-swipe.current.x,e.clientY-swipe.current.y)>8)tapMoved.current=true;
         const oldPoints=Array.from(pointers.current.values());pointers.current.set(e.pointerId,{x:e.clientX,y:e.clientY});
         const points=Array.from(pointers.current.values());
         if(points.length===2){
@@ -94,7 +96,17 @@ export default function PhotoLightbox() {
           update({...current.current,x:current.current.x+dx,y:current.current.y+dy});
         }else if(points.length===1&&current.current.zoom>1)update({...current.current,x:current.current.x+e.clientX-before.x,y:current.current.y+e.clientY-before.y});
       }}
-      onPointerUp={e=>{pointers.current.delete(e.pointerId);const start=swipe.current;if(!pointers.current.size){if(start&&!pinched.current&&current.current.zoom===1&&gallery.length>1){const dx=e.clientX-start.x,dy=e.clientY-start.y;if(Math.abs(dx)>50&&Math.abs(dx)>Math.abs(dy))step(dx<0?1:-1);}swipe.current=null;}}}
+      onPointerUp={e=>{
+        pointers.current.delete(e.pointerId);const start=swipe.current;
+        if(!pointers.current.size){
+          const rect=image.current?.getBoundingClientRect();
+          const outside=(x:number,y:number)=>!!rect&&(x<rect.left||x>rect.right||y<rect.top||y>rect.bottom);
+          // Only a stationary tap that starts and ends off the photo dismisses it.
+          if(start&&!pinched.current&&!tapMoved.current&&outside(start.x,start.y)&&outside(e.clientX,e.clientY))close();
+          else if(start&&!pinched.current&&current.current.zoom===1&&gallery.length>1){const dx=e.clientX-start.x,dy=e.clientY-start.y;if(Math.abs(dx)>50&&Math.abs(dx)>Math.abs(dy))step(dx<0?1:-1);}
+          swipe.current=null;
+        }
+      }}
       onPointerCancel={e=>{pointers.current.delete(e.pointerId);swipe.current=null;pinched.current=true;}}>
       <img ref={image} src={photo.src} alt={photo.label} draggable={false} style={{transform:`translate(${view.x}px, ${view.y}px) scale(${view.zoom})`}}/>
     </div>
