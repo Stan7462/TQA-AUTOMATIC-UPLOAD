@@ -13,6 +13,8 @@ type Submission=Attempt&{rootSubmissionId:string;correctionPending:number;previo
 
 function FailurePicker({note,value,onChange,busy}:{note:string;value:CatalystFailure[];onChange:(next:CatalystFailure[])=>void;busy:boolean}){
  const suggested=useMemo(()=>suggestCatalystFailures(note),[note]);
+ const [activeCode,setActiveCode]=useState<CatalystFailure["code"]>(catalystQcCategories[0].code);
+ const activeCategory=catalystQcCategories.find(category=>category.code===activeCode)??catalystQcCategories[0];
  const selected=(failure:CatalystFailure)=>value.some(item=>item.code===failure.code&&item.reason===failure.reason);
  const toggle=(failure:CatalystFailure)=>onChange(selected(failure)?value.filter(item=>item.code!==failure.code||item.reason!==failure.reason):[...value.filter(item=>item.code!==failure.code),failure]);
  return <section className="qc-failure-picker" aria-label="Catalyst failure reasons">
@@ -20,7 +22,8 @@ function FailurePicker({note,value,onChange,busy}:{note:string;value:CatalystFai
   <p>Type the supervisor comment first. Matching Catalyst reasons appear below.</p>
   {suggested.length>0&&<div className="qc-failure-suggestions"><small>Suggested from your comment</small>{suggested.map(failure=><button type="button" className={selected(failure)?'selected':''} disabled={busy} key={`${failure.code}-${failure.reason}`} onClick={()=>toggle(failure)}><b>{failure.code}</b>{failure.reason}</button>)}</div>}
   {value.length>0&&<div className="qc-failure-selected">{value.map(failure=><button type="button" disabled={busy} key={`${failure.code}-${failure.reason}`} onClick={()=>toggle(failure)} aria-label={`Remove ${failure.code} ${failure.reason}`}><b>{failure.code}</b>{failure.reason}<X size={14}/></button>)}</div>}
-  <div className="qc-failure-topics">{catalystQcCategories.map(category=><details key={category.code}><summary><b>{category.code}</b><span>{category.title}</span></summary><div>{category.reasons.map(reason=>{const failure={code:category.code,reason};return <label key={reason}><input type="checkbox" checked={selected(failure)} disabled={busy} onChange={()=>toggle(failure)}/><span>{reason}</span></label>})}</div></details>)}</div>
+  <div className="qc-failure-topic-tabs" role="tablist" aria-label="Choose a TQA topic">{catalystQcCategories.map(category=>{const hasSelection=value.some(item=>item.code===category.code);return <button type="button" role="tab" aria-selected={activeCategory.code===category.code} className={`${activeCategory.code===category.code?'active':''}${hasSelection?' selected':''}`} disabled={busy} key={category.code} onClick={()=>setActiveCode(category.code)}><b>{category.code}</b><span>{category.title}</span>{hasSelection&&<Check size={14} aria-label="Reason selected"/>}</button>})}</div>
+  <div className="qc-failure-topic-panel" role="tabpanel" aria-label={`${activeCategory.code} ${activeCategory.title}`}><div className="qc-failure-topic-heading"><b>{activeCategory.code}</b><span>{activeCategory.title}</span></div><div className="qc-failure-topics">{activeCategory.reasons.map(reason=>{const failure={code:activeCategory.code,reason};return <label key={reason}><input type="checkbox" checked={selected(failure)} disabled={busy} onChange={()=>toggle(failure)}/><span>{reason}</span></label>})}</div></div>
  </section>;
 }
 
