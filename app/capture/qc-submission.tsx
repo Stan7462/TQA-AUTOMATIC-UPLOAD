@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, Check, ChevronRight, FileText, ImagePlus, LogOut, MapPin, RotateCcw, Send, Trash2, X } from "lucide-react";
+import { Camera, Check, ChevronRight, FileText, Flashlight, FlashlightOff, ImagePlus, LogOut, MapPin, RotateCcw, Send, Trash2, X } from "lucide-react";
 import { sixDigitJobNumber } from "@/lib/job-number-ocr";
 import { fiscalDeadline, fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 import { deleteQcDraft, readQcDraft, writeQcDraft, type QcDraft } from "@/lib/qc-draft";
@@ -265,6 +265,10 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const [draftStatus, setDraftStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
+  const [torchBusy, setTorchBusy] = useState(false);
+  const torchChanging = useRef(false);
   const [cameraZoom, setCameraZoom] = useState(1);
   const [taking, setTaking] = useState(false);
   const [processingScreenshot, setProcessingScreenshot] = useState(false);
@@ -433,7 +437,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     stream.current?.getTracks().forEach((track) => track.stop());
     stream.current = null;
     if (video.current) video.current.srcObject = null;
-    setCameraReady(false); setCameraOn(false);
+    setCameraReady(false); setCameraOn(false); setTorchSupported(false); setTorchOn(false); setTorchBusy(false);
     const fresh: QcDraft = { techId, fiscalMonth: month, submissionId: crypto.randomUUID(), redoSourceId: null, redoChanged: false, jobNumber: "", screenshot: null, photos: [], location: null, updatedAt: Date.now() };
     draftRef.current = fresh;
     setSubmissionId(fresh.submissionId); setJobNumber(""); setScreenshot(null); setPhotos([]); setLocation(null);
@@ -476,6 +480,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     if (video.current) video.current.srcObject = null;
     setCameraReady(false);
     setCameraOn(false);
+    setTorchSupported(false); setTorchOn(false); setTorchBusy(false);
   }
   async function startNewQc() {
     if (!draftReady || busy || taking || screenshotProcessing.current || logoutBusy || clearingDraft.current) return;
@@ -621,14 +626,49 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     try {
       const media = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
       stream.current = media;
+      const track = media.getVideoTracks()[0];
+      const capabilities = track?.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean }) | undefined;
+      let supportsTorch = capabilities?.torch === true;
+      if (supportsTorch && (track.getSettings() as MediaTrackSettings & { torch?: boolean }).torch === true) {
+        try { await track.applyConstraints({ advanced: [{ torch: false } as MediaTrackConstraintSet] }); }
+        catch { supportsTorch = false; }
+      }
+      setTorchSupported(supportsTorch);
+      setTorchOn(false); setTorchBusy(false);
       setCameraReady(false);
       setCameraZoom(1);
       setCameraOn(true);
     } catch { stopCamera(); setError("Allow camera access in your browser, then try again."); }
   }
 
+  async function toggleTorch() {
+    const media = stream.current;
+    const track = media?.getVideoTracks()[0];
+    if (!track || track.readyState !== "live" || !torchSupported || torchChanging.current || taking) return;
+    const next = !torchOn;
+    torchChanging.current = true; setTorchBusy(true); setError("");
+    try {
+      const constraints = track.getConstraints();
+      const advanced = (constraints.advanced ?? []).map((constraint) => {
+        const withoutTorch = { ...constraint } as MediaTrackConstraintSet & { torch?: boolean };
+        delete withoutTorch.torch;
+        return withoutTorch;
+      });
+      await track.applyConstraints({ ...constraints, advanced: [...advanced, { torch: next } as MediaTrackConstraintSet] });
+      if (stream.current !== media || track.readyState !== "live") return;
+      const actual = (track.getSettings() as MediaTrackSettings & { torch?: boolean }).torch;
+      if (typeof actual === "boolean" && actual !== next) throw new Error("Flashlight did not change");
+      setTorchOn(next);
+    } catch {
+      if (stream.current === media) setError("Your phone could not switch the flashlight. Try again or take the picture in better light.");
+    } finally {
+      torchChanging.current = false;
+      if (stream.current === media) setTorchBusy(false);
+    }
+  }
+
   async function takePhoto() {
-    if (Date.now() < pinchCooldownUntil.current || !video.current?.videoWidth || !stream.current || taking || screenshotProcessing.current || photos.length >= MAX_PHOTOS) return;
+    if (Date.now() < pinchCooldownUntil.current || !video.current?.videoWidth || !stream.current || taking || torchChanging.current || screenshotProcessing.current || photos.length >= MAX_PHOTOS) return;
     if (!draftRef.current!.location && !locationRequest.current) void captureQcLocation();
     setTaking(true); setError(""); setCaptured(null); setFlash((current) => current + 1);
     try {
@@ -765,11 +805,12 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
           <video ref={video} autoPlay muted playsInline className="qc-fullscreen-video" aria-label="Live camera preview" onLoadedMetadata={() => setCameraReady(true)} onPlaying={() => setCameraReady(true)} style={{ transform: `scale(${cameraZoom})` }} />
           {flash > 0 && <div key={flash} className="camera-shutter-flash" aria-hidden="true"/>}
           {captured && <div className="qc-capture-fly" key={captured.number}><ImagePreview blob={captured.blob} alt="Just captured QC photo" interactive={false}/></div>}
+          {torchSupported && <button type="button" className={`qc-camera-torch${torchOn ? " is-on" : ""}`} onClick={() => void toggleTorch()} disabled={!cameraReady || torchBusy || taking} aria-pressed={torchOn} aria-label={torchOn ? "Turn flashlight off" : "Turn flashlight on"}>{torchOn ? <Flashlight size={19}/> : <FlashlightOff size={19}/>}<span>{torchBusy ? "Switching…" : torchOn ? "Flashlight on" : "Flashlight off"}</span></button>}
           <button type="button" className="qc-camera-close" onClick={() => { if (Date.now() >= pinchCooldownUntil.current) stopCamera(); }} disabled={taking} aria-label="Close camera"><X size={27}/></button>
           {error && cameraOn && <p className="qc-camera-error" role="alert">{error}</p>}
           <div className="qc-camera-bottom">
             <output className="qc-camera-zoom-value" aria-label={`Camera zoom ${cameraZoom.toFixed(1)} times`}>{cameraZoom.toFixed(1)}×</output>
-            <div className="qc-camera-controls"><div className="qc-camera-last-photo" aria-label={photos.length ? `Latest photo, ${photos.length} taken` : "No photos yet"}>{photos.length > 0 && <ImagePreview blob={photos[photos.length - 1]} alt="Latest photo" interactive={false}/>}</div><button type="button" className="qc-camera-shutter" onClick={() => void takePhoto()} disabled={!cameraReady || taking || busy || processingScreenshot || photos.length >= MAX_PHOTOS} aria-label={taking ? "Capturing photo" : "Take live QC photo"}/><span className="qc-camera-photo-count" aria-live="polite">{photos.length}/7</span></div>
+            <div className="qc-camera-controls"><div className="qc-camera-last-photo" aria-label={photos.length ? `Latest photo, ${photos.length} taken` : "No photos yet"}>{photos.length > 0 && <ImagePreview blob={photos[photos.length - 1]} alt="Latest photo" interactive={false}/>}</div><button type="button" className="qc-camera-shutter" onClick={() => void takePhoto()} disabled={!cameraReady || taking || torchBusy || busy || processingScreenshot || photos.length >= MAX_PHOTOS} aria-label={taking ? "Capturing photo" : "Take live QC photo"}/><span className="qc-camera-photo-count" aria-live="polite">{photos.length}/7</span></div>
           </div>
         </div>
         {error && <p className="form-error" role="alert">{error}</p>}

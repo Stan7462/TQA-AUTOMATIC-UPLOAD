@@ -860,3 +860,8 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
   .qc-reference .qc-milestone{height:18px}
   .qc-reference .qc-milestones-footer{line-height:13px}
 }
+
+.qc-camera-torch{position:absolute;z-index:12;top:calc(14px + env(safe-area-inset-top));left:16px;display:flex;align-items:center;justify-content:center;gap:7px;min-height:44px;max-width:calc(100% - 92px);padding:9px 12px;border:1px solid #ffffff45;border-radius:999px;background:#111c22e8;color:#fff;font-size:13px;font-weight:650;cursor:pointer}
+.qc-camera-torch.is-on{background:#f5df83;color:#26220e;border-color:#ffeca6}
+.qc-camera-torch:disabled{opacity:.65;cursor:wait}
+.qc-camera-torch:focus-visible{outline:3px solid #66d7d1;outline-offset:4px}
