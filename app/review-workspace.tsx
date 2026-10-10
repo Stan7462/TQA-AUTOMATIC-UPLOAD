@@ -9,7 +9,7 @@ import { useQcFilters } from "@/lib/use-qc-filters";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
-type Qc = { id: string; techId: string; jobNumber: string; status: string; trustUploadStatus: string; submittedAt: number; correctionDeadlineAt: number | null; photoIds: string[]; attemptNumber: number; correctionPending: number };
+type Qc = { id: string; techId: string; jobNumber: string; address: string | null; status: string; trustUploadStatus: string; submittedAt: number; correctionDeadlineAt: number | null; photoIds: string[]; attemptNumber: number; correctionPending: number };
 type SnapshotStat = { techId: string; uploaded: number; monthlyGoal: number };
 const statuses = [["pending", "Needs review"], ["all", "All records"], ["approved", "Approved"], ["uploaded", "Uploaded to Catalyst"], ["rejected", "Rejected"]];
 const metricStatuses = statuses.filter(([value]) => value !== "pending");
@@ -141,7 +141,7 @@ export default function Home() {
     (status === 'uploaded' ? q.status === 'approved' && q.trustUploadStatus === 'uploaded' :
       status === 'approved' ? q.status === 'approved' && q.trustUploadStatus !== 'uploaded' :
         q.status === status);
-  const visible = items.filter(q => (!activitySelection?.day || activityDay(q.submittedAt) === activitySelection.day) && (!filters.tech || q.techId === filters.tech) && matches(q,filters.status) && `${q.techId} ${q.jobNumber}`.toLowerCase().includes(filters.search.trim().toLowerCase()));
+  const visible = items.filter(q => (!activitySelection?.day || activityDay(q.submittedAt) === activitySelection.day) && (!filters.tech || q.techId === filters.tech) && matches(q,filters.status) && `${q.techId} ${q.jobNumber} ${q.address ?? ""}`.toLowerCase().includes(filters.search.trim().toLowerCase()));
   const snapshotMonth = fiscalMonthKey();
   const snapshotRange = fiscalMonthBounds(snapshotMonth);
   async function openSnapshot() {

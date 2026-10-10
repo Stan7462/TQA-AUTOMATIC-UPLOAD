@@ -877,3 +877,5 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .qc-lightbox-tools .qc-lightbox-fit{width:54px;gap:4px;font-size:12px}
 .qc-lightbox-tools>span{font-size:12px;min-width:25px;text-align:center}
 @media(max-width:380px){.qc-lightbox-tools{gap:3px}.qc-lightbox-tools button{width:32px}.qc-lightbox-tools .qc-lightbox-fit{width:48px}.qc-lightbox-tools output{min-width:42px}}
+
+.qc-focus-facts .qc-address-fact dd { max-width: 75%; overflow-wrap: anywhere; white-space: normal; }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Camera, Check, ChevronRight, FileText, Flashlight, FlashlightOff, ImagePlus, LogOut, MapPin, RotateCcw, Send, Trash2, X } from "lucide-react";
+import { screenshotAddress } from "@/lib/address-ocr";
 import { sixDigitJobNumber } from "@/lib/job-number-ocr";
 import { fiscalDeadline, fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 import { deleteQcDraft, readQcDraft, writeQcDraft, type QcDraft } from "@/lib/qc-draft";
@@ -134,7 +135,7 @@ async function screenshotAsJpeg(file: File): Promise<Blob> {
   return compactJpeg(canvas, MAX_SCREENSHOT_OUTPUT_BYTES);
 }
 
-async function recognizeJobNumber(file: File, onProgress: (progress: number) => void): Promise<string | null> {
+async function recognizeJobNumber(file: File, onProgress: (progress: number) => void): Promise<{ jobNumber: string | null; address: string | null } | null> {
   let worker: import("tesseract.js").Worker | undefined;
   let ended = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -159,7 +160,7 @@ async function recognizeJobNumber(file: File, onProgress: (progress: number) => 
     });
     if (ended) { await worker.terminate(); return null; }
     const result = await worker.recognize(file);
-    return sixDigitJobNumber(result.data.text, result.data.confidence);
+    return { jobNumber: sixDigitJobNumber(result.data.text, result.data.confidence), address: screenshotAddress(result.data.text, result.data.confidence) };
   };
   try {
     return await Promise.race([
@@ -587,16 +588,19 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       // Decode/validate the screenshot first; OCR still reads the original file.
       const image = await screenshotAsJpeg(file);
       let detectedJobNumber: string | null = null;
+      let address: string | null = null;
       let recognitionFailed = false;
       try {
-        detectedJobNumber = await recognizeJobNumber(file, setScreenshotReading);
+        const extracted = await recognizeJobNumber(file, setScreenshotReading);
+        detectedJobNumber = extracted?.jobNumber ?? null;
+        address = extracted?.address ?? null;
       } catch {
         recognitionFailed = true;
       }
       if (draftTimer.current !== null) { window.clearTimeout(draftTimer.current); draftTimer.current = null; }
       const existingJobNumber = draftRef.current!.jobNumber;
       const nextJobNumber = detectedJobNumber || existingJobNumber || "";
-      await queueDraftSave({ ...draftRef.current!, jobNumber: nextJobNumber, screenshot: image, redoChanged: draftRef.current!.redoChanged || !!draftRef.current!.redoSourceId });
+      await queueDraftSave({ ...draftRef.current!, jobNumber: nextJobNumber, address, screenshot: image, redoChanged: draftRef.current!.redoChanged || !!draftRef.current!.redoSourceId });
       if (detectedJobNumber) setJobNumber(detectedJobNumber);
       setScreenshot(image);
       setScreenshotReading(100);
@@ -738,7 +742,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       // valid QC that is already in memory from reaching the server.
       await queueDraftSave({ ...draftRef.current!, screenshot: preparedScreenshot, photos: preparedPhotos });
       const redoSourceId = draftRef.current!.redoSourceId;
-      const details = { techId, jobNumber: jobNumber.trim(), submissionId, redoSourceId, redoChanged: draftRef.current!.redoChanged };
+      const details = { techId, address: draftRef.current!.address ?? null, jobNumber: jobNumber.trim(), submissionId, redoSourceId, redoChanged: draftRef.current!.redoChanged };
       const submissionLocation = draftRef.current!.location ?? await captureQcLocation();
       for (let index = 0; index < prepared.length; index++) {
         setUploadLabel(`Uploading picture ${index + 1} of ${prepared.length}…`);

@@ -7,6 +7,6 @@ export default function QcFilterBar({ value, onChange, techIds, currentMonthOnly
     {!currentMonthOnly && (monthRequired || value.month) && <label>Month ending on the 21st<input type="month" value={value.month} onChange={e => onChange({ ...value, month: e.target.value })}/></label>}
     <label>Technician<select value={value.tech} onChange={e => onChange({ ...value, tech: e.target.value })}><option value="">All technicians</option>{[...new Set([...techIds, ...(value.tech ? [value.tech] : [])])].sort((a,b) => a.localeCompare(b, undefined, {numeric:true})).map(id => <option key={id} value={id}>Tech {id}</option>)}</select></label>
     <label>Status<select value={value.status} onChange={e => onChange({ ...value, status: e.target.value })}>{[["all","All statuses"],["pending","Needs review"],["approved","Approved"],["rejected","Rejected"],["uploaded","Uploaded to Catalyst"]].map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select></label>
-    <label className="qc-filter-search">Search<input placeholder="Job number or Tech ID" aria-label="Search QCs" value={value.search} onChange={e => onChange({ ...value, search: e.target.value })}/></label>
+    <label className="qc-filter-search">Search<input placeholder="Job# Tech ID or Address" aria-label="Search QCs" value={value.search} onChange={e => onChange({ ...value, search: e.target.value })}/></label>
   </div>;
 }

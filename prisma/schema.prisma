@@ -49,6 +49,7 @@ model QcSubmission {
   tenantId               String  @default("default") @map("tenant_id")
   techId                 String  @map("tech_id")
   jobNumber              String  @default("") @map("job_number")
+  address                String?
   screenshotId           String  @map("screenshot_id")
   photoIds               String  @map("photo_ids")
   status                 String  @default("pending")
@@ -86,6 +87,7 @@ model QcSubmissionAttempt {
   attemptNumber          Int     @map("attempt_number")
   techId                 String  @map("tech_id")
   jobNumber              String  @map("job_number")
+  address                String?
   screenshotId           String  @map("screenshot_id")
   photoIds               String  @map("photo_ids")
   status                 String

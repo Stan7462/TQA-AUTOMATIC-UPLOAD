@@ -28,6 +28,7 @@ export const qcSubmissions = sqliteTable("qc_submissions", {
   id: text("id").primaryKey(),
   techId: text("tech_id").notNull(),
   jobNumber: text("job_number").notNull().default(""),
+  address: text("address"),
   screenshotId: text("screenshot_id").notNull(),
   photoIds: text("photo_ids").notNull(),
   status: text("status").notNull().default("pending"),

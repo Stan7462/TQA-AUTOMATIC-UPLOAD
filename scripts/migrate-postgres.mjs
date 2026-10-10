@@ -39,6 +39,11 @@ async function upgradeSinglePhone(client) {
   if (!(await client.query("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='push_accounts' AND column_name='active_subscription_id'")).rows.length) await client.query(readFileSync(new URL('../postgres/migrations/0003_single_push_phone.sql',import.meta.url),'utf8'));
   await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)', ['0003', Date.now(), '{}']);
 }
+async function upgradeAddress(client) {
+  if ((await client.query("SELECT 1 FROM tqa_postgres_migrations WHERE version='0004'")).rows.length) return;
+  if (!(await client.query("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='qc_submissions' AND column_name='address'")).rows.length) await client.query(readFileSync(new URL('../postgres/migrations/0004_qc_address.sql', import.meta.url), 'utf8'));
+  await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)', ['0004', Date.now(), '{}']);
+}
 export async function migratePostgres() {
   const directory=resolve(process.env.TQA_DATA_DIR || '.tqa-data');
   if(!existsSync(join(directory,'secrets.json'))) throw new Error('Existing application encryption secrets are required before database migration.');
@@ -53,6 +58,7 @@ export async function migratePostgres() {
       if(!applied.length) throw new Error('Unrecognized PostgreSQL migration state.');
       await upgradeNotifications(client);
       await upgradeSinglePhone(client);
+    await upgradeAddress(client);
       await client.query('COMMIT');
       console.log('PostgreSQL schema is current. SQLite is no longer used by the app.');
       return;
@@ -71,11 +77,13 @@ export async function migratePostgres() {
     await client.query(readFileSync(new URL('../postgres/migrations/0001_baseline.sql',import.meta.url),'utf8'));
     if(source.prepare("PRAGMA table_info(push_accounts)").all().some(c=>c.name==='supervisor_summary')) await client.query(readFileSync(new URL('../postgres/migrations/0002_notification_summaries.sql',import.meta.url),'utf8'));
     if(source.prepare("PRAGMA table_info(push_accounts)").all().some(c=>c.name==='active_subscription_id')) await client.query(readFileSync(new URL('../postgres/migrations/0003_single_push_phone.sql',import.meta.url),'utf8'));
+    if(source.prepare("PRAGMA table_info(qc_submissions)").all().some(c=>c.name==='address')) await client.query(readFileSync(new URL('../postgres/migrations/0004_qc_address.sql',import.meta.url),'utf8'));
     const report=await importSqlite(source,client);
     await client.query('CREATE TABLE tqa_postgres_migrations(version TEXT PRIMARY KEY, applied_at BIGINT NOT NULL, verification TEXT NOT NULL)');
     await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)',['0001',Date.now(),JSON.stringify(report)]);
     await upgradeNotifications(client);
     await upgradeSinglePhone(client);
+    await upgradeAddress(client);
     await client.query('COMMIT');
     writeFileSync(join(backupDirectory,'verification.json'),JSON.stringify(report,null,2),{mode:0o600});
     console.log('PostgreSQL migration verified (row counts and SHA-256 of every column):',JSON.stringify(Object.fromEntries(Object.entries(report).map(([t,v])=>[t,v.count]))));

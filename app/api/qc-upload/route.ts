@@ -1,3 +1,4 @@
+import { normalizeAddress } from "@/lib/address-ocr";
 import { env } from "@/lib/local-env";
 import { getTechSessionContext, normalizeTechId, sameOrigin } from "@/lib/tech-auth";
 import { normalizeQcLocation } from "@/lib/qc-location";
@@ -14,6 +15,7 @@ type UploadBody = {
   action?: unknown;
   techId?: unknown;
   jobNumber?: unknown;
+  address?: unknown;
   submissionId?: unknown;
   redoSourceId?: unknown;
   redoChanged?: unknown;
@@ -40,6 +42,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as UploadBody | null;
   const techId = normalizeTechId(body?.techId);
   const jobNumber = typeof body?.jobNumber === "string" ? body.jobNumber.trim() : "";
+  const address = normalizeAddress(body?.address);
   const submissionId = body?.submissionId;
   const redoSourceId = body?.redoSourceId == null ? null : body.redoSourceId;
   if (!techId || !/^\d{1,6}$/.test(jobNumber) || typeof submissionId !== "string" || !/^[0-9a-f-]{36}$/.test(submissionId)) {
@@ -106,15 +109,15 @@ export async function POST(request: Request) {
     const savedId = submissionId;
     if (redoSource) {
       const results = await env.DB.batch([
-        env.DB.prepare("INSERT INTO qc_submission_attempts (tenant_id, root_submission_id, submission_id, attempt_number, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at, reviewed_at, review_note, trust_upload_status, trust_uploaded_at, trust_external_reference, trust_upload_error, trust_upload_attempts, trust_last_attempt_at, trust_uploaded_by_key_id, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at) SELECT tenant_id, COALESCE(root_submission_id, id), id, attempt_number, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at, reviewed_at, review_note, trust_upload_status, trust_uploaded_at, trust_external_reference, trust_upload_error, trust_upload_attempts, trust_last_attempt_at, trust_uploaded_by_key_id, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at FROM qc_submissions WHERE tenant_id = ? AND id = ? AND tech_id = ? AND status = 'rejected' AND correction_pending = 0 AND submitted_at >= ? AND submitted_at < ?")
+        env.DB.prepare("INSERT INTO qc_submission_attempts (tenant_id, root_submission_id, submission_id, attempt_number, tech_id, job_number, address, screenshot_id, photo_ids, status, submitted_at, reviewed_at, review_note, trust_upload_status, trust_uploaded_at, trust_external_reference, trust_upload_error, trust_upload_attempts, trust_last_attempt_at, trust_uploaded_by_key_id, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at) SELECT tenant_id, COALESCE(root_submission_id, id), id, attempt_number, tech_id, job_number, address, screenshot_id, photo_ids, status, submitted_at, reviewed_at, review_note, trust_upload_status, trust_uploaded_at, trust_external_reference, trust_upload_error, trust_upload_attempts, trust_last_attempt_at, trust_uploaded_by_key_id, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at FROM qc_submissions WHERE tenant_id = ? AND id = ? AND tech_id = ? AND status = 'rejected' AND correction_pending = 0 AND submitted_at >= ? AND submitted_at < ?")
           .bind(session.tenantId, redoSource.id, techId, currentMonth.start, currentMonth.end),
-        env.DB.prepare("UPDATE qc_submissions SET id = ?, root_submission_id = ?, attempt_number = ?, correction_pending = 1, correction_deadline_at = NULL, job_number = ?, screenshot_id = ?, photo_ids = ?, status = 'rejected', submitted_at = ?, reviewed_at = NULL, review_note = NULL, trust_upload_status = 'ready', trust_uploaded_at = NULL, trust_external_reference = NULL, trust_upload_error = NULL, trust_upload_attempts = 0, trust_last_attempt_at = NULL, trust_uploaded_by_key_id = NULL, location_status = ?, location_latitude = ?, location_longitude = ?, location_accuracy = ?, location_captured_at = ? WHERE tenant_id = ? AND id = ? AND tech_id = ? AND status = 'rejected' AND correction_pending = 0 AND submitted_at >= ? AND submitted_at < ?")
-          .bind(submissionId, redoSource.rootSubmissionId, redoSource.attemptNumber + 1, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, location.status, location.status === "verified" ? location.latitude : null, location.status === "verified" ? location.longitude : null, location.status === "verified" ? location.accuracy : null, location.capturedAt, session.tenantId, redoSource.id, techId, currentMonth.start, currentMonth.end),
+        env.DB.prepare("UPDATE qc_submissions SET id = ?, root_submission_id = ?, attempt_number = ?, correction_pending = 1, correction_deadline_at = NULL, job_number = ?, address = ?, screenshot_id = ?, photo_ids = ?, status = 'rejected', submitted_at = ?, reviewed_at = NULL, review_note = NULL, trust_upload_status = 'ready', trust_uploaded_at = NULL, trust_external_reference = NULL, trust_upload_error = NULL, trust_upload_attempts = 0, trust_last_attempt_at = NULL, trust_uploaded_by_key_id = NULL, location_status = ?, location_latitude = ?, location_longitude = ?, location_accuracy = ?, location_captured_at = ? WHERE tenant_id = ? AND id = ? AND tech_id = ? AND status = 'rejected' AND correction_pending = 0 AND submitted_at >= ? AND submitted_at < ?")
+          .bind(submissionId, redoSource.rootSubmissionId, redoSource.attemptNumber + 1, jobNumber, address, ids[0], JSON.stringify(ids.slice(1)), now, location.status, location.status === "verified" ? location.latitude : null, location.status === "verified" ? location.longitude : null, location.status === "verified" ? location.accuracy : null, location.capturedAt, session.tenantId, redoSource.id, techId, currentMonth.start, currentMonth.end),
       ]);
       if (!results[0].meta.changes || !results[1].meta.changes) throw new Error("redo-source-unavailable");
     } else {
-      const inserted = await env.DB.prepare("INSERT INTO qc_submissions (id, tenant_id, root_submission_id, attempt_number, correction_pending, tech_id, job_number, screenshot_id, photo_ids, status, submitted_at, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at) SELECT ?, ?, ?, 1, 0, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM technician_removals WHERE tenant_id = ? AND tech_id = ?)")
-        .bind(submissionId, session.tenantId, submissionId, techId, jobNumber, ids[0], JSON.stringify(ids.slice(1)), now, location.status, location.status === "verified" ? location.latitude : null, location.status === "verified" ? location.longitude : null, location.status === "verified" ? location.accuracy : null, location.capturedAt, session.tenantId, techId).run();
+      const inserted = await env.DB.prepare("INSERT INTO qc_submissions (id, tenant_id, root_submission_id, attempt_number, correction_pending, tech_id, job_number, address, screenshot_id, photo_ids, status, submitted_at, location_status, location_latitude, location_longitude, location_accuracy, location_captured_at) SELECT ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM technician_removals WHERE tenant_id = ? AND tech_id = ?)")
+        .bind(submissionId, session.tenantId, submissionId, techId, jobNumber, address, ids[0], JSON.stringify(ids.slice(1)), now, location.status, location.status === "verified" ? location.latitude : null, location.status === "verified" ? location.longitude : null, location.status === "verified" ? location.accuracy : null, location.capturedAt, session.tenantId, techId).run();
       if (!inserted.meta.changes) throw new Error("removed-technician");
     }
     try { await env.DB.prepare("DELETE FROM qc_upload_photos WHERE tenant_id = ? AND submission_id = ? AND tech_id = ?").bind(session.tenantId, submissionId, techId).run(); }

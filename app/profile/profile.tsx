@@ -5,7 +5,7 @@ import { readQcDraft, writeQcDraft } from "@/lib/qc-draft";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 type View='rejected'|'captured'|'uploaded';
-type Submission={id:string;jobNumber:string;screenshotId:string;photoIds:string[];submittedAt:number;reviewedAt:number|null;correctionDeadlineAt:number|null;reviewNote:string|null;status:string;trustUploadStatus:string;attemptNumber:number;correctionPending:number};
+type Submission={id:string;jobNumber:string;address:string|null;screenshotId:string;photoIds:string[];submittedAt:number;reviewedAt:number|null;correctionDeadlineAt:number|null;reviewNote:string|null;status:string;trustUploadStatus:string;attemptNumber:number;correctionPending:number};
 const titles={rejected:'My rejected QCs',captured:'My captured QCs',uploaded:'Uploaded to Catalyst'};
 function rejectionTimeLabel(deadlineAt:number,now:number){const hours=Math.ceil((deadlineAt-now)/(60*60*1000));return hours>0?`${hours}h left`:'Overdue';}
 function cardDeadlineLabel(deadline:string){return deadline==='Overdue'?deadline:deadline.replace('h left',' hours left to fix');}
@@ -46,7 +46,7 @@ export default function Profile(){
        if(!blob.size||!blob.type.startsWith('image/'))throw new Error('Invalid photo');
        return blob;
      }));
-     await writeQcDraft({techId,fiscalMonth:fiscalMonthKey(),submissionId:crypto.randomUUID(),redoSourceId:item.id,redoChanged:false,jobNumber:/^\d{1,6}$/.test(item.jobNumber)?item.jobNumber:'',screenshot:pictures[0],photos:pictures.slice(1),location:null,updatedAt:Date.now()});
+     await writeQcDraft({techId,fiscalMonth:fiscalMonthKey(),submissionId:crypto.randomUUID(),redoSourceId:item.id,redoChanged:false,jobNumber:/^\d{1,6}$/.test(item.jobNumber)?item.jobNumber:'',address:item.address,screenshot:pictures[0],photos:pictures.slice(1),location:null,updatedAt:Date.now()});
      location.assign('/capture');
    }catch{
      const message='Could not load all pictures or save this QC. Your unfinished QC is unchanged. Please try again.';

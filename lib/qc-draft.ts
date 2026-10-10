@@ -1,3 +1,4 @@
+import { normalizeAddress } from "@/lib/address-ocr";
 import { normalizeQcLocation, type QcLocation } from "@/lib/qc-location";
 import { fiscalMonthKey } from "@/lib/fiscal-month";
 
@@ -8,6 +9,7 @@ export type QcDraft = {
   redoSourceId: string | null;
   redoChanged: boolean;
   jobNumber: string;
+  address?: string | null;
   screenshot: Blob | null;
   photos: Blob[];
   location: QcLocation | null;
@@ -138,6 +140,7 @@ export async function readQcDraft(techId: string): Promise<QcDraft | null> {
     redoSourceId: draft.redoSourceId ?? null,
     redoChanged: draft.redoChanged ?? false,
     jobNumber: draft.jobNumber!,
+    address: screenshot ? normalizeAddress(draft.address) : null,
     screenshot,
     photos,
     location: normalizeQcLocation(draft.location),
@@ -165,6 +168,7 @@ export async function writeQcDraft(draft: QcDraft): Promise<void> {
     redoSourceId: draft.redoSourceId,
     redoChanged: draft.redoChanged,
     jobNumber: draft.jobNumber,
+    address: normalizeAddress(draft.address),
     screenshot: draft.screenshot ? await storeImage(draft.screenshot) : null,
     photos: await Promise.all(draft.photos.map(storeImage)),
     location: draft.location,
