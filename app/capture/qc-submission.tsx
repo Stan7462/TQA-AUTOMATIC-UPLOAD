@@ -8,6 +8,8 @@ import { deleteQcDraft, readQcDraft, writeQcDraft, type QcDraft } from "@/lib/qc
 import type { QcLocation } from "@/lib/qc-location";
 import { verifySubmissionPermissions } from "@/lib/required-permissions";
 
+import MonthlyGoalProgress from "./monthly-goal-progress";
+
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
 const MAX_SCREENSHOT_OUTPUT_BYTES = 250 * 1024;
 const MAX_LIVE_PHOTO_BYTES = 200 * 1024;
@@ -419,7 +421,6 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const hasCurrentProgress = progress?.techId === techId && progress.month === month;
   const approvedQcs = hasCurrentProgress ? progress.approved : null;
   const monthlyGoal = hasCurrentProgress ? progress.monthlyGoal : DEFAULT_MONTHLY_QC_GOAL;
-  const remainingQcs = approvedQcs === null ? null : Math.max(0, monthlyGoal - approvedQcs);
   const rejectedDeadlineHours = qcCounts?.urgentRejectedAt && today ? remainingDeadlineHours(qcCounts.urgentRejectedAt, today.getTime()) : null;
   const validJobNumber = /^\d{1,6}$/.test(jobNumber);
   const redoNeedsChange = !!draftRef.current?.redoSourceId && !draftRef.current.redoChanged;
@@ -748,7 +749,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         <a className="qc-summary-card" href="/profile?view=uploaded"><span>Uploaded to Catalyst</span><strong>{qcCounts?.uploaded ?? "—"}</strong></a>
       </section>
       {logoutError && <p className="form-error" role="alert">{logoutError}</p>}
-      <div className="qc-deadline" role="status"><div className="qc-progress-ring" aria-hidden="true" style={{ background: `conic-gradient(#d7e9ff ${approvedQcs === null ? 0 : Math.min(100, approvedQcs / monthlyGoal * 100)}%, #394b5a 0)` }}/><div className="qc-deadline-message"><strong>{remainingQcs === 0 ? "Monthly goal complete" : deadline ? deadline.daysLeft === 0 ? "Due today" : `${deadline.daysLeft} ${deadline.daysLeft === 1 ? "day" : "days"} left` : "Monthly QC deadline"}</strong><span>{!validTechId ? "Sign in again to see QCs remaining" : progressError ? "Approved QC progress is unavailable. Try again shortly." : remainingQcs === null ? "Checking approved QC progress…" : remainingQcs === 0 ? `${approvedQcs} of ${monthlyGoal} approved · 0 remaining` : `${approvedQcs} of ${monthlyGoal} approved · ${remainingQcs} remaining`}</span></div><small>Due <b>{deadline ? deadline.date.toLocaleDateString(undefined, { month: "long", day: "numeric" }) : "on the 21st"}</b></small></div>
+      <MonthlyGoalProgress approved={approvedQcs} goal={monthlyGoal} due={deadline ? deadline.date.toLocaleDateString(undefined, { month: "long", day: "numeric" }) : "on the 21st"} error={!validTechId ? "Sign in again to see QCs remaining" : progressError ? "Approved QC progress is unavailable. Try again shortly." : undefined}/>
       {submitted ? <div className="qc-success" role="status"><Check size={34}/><h2>Sent for review</h2><p>Your QC was submitted for approval.</p><button className="button dark" onClick={() => setSubmitted(false)}>Start another QC</button></div> : <>
         <div className="qc-step-timeline">
         <section className="qc-step qc-live-step">
