@@ -19,10 +19,11 @@ export async function GET(request: Request) {
     env.DB.prepare(`SELECT tech_id AS techId, COUNT(DISTINCT COALESCE(root_submission_id, id)) AS failedUploaded FROM (SELECT id, tenant_id, root_submission_id, attempt_number, tech_id, status, trust_upload_status, submitted_at FROM qc_submissions UNION ALL SELECT submission_id AS id, tenant_id, root_submission_id, attempt_number, tech_id, status, trust_upload_status, submitted_at FROM qc_submission_attempts) AS failed_qcs WHERE tenant_id = ? AND attempt_number = 1 AND status = 'rejected' AND trust_upload_status = 'uploaded' AND submitted_at >= ? AND submitted_at < ? GROUP BY tech_id`).bind(user!.tenantId, start, end).all<{ techId: string; failedUploaded: number }>(),
   ]);
   const stats = new Map(results.results.map((row) => [row.techId, row]));
+  const activeTechIds = new Set(roster.results.map(tech => tech.techId));
   for (const tech of roster.results) if (!stats.has(tech.techId)) stats.set(tech.techId, { techId: tech.techId, submitted: 0, approved: 0, rejected: 0, pending: 0, uploaded: 0 });
   const monthlyGoal = tenant && Number.isInteger(tenant.monthlyGoal) && tenant.monthlyGoal >= 1 && tenant.monthlyGoal <= 99 ? tenant.monthlyGoal : 5;
   for (const row of failures.results) if (!stats.has(row.techId)) stats.set(row.techId, { techId: row.techId, submitted: 0, approved: 0, rejected: 0, pending: 0, uploaded: 0 });
   const failedCounts = new Map(failures.results.map(row => [row.techId, Number(row.failedUploaded)]));
   const goals = new Map(roster.results.map(tech => [tech.techId, tech.monthlyGoal ?? monthlyGoal]));
-  return Response.json({ technicians: [...stats.values()].map(stat => ({ ...stat, failedUploaded: failedCounts.get(stat.techId) ?? 0, monthlyGoal: goals.get(stat.techId) ?? monthlyGoal })).sort((a, b) => a.techId.localeCompare(b.techId, undefined, { numeric: true })), monthlyGoal }, { headers: { "Cache-Control": "private, no-store" } });
+  return Response.json({ technicians: [...stats.values()].filter(stat => activeTechIds.has(stat.techId)).map(stat => ({ ...stat, failedUploaded: failedCounts.get(stat.techId) ?? 0, monthlyGoal: goals.get(stat.techId) ?? monthlyGoal })).sort((a, b) => a.techId.localeCompare(b.techId, undefined, { numeric: true })), monthlyGoal }, { headers: { "Cache-Control": "private, no-store" } });
 }
