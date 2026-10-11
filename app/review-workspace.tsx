@@ -10,7 +10,7 @@ import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 type Qc = { id: string; techId: string; jobNumber: string; address: string | null; status: string; trustUploadStatus: string; submittedAt: number; correctionDeadlineAt: number | null; photoIds: string[]; attemptNumber: number; correctionPending: number };
-type SnapshotStat = { techId: string; uploaded: number; monthlyGoal: number };
+type SnapshotStat = { techId: string; uploaded: number; failedUploaded: number; monthlyGoal: number };
 const statuses = [["pending", "Needs review"], ["all", "All records"], ["approved", "Approved"], ["uploaded", "Uploaded to Catalyst"], ["rejected", "Rejected"], ["fixed", "Fixed"]];
 const metricStatuses = statuses.filter(([value]) => value !== "pending" && value !== "fixed");
 function adminDeadline(q: Qc, now: number) {
@@ -56,9 +56,14 @@ function snapshotPng(stats: SnapshotStat[], range: { start: number; end: number 
   context.fillRect(tableX, tableY, tableWidth, 50);
   context.fillStyle = "#aabdc9";
   context.font = "700 18px system-ui, sans-serif";
-  context.fillText("TECHNICIAN", tableX + 22, tableY + 32);
-  context.textAlign = "right";
-  context.fillText("UPLOADED", tableX + tableWidth - 22, tableY + 32);
+  for (let column = 0; column < columns; column++) {
+    const x = tableX + column * columnWidth;
+    context.textAlign = "left";
+    context.fillText("TECHNICIAN", x + 16, tableY + 32);
+    context.textAlign = "right";
+    context.fillText("APPROVED", x + columnWidth - 105, tableY + 32);
+    context.fillText("FAILED", x + columnWidth - 16, tableY + 32);
+  }
   context.textAlign = "left";
   stats.forEach((stat, index) => {
     const column = dense ? index % 2 : 0;
@@ -71,17 +76,23 @@ function snapshotPng(stats: SnapshotStat[], range: { start: number; end: number 
     context.strokeRect(x, y, columnWidth, rowHeight);
     context.fillStyle = "#edf4fb";
     context.font = `700 ${dense ? 23 : 27}px system-ui, sans-serif`;
-    context.fillText(`Tech ${stat.techId}`, x + 22, y + rowHeight / 2 + 9, columnWidth - 170);
+    context.fillText(`Tech ${stat.techId}`, x + 16, y + rowHeight / 2 + 9, columnWidth - 235);
     context.textAlign = "right";
     context.font = `700 ${dense ? 28 : 34}px system-ui, sans-serif`;
-    context.fillText(String(stat.uploaded), x + columnWidth - 82, y + rowHeight / 2 + 10);
+    context.fillText(String(stat.uploaded), x + columnWidth - 163, y + rowHeight / 2 + 10);
     context.fillStyle = "#bed0dc";
     context.font = `600 ${dense ? 18 : 21}px system-ui, sans-serif`;
-    context.fillText(`of ${stat.monthlyGoal ?? monthlyGoal}`, x + columnWidth - 20, y + rowHeight / 2 + 9);
+    context.fillText(`of ${stat.monthlyGoal ?? monthlyGoal}`, x + columnWidth - 105, y + rowHeight / 2 + 9);
+    context.fillStyle = stat.failedUploaded ? "#ffadb8" : "#bed0dc";
+    context.font = `700 ${dense ? 28 : 34}px system-ui, sans-serif`;
+    context.fillText(String(stat.failedUploaded ?? 0), x + columnWidth - 16, y + rowHeight / 2 + 10);
     context.textAlign = "left";
   });
   context.fillStyle = "#91a7b6";
   context.font = "20px system-ui, sans-serif";
+  context.textAlign = "left";
+  context.font = "16px system-ui, sans-serif";
+  context.fillText("Confirmed uploads • Failed QCs do not count toward the monthly goal", 64, height - 34);
   context.textAlign = "right";
   context.fillText(`Updated ${new Date().toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`, width - 64, height - 34);
   const encoded = canvas.toDataURL("image/png").split(",")[1];
@@ -176,7 +187,7 @@ export default function Home() {
   }
   return <AdminShell active="records">
     <section className="intro"><div><h1>All records</h1><p>Review progress and track uploads to Catalyst.</p></div><div className="intro-actions"><button type="button" className="button light" onClick={() => void openSnapshot()}><UsersRound size={18}/>Catalyst snapshot</button><a className="button light" href="/records/approved">Export approved QCs</a></div></section>
-    {snapshotOpen && <div className="qc-confirm-overlay qc-snapshot-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSnapshotOpen(false); }}><section className={`qc-team-snapshot${snapshotStats.length>10?' is-dense':''}`} role="dialog" aria-modal="true" aria-labelledby="qc-snapshot-title"><button type="button" className="qc-snapshot-close" aria-label="Close Catalyst snapshot" onClick={() => setSnapshotOpen(false)}><X size={22}/></button><span className="kicker">TQA AUTOMATIC UPLOAD</span><h2 id="qc-snapshot-title">Uploaded to Catalyst</h2><p className="qc-snapshot-period">{new Date(snapshotRange.start).toLocaleDateString(undefined,{month:"short",day:"numeric"})} – {new Date(snapshotRange.end-1).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})}</p>{snapshotLoading ? <p className="qc-snapshot-empty">Loading totals…</p> : snapshotError ? <p className="form-error" role="alert">{snapshotError}</p> : snapshotStats.length ? <div className="qc-snapshot-table" role="table" aria-label="Technician Catalyst upload progress"><div className="qc-snapshot-table-head" role="row"><span role="columnheader">Technician</span><span role="columnheader">Uploaded</span></div>{snapshotStats.map(stat => <div className="qc-snapshot-row" role="row" key={stat.techId}><strong role="cell">Tech {stat.techId}</strong><span role="cell"><b>{stat.uploaded}</b> of {stat.monthlyGoal ?? snapshotMonthlyGoal}</span></div>)}</div> : <p className="qc-snapshot-empty">No active technicians.</p>}<div className="qc-snapshot-footer"><button type="button" className="qc-snapshot-share" disabled={snapshotLoading || !!snapshotError || !snapshotStats.length || snapshotSharing} onClick={() => void shareSnapshot()}><Share2 size={15}/>{snapshotSharing ? "Preparing…" : "Share snapshot"}</button><small>Updated {new Date().toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</small></div>{snapshotShareNote && <p className="qc-snapshot-share-note" role="status">{snapshotShareNote}</p>}</section></div>}
+    {snapshotOpen && <div className="qc-confirm-overlay qc-snapshot-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSnapshotOpen(false); }}><section className={`qc-team-snapshot${snapshotStats.length>10?' is-dense':''}`} role="dialog" aria-modal="true" aria-labelledby="qc-snapshot-title"><button type="button" className="qc-snapshot-close" aria-label="Close Catalyst snapshot" onClick={() => setSnapshotOpen(false)}><X size={22}/></button><span className="kicker">TQA AUTOMATIC UPLOAD</span><h2 id="qc-snapshot-title">Uploaded to Catalyst</h2><p className="qc-snapshot-period">{new Date(snapshotRange.start).toLocaleDateString(undefined,{month:"short",day:"numeric"})} – {new Date(snapshotRange.end-1).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})}</p>{snapshotLoading ? <p className="qc-snapshot-empty">Loading totals…</p> : snapshotError ? <p className="form-error" role="alert">{snapshotError}</p> : snapshotStats.length ? <div className="qc-snapshot-table" role="table" aria-label="Technician Catalyst upload progress">{(snapshotStats.length>10?[0,1]:[0]).map(column=><div className="qc-snapshot-table-head" role="row" key={`head-${column}`}><span role="columnheader">Technician</span><span role="columnheader">Approved</span><span role="columnheader">Failed</span></div>)}{snapshotStats.map(stat => <div className="qc-snapshot-row" role="row" key={stat.techId}><strong role="cell">Tech {stat.techId}</strong><span role="cell"><b>{stat.uploaded}</b> of {stat.monthlyGoal ?? snapshotMonthlyGoal}</span><span role="cell" className="qc-snapshot-failed"><b>{stat.failedUploaded ?? 0}</b></span></div>)}</div> : <p className="qc-snapshot-empty">No active technicians.</p>}<p className="qc-snapshot-count-note">Confirmed Catalyst uploads. Failed QCs do not count toward the monthly goal.</p><div className="qc-snapshot-footer"><button type="button" className="qc-snapshot-share" disabled={snapshotLoading || !!snapshotError || !snapshotStats.length || snapshotSharing} onClick={() => void shareSnapshot()}><Share2 size={15}/>{snapshotSharing ? "Preparing…" : "Share snapshot"}</button><small>Updated {new Date().toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</small></div>{snapshotShareNote && <p className="qc-snapshot-share-note" role="status">{snapshotShareNote}</p>}</section></div>}
     <section className="metrics status-metrics" aria-label="Filter QC records by status">{metricStatuses.map(([value,label]) => { const active = filters.status === value && !filters.tech && !filters.search && !activitySelection?.day; const corrected=value==='rejected'?items.filter(q=>q.status==='rejected'&&q.correctionPending===1).length:0; return <button key={value} className={`metric status-metric${active?' active':''}`} aria-pressed={active} onClick={()=>{setActivitySelection(null);setFilters({month:"",tech:"",status:value,search:""});if(!["all","uploaded"].includes(value))setView("list");}}><span>{label}</span><strong>{loading ? '—' : items.filter(q=>matches(q,value)).length}</strong>{corrected>0&&<span className="status-metric-notification" aria-label={`${corrected} fixed ${corrected===1?'QC':'QCs'} ready to review`}>{corrected}</span>}</button>; })}</section>
     <section className="admin-page-content"><QcFilterBar value={filters} onChange={value=>{setActivitySelection(null);setFilters(value);if(!["all","uploaded"].includes(value.status))setView("list");}} techIds={view === "activity" ? activityTechIds : items.map(q=>q.techId)} currentMonthOnly/>
     <div className="qc-view-switch" aria-label="Record view"><button className={`button light${view==='list'?' active':''}`} aria-pressed={view==='list'} onClick={()=>{setView("list");setActivitySelection(null);}}>List</button><button className={`button light${view==='activity'?' active':''}`} aria-pressed={view==='activity'} onClick={()=>{setView("activity");setActivitySelection(null);setFilters({...filters,status:"all"});}}>Activity</button></div>

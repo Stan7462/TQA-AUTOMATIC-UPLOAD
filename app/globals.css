@@ -889,3 +889,15 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .qc-failure-topic-panel{display:grid;gap:7px;min-width:0;padding:9px;border:1px solid #486170;border-radius:10px;background:#142936}.qc-failure-topic-heading{display:flex;align-items:flex-start;gap:7px;padding:2px 3px;color:#d9e7ef;font-size:13px;line-height:1.35}.qc-failure-topic-heading b{color:#91ded5;flex:none}
 .qc-failure-topics{display:grid;gap:4px;max-height:clamp(220px,38vh,430px);overflow-y:auto;overscroll-behavior-y:contain;scrollbar-gutter:stable;padding-right:5px;touch-action:pan-y;scrollbar-color:#638394 #142936}.qc-failure-topics label{display:grid;grid-template-columns:auto 1fr;gap:9px;align-items:start;padding:9px;border-radius:7px;background:#1b313e;font-size:13px;line-height:1.35;cursor:pointer}.qc-failure-topics label:hover{background:#254251}.qc-failure-topics input{margin-top:2px;accent-color:#53c9a7}
 .qc-readonly-failures{display:grid;gap:5px;margin-top:10px}.qc-readonly-failures span{padding:7px 9px;border-radius:8px;background:#18303c;font-size:13px}.qc-readonly-failures b{color:#8edbd2;margin-right:5px}
+
+/* Catalyst snapshot: confirmed Pass and first Fail counts. */
+.qc-snapshot-table-head,.qc-snapshot-row{grid-template-columns:minmax(0,1fr) 110px 60px;gap:10px}
+.qc-snapshot-table-head span:not(:first-child){text-align:right}
+.qc-snapshot-failed b{color:#ffadb8}
+.qc-snapshot-count-note{color:#aabdc9;font-size:11px;line-height:1.5;margin:12px 0 0}
+.qc-team-snapshot.is-dense .qc-snapshot-table-head{grid-column:auto}
+.qc-team-snapshot.is-dense .qc-snapshot-row{grid-template-columns:minmax(0,1fr) 76px 44px;gap:6px}
+.qc-team-snapshot.is-dense .qc-snapshot-table-head{grid-template-columns:minmax(0,1fr) 76px 44px;gap:6px}
+@media(max-width:600px){.qc-snapshot-table-head,.qc-snapshot-row{grid-template-columns:minmax(0,1fr) 94px 50px;gap:6px}.qc-team-snapshot.is-dense .qc-snapshot-table{display:block}.qc-team-snapshot.is-dense .qc-snapshot-table-head,.qc-team-snapshot.is-dense .qc-snapshot-row{grid-template-columns:minmax(0,1fr) 94px 50px}.qc-team-snapshot.is-dense .qc-snapshot-row:nth-child(odd){border-left:0}}
+
+@media(max-width:600px){.qc-team-snapshot.is-dense .qc-snapshot-table-head:nth-child(2){display:none}}
