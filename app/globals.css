@@ -903,3 +903,5 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 @media(max-width:600px){.qc-team-snapshot.is-dense .qc-snapshot-table-head:nth-child(2){display:none}}
 
 .qc-snapshot-index{display:inline-block;min-width:2.5em;margin-right:5px;color:#8195a3;font-size:.62em;font-weight:500;vertical-align:baseline}
+
+.qc-fail-upload-badge{white-space:normal;line-height:1.35}.qc-focus-details>.qc-fail-upload-badge{justify-self:start;width:fit-content;margin-top:10px}.table-wrap .qc-fail-upload-badge{margin-top:6px}
