@@ -131,3 +131,27 @@ test('extension uploads Fail then newly unlocked approved Fix in the same run',a
  }finally{db.close();}
 });
 test.after(()=>{rmSync(temp,{recursive:true,force:true});delete globalThis.workflowTest;});
+
+
+test('activity drill-down finds an earlier submission uploaded today, including older fiscal submissions', async()=>{
+ const db=fixture();
+ db.exec("CREATE TABLE technicians(tenant_id TEXT, tech_id TEXT, active INTEGER, is_admin INTEGER)");
+ const now=Date.now();
+ const old=now-45*86400000;
+ db.prepare("UPDATE qc_submissions SET submitted_at=?, trust_upload_status='uploaded',trust_uploaded_at=?,status='approved' WHERE id=?").run(old,now,first);
+ const chart=await (await routes.activity.GET()).json();
+ assert.equal(chart.uploads.length,1);
+ const url=`http://localhost/api/qc-submissions?status=all&start=${chart.start}&end=${chart.end}`;
+ const submitted=await (await routes.dashboard.GET(new Request(url))).json();
+ assert.equal(submitted.submissions.length,0);
+ const uploaded=await (await routes.dashboard.GET(new Request(url+'&dateBasis=uploaded'))).json();
+ assert.equal(uploaded.submissions.length,1);
+ assert.equal(uploaded.submissions[0].id,chart.uploads[0].id);
+ assert.equal(uploaded.submissions[0].trustUploadedAt,now);
+ // Another company and an unuploaded QC must not appear in the selected chart's records.
+ db.prepare("INSERT INTO qc_submissions(id,tenant_id,tech_id,job_number,photo_ids,status,submitted_at,trust_upload_status,trust_uploaded_at) VALUES(?,'other','TECH','123','[]','approved',?,'uploaded',?)").run(second,now,now);
+ db.prepare("INSERT INTO qc_submissions(id,tenant_id,tech_id,job_number,photo_ids,status,submitted_at,trust_upload_status) VALUES(?,'a','TECH','124','[]','approved',?,'ready')").run(third,now);
+ const filtered=await (await routes.dashboard.GET(new Request(url+'&dateBasis=uploaded'))).json();
+ assert.deepEqual(filtered.submissions.map(q=>q.id),[first]);
+ db.close();
+});
