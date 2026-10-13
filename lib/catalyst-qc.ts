@@ -1,3 +1,4 @@
+import { matchCatalystFailures } from "./catalyst-matcher";
 export type CatalystFailure = { code: string; reason: string };
 
 export const catalystQcCategories = [
@@ -135,10 +136,6 @@ export function catalystFailureLabel(failure: CatalystFailure): string {
   return failureLabels[failure.code]?.[failure.reason] ?? failure.reason;
 }
 
-function words(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter((word) => word.length > 2);
-}
-
 export function isCatalystFailure(value: unknown): value is CatalystFailure {
   if (!value || typeof value !== "object") return false;
   const candidate = value as CatalystFailure;
@@ -150,16 +147,12 @@ export function normalizeCatalystFailures(value: unknown): CatalystFailure[] | n
   if (!Array.isArray(value) || value.length < 1 || value.length > 20 || !value.every(isCatalystFailure)) return null;
   const unique = new Map(value.map((item) => [`${item.code}\0${item.reason}`, item]));
   const failures = [...unique.values()];
-  return new Set(failures.map((item) => item.code)).size === failures.length ? failures : null;
+  return failures;
 }
 
+// Limit applies to each detected problem, so additional problems are not hidden.
 export function suggestCatalystFailures(comment: string, limit = 6): CatalystFailure[] {
-  const input = new Set(words(comment));
-  if (!input.size) return [];
-  return catalystQcCategories.flatMap((category) => category.reasons.map((reason) => {
-    const haystack = new Set(words(catalystFailureLabel({ code: category.code, reason })));
-    let score = 0;
-    for (const word of input) if (haystack.has(word) || [...haystack].some((candidate) => candidate.startsWith(word) || word.startsWith(candidate))) score += word.length > 5 ? 3 : 1;
-    return { code: category.code, reason, score };
-  })).filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, limit).map(({ code, reason }) => ({ code, reason }));
+  const groups = matchCatalystFailures(comment).groups;
+  const unique = new Map(groups.flatMap(group => group.results.slice(0, limit)).map(failure => [`${failure.code}\0${failure.reason}`, {code: failure.code, reason: failure.reason}]));
+  return [...unique.values()];
 }

@@ -118,7 +118,7 @@ test('extension uploads Fail then newly unlocked approved Fix in the same run',a
   await reject(first);await redo(first,second);await approve(second);
   const processed=[];let run={};
   const background=readFileSync(join(root,'chrome-extension/background.js'),'utf8');
-  const source=background.slice(background.indexOf('async function runQueue()'),background.indexOf('chrome.runtime.onMessage.addListener'));
+  const source=background.slice(background.indexOf('async function runQueue('),background.indexOf('chrome.runtime.onMessage.addListener'));
   await runInNewContext(source+';runQueue()',{
    loadQueue:queue,rideAlongPercentage:async()=>50,observationTypeAssignments,
    setRun:async patch=>{run={...run,...patch};},stored:async()=>({run}),
@@ -154,4 +154,17 @@ test('activity drill-down finds an earlier submission uploaded today, including 
  const filtered=await (await routes.dashboard.GET(new Request(url+'&dateBasis=uploaded'))).json();
  assert.deepEqual(filtered.submissions.map(q=>q.id),[first]);
  db.close();
+});
+
+
+test('review saves and queues multiple exact reasons from the same TQA category',async()=>{
+ const db=fixture();
+ try {
+  const reasons=[{code:'TQA6',reason:'Approved Connector Properly Installed'},{code:'TQA6',reason:'Enclosure installed as required, located properly and clearances maintained'}];
+  const response=await routes.review.POST(request({status:'rejected',reviewNote:'No house box and unsuitable fittings',failureReasons:reasons}),{params:Promise.resolve({id:first})});
+  assert.equal(response.status,200);
+  assert.deepEqual(JSON.parse(db.prepare('SELECT catalyst_failures FROM qc_submissions WHERE id=?').get(first).catalyst_failures),reasons);
+  const detail=await (await routes.detail.GET(new Request('http://localhost/test'),{params:Promise.resolve({id:first})})).json();
+  assert.deepEqual(detail.qc.failureReasons,reasons);
+ }finally{db.close();}
 });

@@ -15,7 +15,7 @@ export function orderedPhotos(qc) {
 
 export function observationTypeAssignments(qcs, rideAlongPercentage, random = Math.random) {
   const percentage = Math.max(0, Math.min(100, Number(rideAlongPercentage) || 0));
-  const observationIndexes = qcs.map((qc, index) => qc.workflow === "follow_up" ? null : index).filter((index) => index !== null);
+  const observationIndexes = qcs.map((qc, index) => qc.workflow === "follow_up" || qc.outcome === "fail" || qc.reviewStatus === "rejected" ? null : index).filter((index) => index !== null);
   const rideAlongCount = Math.round(observationIndexes.length * percentage / 100);
   const shuffled = [...observationIndexes];
   for (let index = shuffled.length - 1; index > 0; index--) {
@@ -34,4 +34,17 @@ export function observationTypeAssignments(qcs, rideAlongPercentage, random = Ma
 export function safeError(error) {
   const message = error instanceof Error ? error.message : String(error);
   return message.replace(/tqa_trust_[a-f0-9]{64}/g, "[redacted]").replace(/\b[a-f0-9]{64}\b/g, "[redacted]");
+}
+
+// Only resume when Catalyst still has exactly the photos we confirmed saving.
+export function recoveryPhotoIndex(checkpoint, state, photos) {
+  if (checkpoint?.completionStarted) throw new Error('Completion may already have happened. Review Catalyst before retrying.');
+  const expected = checkpoint?.photoIds || [];
+  if (expected.length > photos.length || expected.some((id, i) => id !== photos[i].id)) throw new Error('QC photos changed since the interrupted upload. Review Catalyst before retrying.');
+  const actual = state.photoKeys || [];
+  const saved = checkpoint?.photoKeys || [];
+  if (actual.length !== saved.length || actual.some((id, i) => id !== saved[i]) || saved.length !== expected.length) {
+    throw new Error('Catalyst photos do not match confirmed upload progress. Existing photos will not be uploaded again; review this observation.');
+  }
+  return expected.length;
 }

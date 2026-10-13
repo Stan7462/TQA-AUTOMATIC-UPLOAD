@@ -114,16 +114,50 @@
   }
 
   async function selectComboElement(combo, option, description = "dropdown") {
-    const control = combo?.closest(".react-select__control") || combo?.parentElement;
-    if (!combo || !control) throw new Error(`Catalyst ${description} was not found.`);
-    combo.focus();
-    if (combo.getAttribute("aria-expanded") !== "true") control.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, view: window }));
-    const listbox = await waitFor(() => document.getElementById(combo.getAttribute("aria-controls")) || document.querySelector("[role='listbox']"), `${description} options`, 5000);
+    const currentCombo = () => (combo?.id && document.getElementById(combo.id)) || combo;
+    const currentControl = () => currentCombo()?.closest(".react-select__control") || currentCombo()?.parentElement;
+    if (!combo || !currentControl()) throw new Error(`Catalyst ${description} was not found.`);
+    const hasSelection = () => [...(currentControl()?.querySelectorAll(".react-select__single-value, .react-select__multi-value__label") || [])]
+      .some(node => clean(node.textContent).toLowerCase() === option.toLowerCase());
+    const closeMenu = () => {
+      if (currentCombo().getAttribute("aria-expanded") === "true") {
+        currentCombo().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+      }
+    };
+    // Additional Information uses multi-value tags; resumed selections must be kept.
+    if (hasSelection()) { closeMenu(); return; }
+    currentCombo().focus();
+    if (currentCombo().getAttribute("aria-expanded") !== "true") {
+      currentControl().dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, view: window }));
+    }
+    try {
+      await waitFor(() => currentCombo().getAttribute("aria-expanded") === "true", `${description} to open`, 3000);
+    } catch {
+      // Some React Select controls ignore the mouse event while their row updates.
+      currentCombo().focus();
+      currentCombo().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", code: "ArrowDown", bubbles: true, cancelable: true }));
+      await waitFor(() => currentCombo().getAttribute("aria-expanded") === "true", `${description} to open by keyboard`, 5000);
+    }
+    const listbox = await waitFor(() => {
+      const id = currentCombo().getAttribute("aria-controls");
+      return id ? document.getElementById(id) : document.querySelector("[role='listbox']");
+    }, `${description} options`, 10000);
     const choices = [...listbox.querySelectorAll("[role='option']")];
     const item = choices.find((node) => clean(node.textContent).toLowerCase() === option.toLowerCase());
     if (!item) throw new Error(`Catalyst ${description} has no ${option} option. Available: ${choices.map((node) => clean(node.textContent)).join(", ") || "none"}.`);
+    pageLog("info", "dropdown", `Selecting ${option} from ${description}.`);
     item.click();
-    await sleep(200);
+    await waitFor(hasSelection, `${option} selection to appear in ${description}`, 5000);
+    closeMenu();
+  }
+
+  async function inspectObservation(jobNumber, techId) {
+    await waitFor(() => detailValue("Job Number") === String(jobNumber).trim() && detailValue("Tech Number") === String(techId).trim(), "matching recovery job and technician", 15000);
+    // The QC form and Complete button are gated by the two setup selections.
+    await waitFor(() => visible(document.querySelector("input[type='file']#formFile")) && [...document.querySelectorAll("[role='combobox']")].filter(visible).length >= 2, "editable observation setup and photo controls", 15000);
+    // Use the saved thumbnail identifiers, not every decorative image on the page.
+    const photoKeys = [...document.querySelectorAll("[id^='thumbnail-image-container-']")].filter(visible).map(el=>el.id).sort();
+    return {photoKeys};
   }
 
   async function prepare(jobNumber, techId, observationType) {
@@ -142,6 +176,7 @@
     if (!["Ride Along", "After the Fact"].includes(observationType)) throw new Error("The requested observation type is invalid.");
     await selectCombo(0, observationType);
     await selectCombo(1, "No");
+    await waitFor(() => [...document.querySelectorAll("tr, [role='row']")].filter(row => visible(row) && /^TQA\d+$/.test(clean(row.querySelector("td, [role='cell']")?.textContent))).length >= 7, "quality checks after observation setup", 15000);
     const technicianName = detailValue("Technician Name/Company").split("/")[0].trim();
     return { prepared: true, technicianName };
   }
@@ -184,9 +219,16 @@
     const rows = [...document.querySelectorAll("tr, [role='row']")].filter(visible);
     const qcRows = rows.filter((row) => /^TQA\d+$/m.test(clean(row.querySelector("td, [role='cell']")?.textContent)));
     if (qcRows.length < 7) throw new Error(`Only ${qcRows.length} TQA checks were found; expected at least 7.`);
-    const byCode = new Map(failures.map((failure) => [failure.code, failure]));
-    for (const row of qcRows) {
-      const code = /^TQA\d+$/m.exec(clean(row.querySelector("td, [role='cell']")?.textContent))?.[0];
+    const byCode = new Map();
+    for (const failure of failures) {
+      const reasons = byCode.get(failure.code) || [];
+      if (!reasons.includes(failure.reason)) reasons.push(failure.reason);
+      byCode.set(failure.code, reasons);
+    }
+    for (const originalRow of qcRows) {
+      const code = /^TQA\d+$/m.exec(clean(originalRow.querySelector("td, [role='cell']")?.textContent))?.[0];
+      const row = [...document.querySelectorAll("tr, [role='row']")].find(item => visible(item) && clean(item.querySelector("td, [role='cell']")?.textContent) === code);
+      if (!row) throw new Error(`Catalyst ${code} row disappeared while setting checks.`);
       const failure = byCode.get(code);
       const radios = [...row.querySelectorAll("input[type='radio']")];
       if (radios.length < 2) throw new Error("A TQA row is missing Displayed and Not Displayed options.");
@@ -194,10 +236,16 @@
       if (!target.checked) target.click();
       if (!target.checked) throw new Error(`The ${code} ${failure ? "Not Displayed" : "Displayed"} option did not stay selected.`);
       if (failure) {
-        const combo = [...row.querySelectorAll("[role='combobox']")].find(visible);
-        if (!combo) throw new Error(`${code} did not show its Additional Information dropdown after selecting Not Displayed.`);
-        await selectComboElement(combo, failure.reason, `${code} Additional Information`);
-        const comment = [...row.querySelectorAll("textarea")].find(visible);
+        // Catalyst renders this field asynchronously and may replace the entire row.
+        const currentRow = () => [...document.querySelectorAll("tr, [role='row']")].find(item =>
+          visible(item) && clean(item.querySelector("td, [role='cell']")?.textContent) === code);
+        const combo = await waitFor(() => {
+          const updatedRow = currentRow();
+          return updatedRow && [...updatedRow.querySelectorAll("[role='combobox']")].find(item =>
+            visible(item) && !item.disabled && item.getAttribute("aria-disabled") !== "true");
+        }, `${code} Additional Information dropdown after selecting Not Displayed`, 15000);
+        for (const reason of failure) await selectComboElement(combo, reason, `${code} Additional Information`);
+        const comment = [...(currentRow()?.querySelectorAll("textarea") || [])].find(visible);
         if (comment && supervisorComment) nativeValue(comment, supervisorComment);
       }
     }
@@ -207,12 +255,15 @@
       if (!overall) throw new Error("Catalyst Overall Comments field was not found.");
       nativeValue(overall, supervisorComment);
     }
-    return { displayed: qcRows.length - failures.length, notDisplayed: failures.length };
+    return { displayed: qcRows.length - byCode.size, notDisplayed: byCode.size };
   }
 
-  async function findCompletedObservation(jobNumber, technicianName) {
+  async function findCompletedObservation(jobNumber, technicianName, techId) {
     if (!location.pathname.endsWith("/observations")) throw new Error("Open Catalyst Observations first.");
-    const radios = await waitFor(() => [...document.querySelectorAll("input[type='radio']")].filter(visible), "Observations search options");
+    const radios = await waitFor(() => {
+      const options = [...document.querySelectorAll("input[type='radio']")].filter(visible);
+      return options.length >= 2 ? options : null;
+    }, "Observer/Technician search controls to finish loading", 25000);
     if (radios.length < 2) throw new Error("Observer/Technician search was not found.");
     if (!radios[1].checked) radios[1].click();
     const combo = await waitFor(() => [...document.querySelectorAll("[role='combobox']")].find((item) => /tech/i.test(item.getAttribute("aria-label") || item.getAttribute("placeholder") || "")) || [...document.querySelectorAll("[role='combobox']")].filter(visible)[0], "technician search field");
@@ -222,7 +273,14 @@
     const option = [...listbox.querySelectorAll("[role='option']")].find((item) => clean(item.textContent).toLowerCase().includes(technicianName.toLowerCase()));
     if (!option) throw new Error(`Catalyst could not find technician ${technicianName}.`);
     option.click();
-    const row = await waitFor(() => [...document.querySelectorAll(".ag-center-cols-container .ag-row, .ag-body-viewport .ag-row")].find((item) => visible(item) && new RegExp(`(^|\\D)${String(jobNumber).replace(/\D/g, "")}($|\\D)`).test(clean(item.textContent))), `completed observation for job ${jobNumber}`, 30000);
+    const row = await waitFor(() => {
+      const matches = [...document.querySelectorAll(".ag-center-cols-container .ag-row, .ag-body-viewport .ag-row")].filter(item =>
+        visible(item) && clean(item.querySelector('[col-id="JobNo"]')?.textContent) === String(jobNumber).trim()
+        && (!techId || clean(item.querySelector('[col-id="TechID"]')?.textContent) === String(techId).trim())
+        && clean(item.querySelector('[col-id="EvaluationStatus"]')?.textContent).toLowerCase() === "completed");
+      if (matches.length > 1) throw new Error(`Multiple completed observations match job ${jobNumber}. Review Catalyst before reporting.`);
+      return matches[0];
+    }, `completed observation for job ${jobNumber} and Tech ID ${techId || technicianName}`, 30000);
     const action = [...row.querySelectorAll("button, a")].find((item) => visible(item) && (/view|open|eye/i.test(`${item.getAttribute("aria-label") || ""} ${item.getAttribute("title") || ""} ${item.className || ""}`) || item.querySelector("svg")));
     if (!action) throw new Error(`The View action for completed job ${jobNumber} was not found.`);
     const href = action.href || action.closest("a")?.href;
@@ -230,6 +288,18 @@
     if (linkedId) return { observationId: linkedId };
     action.click();
     return { navigating: true };
+  }
+
+  async function verifyCompletedObservation(jobNumber, techId, outcome, photoCount) {
+    const observationId = new URL(location.href).searchParams.get("id");
+    if (!/^\d+$/.test(observationId || "")) throw new Error("Open a completed observation using its id, not its jobid.");
+    await waitFor(() => detailValue("Job Number") === String(jobNumber).trim() && detailValue("Tech Number") === String(techId).trim(), "matching completed job and technician", 15000);
+    await waitFor(() => document.querySelector("#formFile")?.disabled && /\d/.test(detailValue("Observation Comp Date")), "saved, read-only Catalyst observation", 15000);
+    const score = [...document.querySelectorAll(".bg-danger, .bg-success")].find(el => visible(el) && /^(Fail|Pass)$/.test(clean(el.textContent)));
+    if (clean(score?.textContent).toLowerCase() !== outcome) throw new Error(`Catalyst outcome does not match this QC (${outcome}).`);
+    const photos = [...document.querySelectorAll("[id^='thumbnail-image-container-']")].filter(visible);
+    if (photos.length !== photoCount) throw new Error("Completed Catalyst photo count does not match this QC. Review before confirming.");
+    return {observationId};
   }
 
   async function prepareFollowUp(jobNumber, techId) {
@@ -295,11 +365,13 @@
       switch (message.command) {
         case "PING": return { url: location.href };
         case "FIND_JOB": return findJob(message.jobNumber);
+        case "INSPECT_OBSERVATION": return inspectObservation(message.jobNumber, message.techId);
         case "PREPARE": return prepare(message.jobNumber, message.techId, message.observationType);
         case "UPLOAD_PHOTO": return uploadPhoto(message.base64, message.fileName);
         case "SET_CHECKS": return setChecks(message.failures, message.supervisorComment);
         case "COMPLETE": return complete();
-        case "FIND_COMPLETED_OBSERVATION": return findCompletedObservation(message.jobNumber, message.technicianName);
+        case "VERIFY_COMPLETED_OBSERVATION": return verifyCompletedObservation(message.jobNumber, message.techId, message.outcome, message.photoCount);
+        case "FIND_COMPLETED_OBSERVATION": return findCompletedObservation(message.jobNumber, message.technicianName, message.techId);
         case "PREPARE_FOLLOW_UP": return prepareFollowUp(message.jobNumber, message.techId);
         case "UPLOAD_FOLLOW_UP_PHOTO": return uploadFollowUpPhoto(message.base64, message.fileName);
         case "SAVE_FOLLOW_UP": return saveFollowUp(message.note);
