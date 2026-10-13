@@ -34,6 +34,8 @@ async function handler(file,name){
  return import(output);
 }
 const routes={
+ dashboard:await handler('app/api/qc-submissions/route.ts','dashboard'),
+ activity:await handler('app/api/catalyst-activity/route.ts','activity'),
  redo:await handler('app/api/qc-upload/route.ts','redo'),
  review:await handler('app/api/qc-submissions/[id]/route.ts','review'),
  list:await handler('app/api/integrations/trust/qcs/route.ts','list'),

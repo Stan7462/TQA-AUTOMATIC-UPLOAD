@@ -4,13 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronRight, Share2, UsersRound, X } from "lucide-react";
 import AdminShell from "@/app/admin-shell";
 import CatalystActivity, { type ActivitySelection } from "@/app/catalyst-activity";
-import { activityDay } from "@/lib/catalyst-activity";
+import { activityDay, activityMonth } from "@/lib/catalyst-activity";
 import QcFilterBar from "@/app/qc-filter-bar";
 import { useQcFilters } from "@/lib/use-qc-filters";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
-type Qc = { id: string; techId: string; jobNumber: string; address: string | null; status: string; trustUploadStatus: string; submittedAt: number; correctionDeadlineAt: number | null; photoIds: string[]; attemptNumber: number; correctionPending: number };
+type Qc = { id: string; techId: string; jobNumber: string; address: string | null; status: string; trustUploadStatus: string; submittedAt: number; trustUploadedAt: number | null; correctionDeadlineAt: number | null; photoIds: string[]; attemptNumber: number; correctionPending: number };
 type SnapshotStat = { techId: string; uploaded: number; failedUploaded: number; monthlyGoal: number };
 const statuses = [["pending", "Needs review"], ["all", "All records"], ["approved", "Approved"], ["uploaded", "Uploaded to Catalyst"], ["rejected", "Rejected"], ["fixed", "Fixed"]];
 const metricStatuses = statuses.filter(([value]) => value !== "pending" && value !== "fixed");
@@ -109,6 +109,7 @@ export default function Home() {
   const [activityTechIds, setActivityTechIds] = useState<string[]>([]);
   const [view, setView] = useState<"list" | "activity">("activity");
   const [items, setItems] = useState<Qc[]>([]);
+  const [activityItems, setActivityItems] = useState<Qc[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [snapshotOpen, setSnapshotOpen] = useState(false);
@@ -140,15 +141,19 @@ export default function Home() {
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const currentMonth = fiscalMonthBounds(fiscalMonthKey());
-      let cursor: string | null = null;
-      const found: Qc[] = [];
-      do {
-        const response: Response = await fetch(`/api/qc-submissions?status=all&pageSize=100&start=${currentMonth.start}&end=${currentMonth.end}` + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''), {cache:'no-store', signal});
-        const data = await response.json() as {error?:string;submissions:Qc[];nextCursor:string|null};
-        if (!response.ok) throw new Error(data.error || 'Could not load QCs.');
-        found.push(...data.submissions); cursor=data.nextCursor;
-      } while(cursor && !signal?.aborted);
-      if (!signal?.aborted) {setItems(found);setError('');}
+      async function fetchPages(range: { start: number; end: number }, uploaded = false) {
+        let cursor: string | null = null;
+        const found: Qc[] = [];
+        do {
+          const response: Response = await fetch(`/api/qc-submissions?status=all&pageSize=100&start=${range.start}&end=${range.end}${uploaded ? '&dateBasis=uploaded' : ''}` + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''), {cache:'no-store', signal});
+          const data = await response.json() as {error?:string;submissions:Qc[];nextCursor:string|null};
+          if (!response.ok) throw new Error(data.error || 'Could not load QCs.');
+          found.push(...data.submissions); cursor=data.nextCursor;
+        } while(cursor && !signal?.aborted);
+        return found;
+      }
+      const [found, uploaded] = await Promise.all([fetchPages(currentMonth), fetchPages(activityMonth(), true)]);
+      if (!signal?.aborted) {setItems(found);setActivityItems(uploaded);setError('');}
     } catch(cause) {if (!signal?.aborted) setError(cause instanceof Error ? cause.message : 'Could not load QCs.');}
     finally {if (!signal?.aborted) setLoading(false);}
   }, []);
@@ -158,7 +163,7 @@ export default function Home() {
     (status === 'rejected' ? q.status === 'rejected' || (q.attemptNumber > 1 && q.status === 'approved' && q.trustUploadStatus !== 'uploaded') : status === 'fixed' ? q.status === 'rejected' && q.correctionPending === 1 : status === 'uploaded' ? q.status === 'approved' && q.trustUploadStatus === 'uploaded' :
       status === 'approved' ? q.status === 'approved' && q.trustUploadStatus !== 'uploaded' :
         q.status === status);
-  const visible = items.filter(q => (!activitySelection?.day || activityDay(q.submittedAt) === activitySelection.day) && (!filters.tech || q.techId === filters.tech) && matches(q,filters.status) && `${q.techId} ${q.jobNumber} ${q.address ?? ""}`.toLowerCase().includes(filters.search.trim().toLowerCase()));
+  const visible = (activitySelection ? activityItems : items).filter(q => (!activitySelection?.day || (q.trustUploadedAt != null && activityDay(q.trustUploadedAt) === activitySelection.day)) && (!filters.tech || q.techId === filters.tech) && (activitySelection || matches(q,filters.status)) && `${q.techId} ${q.jobNumber} ${q.address ?? ""}`.toLowerCase().includes(filters.search.trim().toLowerCase()));
   const snapshotMonth = fiscalMonthKey();
   const snapshotRange = fiscalMonthBounds(snapshotMonth);
   async function openSnapshot() {
@@ -197,7 +202,7 @@ export default function Home() {
     <section className="admin-page-content"><QcFilterBar value={filters} onChange={value=>{setActivitySelection(null);setFilters(value);if(!["all","uploaded"].includes(value.status))setView("list");}} techIds={view === "activity" ? activityTechIds : items.map(q=>q.techId)} currentMonthOnly/>
     <div className="qc-view-switch" aria-label="Record view"><button className={`button light${view==='list'?' active':''}`} aria-pressed={view==='list'} onClick={()=>{setView("list");setActivitySelection(null);}}>List</button><button className={`button light${view==='activity'?' active':''}`} aria-pressed={view==='activity'} onClick={()=>{setView("activity");setActivitySelection(null);setFilters({...filters,status:"all"});}}>Activity</button></div>
     {view === "activity" && ["all", "uploaded"].includes(filters.status) && <div className="list-panel"><CatalystActivity selected={activitySelection} onSelect={selection=>{setActivitySelection(selection);setFilters({month:"",tech:selection.techId,status:"all",search:""});}} onTechIds={setActivityTechIds}/></div>}
-    {activitySelection && <div className="activity-filter-summary" role="status"><span>Submitted QCs · {activitySelection.techId ? `Tech ${activitySelection.techId}` : "All technicians"} · {activitySelection.day ? new Date(`${activitySelection.day}T12:00:00Z`).toLocaleDateString("en-US",{timeZone:"UTC",month:"short",day:"numeric",year:"numeric"}) : "Current fiscal month"}</span><button type="button" className="button light" onClick={()=>{setActivitySelection(null);setFilters({month:"",tech:"",status:"all",search:""});}}>Clear filter</button></div>}
+    {activitySelection && <div className="activity-filter-summary" role="status"><span>Uploaded to Catalyst · {activitySelection.techId ? `Tech ${activitySelection.techId}` : "All technicians"} · {activitySelection.day ? new Date(`${activitySelection.day}T12:00:00Z`).toLocaleDateString("en-US",{timeZone:"UTC",month:"short",day:"numeric",year:"numeric"}) : "Current fiscal month"}</span><button type="button" className="button light" onClick={()=>{setActivitySelection(null);setFilters({month:"",tech:"",status:"all",search:""});}}>Clear filter</button></div>}
     {error && <p className="form-error" role="alert">{error} <button className="button light" onClick={()=>void load()}>Retry</button></p>}
     <div className="list-panel"><div className="panel-heading"><h2>{statuses.find(([v])=>v===filters.status)?.[1] || 'All records'}</h2><span>{visible.length} shown</span></div>
     {loading || !ready ? <p className="no-results">Loading QCs…</p> : visible.length ? <div className="table-wrap"><table className="qc-data-table"><thead><tr><th>Job</th><th>Tech ID</th><th>Submitted</th><th>Status</th>{filters.status==='rejected'&&<th className="qc-deadline-heading">Time left to fix</th>}<th><span className="sr-only">Open QC</span></th></tr></thead><tbody>{visible.map(q=>{const returnParams=new URLSearchParams({restore:'1',status:filters.status});if(view==='activity')returnParams.set('activity','1');if(activitySelection?.day)returnParams.set('day',activitySelection.day);if(filters.tech)returnParams.set('tech',filters.tech);if(filters.search)returnParams.set('search',filters.search);const detailParams=new URLSearchParams({qc:q.id,return:`/?${returnParams.toString()}`});if(q.correctionPending===1)detailParams.set('fixed','1');else detailParams.set('readonly','1');const destination=`/captures?${detailParams.toString()}`;const open=()=>window.location.assign(destination);const deadline=adminDeadline(q,clock);return <tr className="qc-clickable-row" key={q.id} role="link" tabIndex={0} aria-label={`Open job ${q.jobNumber}`} onClick={open} onKeyDown={(event)=>{if(event.key==='Enter')open();}}><td><strong>{q.jobNumber}</strong><small>{q.photoIds.length+1} pictures</small></td><td>{q.techId}</td><td>{new Date(q.submittedAt).toLocaleDateString()}<small>{new Date(q.submittedAt).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</small></td><td><span className={`qc-status ${q.status}${q.correctionPending===1?' correction-ready':''}`}>{q.correctionPending===1?`Fixed · Attempt ${q.attemptNumber}`:q.status==='pending'?'Needs review':q.status==='approved'?'Approved':'Rejected'}</span><FailedQcUploadBadge {...q}/>{q.status==='approved' && <small>{q.trustUploadStatus==='uploaded'?'Uploaded to Catalyst':q.trustUploadStatus==='failed'?'Catalyst upload needs retry':'Ready for Catalyst'}</small>}</td>{filters.status==='rejected'&&<td className="qc-deadline-cell"><span className={`qc-admin-deadline ${deadline.state}`}>{deadline.label}</span></td>}<td><span className="open-row" aria-hidden="true"><ChevronRight size={18}/></span></td></tr>})}</tbody></table></div> : <p className="no-results">{items.length?'No QCs match these filters.':'No QCs submitted yet.'}</p>}

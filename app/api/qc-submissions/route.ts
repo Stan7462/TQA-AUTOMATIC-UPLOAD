@@ -99,6 +99,8 @@ export async function GET(request: Request) {
   const start = Number(url.searchParams.get("start"));
   const end = Number(url.searchParams.get("end"));
   const hasRange = url.searchParams.has("start") || url.searchParams.has("end");
+  const uploadedActivity = url.searchParams.get("dateBasis") === "uploaded";
+  const dateColumn = uploadedActivity ? "trust_uploaded_at" : "submitted_at";
   if (hasRange && (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start || end - start > 370 * 86400000)) return Response.json({ error: "Invalid date range" }, { status: 400 });
   const cursor = url.searchParams.get("cursor");
   const match = cursor?.match(/^(\d{1,16}):([0-9a-f-]{36})$/);
@@ -113,7 +115,8 @@ export async function GET(request: Request) {
     }
     if (status === "rejected") conditions.push("(status = 'rejected' OR (attempt_number > 1 AND status = 'approved' AND trust_upload_status <> 'uploaded'))");
     else if (status !== "all") { conditions.push("status = ?"); bindings.push(status); }
-    if (hasRange) { conditions.push("submitted_at >= ? AND submitted_at < ?"); bindings.push(start, end); }
+    if (uploadedActivity) conditions.push("trust_upload_status = 'uploaded'");
+    if (hasRange) { conditions.push(`${dateColumn} >= ? AND ${dateColumn} < ?`); bindings.push(start, end); }
     if (match) { conditions.push("(submitted_at < ? OR (submitted_at = ? AND id < ?))"); bindings.push(Number(match[1]), Number(match[1]), match[2]); }
     const where = conditions.length ? " WHERE " + conditions.join(" AND ") : "";
     const query = env.DB.prepare("SELECT id, COALESCE(root_submission_id, id) AS rootSubmissionId, attempt_number AS attemptNumber, correction_pending AS correctionPending, correction_deadline_at AS correctionDeadlineAt, tech_id AS techId, job_number AS jobNumber, address, screenshot_id AS screenshotId, photo_ids AS photoIds, status, submitted_at AS submittedAt, reviewed_at AS reviewedAt, review_note AS reviewNote, catalyst_failures AS catalystFailures, trust_upload_kind AS trustUploadKind, catalyst_observation_id AS catalystObservationId, trust_upload_status AS trustUploadStatus, trust_uploaded_at AS trustUploadedAt, trust_external_reference AS trustExternalReference, trust_upload_error AS trustUploadError, location_status AS locationStatus, location_latitude AS locationLatitude, location_longitude AS locationLongitude, location_accuracy AS locationAccuracy, location_captured_at AS locationCapturedAt FROM qc_submissions" + where + " ORDER BY submitted_at DESC, id DESC LIMIT ?").bind(...bindings, pageSize + 1);
