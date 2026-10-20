@@ -253,9 +253,17 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
     const photos = qc.workflow === "follow_up" ? orderedPhotos(qc).filter((photo) => photo.kind === "live_photo") : orderedPhotos(qc);
     if (qc.workflow === "follow_up") {
       if (!/^\d+$/.test(qc.catalystObservationId || "")) throw new Error("The corrected QC is missing its Catalyst observation ID.");
+      const followCheckpoint = await recovery(qc.id);
+      if (followCheckpoint?.workflow === "follow_up" && followCheckpoint.completionConfirmed &&
+          followCheckpoint.jobNumber === qc.jobNumber && followCheckpoint.techId === qc.techId &&
+          followCheckpoint.externalReference === qc.catalystObservationId &&
+          JSON.stringify(followCheckpoint.photoIds) === JSON.stringify(photos.map(photo => photo.id))) {
+        return await reportFollowUp(qc, photos);
+      }
       await setRun({ currentQcId: qc.id, jobNumber: qc.jobNumber, techId: qc.techId, photoTotal: photos.length, stage: "opening follow-up", message: `Opening failed Catalyst observation ${qc.catalystObservationId} for job ${qc.jobNumber}` });
       await navigate(tabId, completedObservationUrl(qc.catalystObservationId));
-      await pageCommand(tabId, "PREPARE_FOLLOW_UP", { jobNumber: qc.jobNumber, techId: qc.techId }, 30000);
+      const followUp = await pageCommand(tabId, "PREPARE_FOLLOW_UP", { jobNumber: qc.jobNumber, techId: qc.techId, photoCount: photos.length }, 90000);
+      if (followUp?.completed) return await reportFollowUp(qc, photos);
       for (let i = 0; i < photos.length; i++) {
         if (stopRequested) throw new Error("Stopped by user before completing this follow-up.");
         await setRun({ stage: "uploading correction", photoIndex: i, message: `Uploading corrected photo ${i + 1} of ${photos.length} for job ${qc.jobNumber}` });
@@ -265,13 +273,12 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
         await setRun({ photoIndex: photoCount });
       }
       await setRun({ stage: "saving follow-up", message: `Saving completed follow-up for job ${qc.jobNumber}` });
-      const success = waitForSuccess(tabId);
-      try { await pageCommand(tabId, "SAVE_FOLLOW_UP", { note: "Issues are fixed." }, 10000); } catch { /* dialog can close before replying */ }
-      const successMessage = await success;
-      const uploaded = await report(qc.id, "uploaded", qc.catalystObservationId);
-      if (uploaded.uploadStatus !== "uploaded") throw new Error("TQA did not confirm follow-up upload status.");
-      await setRun({ stage: "uploaded", message: `Job ${qc.jobNumber} follow-up: ${successMessage}` });
-      return { status: "uploaded", jobNumber: qc.jobNumber };
+      await pageCommand(tabId, "SAVE_FOLLOW_UP", { note: "Issues are fixed.", photoCount: photos.length }, 45000);
+      // Verify a fresh persisted record, rather than relying on an observation-only toast.
+      await navigate(tabId, completedObservationUrl(qc.catalystObservationId));
+      const verified = await pageCommand(tabId, "VERIFY_SAVED_FOLLOW_UP", { jobNumber: qc.jobNumber, techId: qc.techId, photoCount: photos.length }, 60000);
+      if (!verified?.completed) throw new Error("Catalyst did not confirm the saved correction.");
+      return await reportFollowUp(qc, photos);
     }
     await setRun({ currentQcId: qc.id, jobNumber: qc.jobNumber, techId: qc.techId, photoTotal: photos.length,
       stage: "finding job", message: `Finding job ${qc.jobNumber} (attempt ${attempt} of ${MAX_QC_ATTEMPTS})` });
@@ -347,16 +354,34 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
   }
 }
 
+async function reportFollowUp(qc, photos) {
+  await recovery(qc.id, { workflow: "follow_up", completionConfirmed: true, jobNumber: qc.jobNumber, techId: qc.techId,
+    externalReference: qc.catalystObservationId, photoIds: photos.map(photo => photo.id) });
+  await setRun({ stage: "reporting", message: `Saved correction verified; reporting job ${qc.jobNumber} to TQA` });
+  const uploaded = await report(qc.id, "uploaded", qc.catalystObservationId);
+  if (uploaded.uploadStatus !== "uploaded") throw new Error("TQA did not confirm follow-up upload status.");
+  await recovery(qc.id, null);
+  await setRun({ stage: "uploaded", message: `Job ${qc.jobNumber} correction saved and reported to TQA` });
+  return { status: "uploaded", jobNumber: qc.jobNumber };
+}
+
 async function reportSavedObservation(qc, tabId, checkpoint) {
-  await setRun({stage:"reporting",message:`Catalyst saved job ${qc.jobNumber}; confirming its observation ID and reporting to TQA`});
-  let reference = checkpoint.externalReference || checkpoint.jobId;
+  await setRun({stage:"reporting",message:`Catalyst saved job ${qc.jobNumber}; reporting the confirmed save to TQA`});
+  let reference = qc.outcome === "fail" ? checkpoint.externalReference : checkpoint.externalReference || checkpoint.jobId;
   if (qc.outcome === "fail" && !checkpoint.externalReference) {
-    if (!checkpoint.technicianName) throw new Error("Catalyst technician name is missing for completed observation lookup.");
-    await navigate(tabId, OBSERVATIONS_URL);
-    const found = await pageCommand(tabId,"FIND_COMPLETED_OBSERVATION",{jobNumber:qc.jobNumber,techId:qc.techId,technicianName:checkpoint.technicianName},60000);
-    reference = /^\d+$/.test(found?.observationId || "") ? found.observationId : await waitForObservationId(tabId);
+    // The Observation Saved toast is Catalyst's authoritative completion signal.
+    // Recover the observation ID when Catalyst's name search can find it, but do
+    // not leave an already-saved Fail in the upload queue when that lookup fails.
+    try {
+      if (!checkpoint.technicianName) throw new Error("Catalyst technician name is missing for completed observation lookup.");
+      await navigate(tabId, OBSERVATIONS_URL);
+      const found = await pageCommand(tabId,"FIND_COMPLETED_OBSERVATION",{jobNumber:qc.jobNumber,techId:qc.techId,technicianName:checkpoint.technicianName},60000);
+      reference = /^\d+$/.test(found?.observationId || "") ? found.observationId : await waitForObservationId(tabId);
+    } catch (error) {
+      await logEvent("info", "observation ID", `Job ${qc.jobNumber}: Observation Saved was confirmed. Catalyst observation ID lookup was skipped: ${safeError(error)}`);
+    }
   }
-  await recovery(qc.id,{externalReference:reference});
+  if (reference) await recovery(qc.id,{externalReference:reference});
   const uploaded = await report(qc.id,"uploaded",reference);
   if (uploaded.uploadStatus !== "uploaded") throw new Error("TQA did not confirm uploaded status.");
   await recovery(qc.id,null);

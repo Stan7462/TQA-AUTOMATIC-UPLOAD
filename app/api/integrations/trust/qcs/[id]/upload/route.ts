@@ -29,12 +29,22 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (current.submittedAt < range.start || current.submittedAt >= range.end) return trustError(409, "PREVIOUS_PERIOD", "This QC belongs to a previous fiscal month.");
     const eligible = await env.DB.prepare(`SELECT id FROM ${trustQcSource} WHERE tenant_id = ? AND id = ? AND ${trustQcEligible}`).bind(key.tenantId, id).first();
     if (!eligible) return trustError(409, "QC_NOT_READY", "This QC is not ready for Catalyst.");
+    const firstFail = current.status === "rejected" && current.trustUploadKind === "observation";
     if (current.trustUploadStatus === "uploaded") {
       if (body.status !== "uploaded") return trustError(409, "ALREADY_UPLOADED", "QC is already marked uploaded.");
+      if (firstFail && !current.catalystObservationId && typeof reference === "string" && /^\d+$/.test(reference.trim())) {
+        const observationId = reference.trim();
+        await env.DB.batch(["qc_submissions", "qc_submission_attempts"].map(table => {
+          const idColumn = table === "qc_submissions" ? "id" : "submission_id";
+          return env.DB.prepare(`UPDATE ${table} SET trust_external_reference = ?, catalyst_observation_id = ? WHERE tenant_id = ? AND ${idColumn} = ? AND trust_upload_status = 'uploaded'`).bind(observationId, observationId, key.tenantId, id);
+        }));
+        await env.DB.batch(["qc_submissions", "qc_submission_attempts"].map(table => env.DB.prepare(`UPDATE ${table} SET catalyst_observation_id = ? WHERE tenant_id = ? AND root_submission_id = ? AND catalyst_observation_id IS NULL`).bind(observationId, key.tenantId, current.rootSubmissionId)));
+        const linked = await env.DB.prepare(`SELECT ${trustQcSelect} FROM ${trustQcSource} WHERE tenant_id = ? AND id = ?`).bind(key.tenantId, id).first<TrustQcRow>();
+        if (linked) return Response.json({ qc: trustQc(request, linked), alreadyUploaded: true }, { headers: trustNoStore });
+      }
       return Response.json({ qc: trustQc(request, current), alreadyUploaded: true }, { headers: trustNoStore });
     }
-    const firstFail = current.status === "rejected" && current.trustUploadKind === "observation";
-    if (firstFail && body.status === "uploaded" && (typeof reference !== "string" || !/^\d+$/.test(reference.trim()))) return trustError(400, "INVALID_REFERENCE", "The first Fail upload must include its Catalyst observation ID.");
+    if (firstFail && body.status === "uploaded" && reference !== undefined && (typeof reference !== "string" || !/^\d+$/.test(reference.trim()))) return trustError(400, "INVALID_REFERENCE", "A Catalyst observation ID must contain digits only.");
     const now = Date.now();
     const changes = [ ["qc_submissions", "id"], ["qc_submission_attempts", "submission_id"] ].map(([table, idColumn]) =>
       body.status === "uploaded"
@@ -42,7 +52,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           .bind(now, typeof reference === "string" ? reference.trim() : null, typeof reference === "string" ? reference.trim() : null, now, key.id, key.tenantId, id)
         : env.DB.prepare(`UPDATE ${table} SET trust_upload_status = 'failed', trust_upload_error = ?, trust_upload_attempts = trust_upload_attempts + 1, trust_last_attempt_at = ? WHERE tenant_id = ? AND ${idColumn} = ? AND trust_upload_status IN ('ready', 'failed')`)
           .bind((errorMessage as string).trim(), now, key.tenantId, id));
-    if (firstFail && body.status === "uploaded") {
+    if (firstFail && body.status === "uploaded" && typeof reference === "string") {
       // Propagate the original observation ID even if a redo moved that Fail to history.
       for (const table of ["qc_submissions", "qc_submission_attempts"]) changes.push(env.DB.prepare(`UPDATE ${table} SET catalyst_observation_id = ? WHERE tenant_id = ? AND root_submission_id = ? AND catalyst_observation_id IS NULL`).bind((reference as string).trim(), key.tenantId, current.rootSubmissionId));
     }

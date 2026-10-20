@@ -269,9 +269,15 @@
     const combo = await waitFor(() => [...document.querySelectorAll("[role='combobox']")].find((item) => /tech/i.test(item.getAttribute("aria-label") || item.getAttribute("placeholder") || "")) || [...document.querySelectorAll("[role='combobox']")].filter(visible)[0], "technician search field");
     nativeValue(combo, technicianName);
     combo.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", code: "ArrowDown", bubbles: true }));
-    const listbox = await waitFor(() => document.querySelector("[role='listbox']"), "technician search results", 8000);
-    const option = [...listbox.querySelectorAll("[role='option']")].find((item) => clean(item.textContent).toLowerCase().includes(technicianName.toLowerCase()));
-    if (!option) throw new Error(`Catalyst could not find technician ${technicianName}.`);
+    const wanted = technicianName.toLowerCase().split(/\s+/).filter(Boolean);
+    const option = await waitFor(() => {
+      const listbox = document.querySelector("[role='listbox']");
+      if (!listbox) return null;
+      return [...listbox.querySelectorAll("[role='option']")].find((item) => {
+        const label = clean(item.textContent).toLowerCase();
+        return label.includes(technicianName.toLowerCase()) || (wanted.length > 1 && wanted.every(part => label.includes(part)));
+      }) || null;
+    }, `technician ${technicianName} in Catalyst search results`, 15000);
     option.click();
     const row = await waitFor(() => {
       const matches = [...document.querySelectorAll(".ag-center-cols-container .ag-row, .ag-body-viewport .ag-row")].filter(item =>
@@ -302,14 +308,48 @@
     return {observationId};
   }
 
-  async function prepareFollowUp(jobNumber, techId) {
+  function savedFollowUp(scope, expectedPhotoCount, allowLoading = false) {
+    const values = [...scope.querySelectorAll(".react-select__single-value")].map(item => clean(item.textContent));
+    const combos = [...scope.querySelectorAll("[role='combobox']")].filter(visible);
+    const completedLog = [...scope.querySelectorAll("tbody tr")].some(row =>
+      [...row.querySelectorAll("td")].some(cell => clean(cell.textContent) === "Complete"));
+    const completed = values.includes("Complete") && values.includes("Issues Corrected") &&
+      combos.length >= 2 && combos.every(item => item.disabled || item.getAttribute("aria-disabled") === "true") &&
+      completedLog;
+    if (!completed) return null;
+    const photoKeys = [...scope.querySelectorAll("[id^='thumbnail-image-container-']")].filter(visible).map(item => item.id).sort();
+    if (!Number.isInteger(expectedPhotoCount) || expectedPhotoCount < 1 || photoKeys.length !== expectedPhotoCount) {
+      if (allowLoading && Number.isInteger(expectedPhotoCount) && expectedPhotoCount > 0) return null;
+      throw new Error("Saved follow-up photo count does not match this corrected QC. Review before reporting; no photos will be uploaded again.");
+    }
+    return { completed: true, photoKeys };
+  }
+
+  async function prepareFollowUp(jobNumber, techId, expectedPhotoCount, verifyOnly = false) {
     await waitFor(() => detailValue("Job Number") === String(jobNumber) && detailValue("Tech Number") === String(techId), "matching failed observation", 15000);
     const followUp = await waitFor(() => button("Follow-up") || button("Follow Up"), "Follow-up button");
     followUp.click();
     const scope = await waitFor(() => [...document.querySelectorAll("[role='dialog'], .modal")].find((node) => visible(node) && /Follow.?Up/i.test(node.textContent)) || (/Follow.?Up Details/i.test(document.body.innerText) && button("Save") ? document : null), "Follow-up form");
-    const combos = [...scope.querySelectorAll("[role='combobox']")].filter(visible);
-    if (combos.length < 2) throw new Error("Follow-up Status and Disposition fields were not found.");
-    await selectComboElement(combos.at(-2), "Complete", "Follow-up Status");
+    const state = await waitFor(() => {
+      const completed = savedFollowUp(scope, expectedPhotoCount, true);
+      if (completed) return completed;
+      const editable = [...scope.querySelectorAll("[role='combobox']")].some(item =>
+        visible(item) && !item.disabled && item.getAttribute("aria-disabled") !== "true");
+      return editable ? { editable: true } : null;
+    }, `editable Follow-up Status or saved Complete / Issues Corrected with ${expectedPhotoCount} correction photos`, 30000);
+    if (state.completed) {
+      pageLog("success", "follow-up verified", `Saved Complete / Issues Corrected with ${state.photoKeys.length} corrected photos. Reporting only; no photos will be uploaded.`);
+      return state;
+    }
+    if (verifyOnly) throw new Error("Catalyst does not show a saved Complete / Issues Corrected follow-up. No success was reported.");
+    const existingPhotos = [...scope.querySelectorAll("[id^='thumbnail-image-container-']")].filter(visible);
+    if (existingPhotos.length) throw new Error("Correction photos already exist in this unfinished follow-up. Review it before retrying; existing photos will not be uploaded again.");
+    // Catalyst initially renders only Status. Disposition is conditional on Complete.
+    const enabledCombos = () => [...scope.querySelectorAll("[role='combobox']")].filter(item =>
+      visible(item) && !item.disabled && item.getAttribute("aria-disabled") !== "true");
+    const status = await waitFor(() => enabledCombos()[0], "Follow-up Status field", 15000);
+    await selectComboElement(status, "Complete", "Follow-up Status");
+    await waitFor(() => enabledCombos().length >= 2 && enabledCombos()[1], "Follow-up Disposition after selecting Complete", 15000);
     return { prepared: true };
   }
 
@@ -319,7 +359,7 @@
     return uploadPhoto(base64, fileName, scope, true);
   }
 
-  async function saveFollowUp(note = "Issues are fixed.") {
+  async function saveFollowUp(note = "Issues are fixed.", expectedSavedPhotoCount) {
     const dialog = [...document.querySelectorAll("[role='dialog'], .modal")].find((node) => visible(node) && /Follow.?Up/i.test(node.textContent)) || document;
     const combos = [...dialog.querySelectorAll("[role='combobox']")].filter(visible);
     if (combos.length < 2) throw new Error("Follow-up form is not open.");
@@ -330,6 +370,8 @@
     const save = [...dialog.querySelectorAll("button")].find((item) => visible(item) && clean(item.textContent) === "Save" && !item.disabled);
     if (!save) throw new Error("Follow-up Save button is unavailable.");
     save.click();
+    // Wait for Catalyst's save response to close or lock the form before navigating.
+    await waitFor(() => !visible(dialog) || savedFollowUp(dialog, expectedSavedPhotoCount, true), "Catalyst follow-up save confirmation", 25000);
     return { clicked: true };
   }
 
@@ -372,9 +414,10 @@
         case "COMPLETE": return complete();
         case "VERIFY_COMPLETED_OBSERVATION": return verifyCompletedObservation(message.jobNumber, message.techId, message.outcome, message.photoCount);
         case "FIND_COMPLETED_OBSERVATION": return findCompletedObservation(message.jobNumber, message.technicianName, message.techId);
-        case "PREPARE_FOLLOW_UP": return prepareFollowUp(message.jobNumber, message.techId);
+        case "PREPARE_FOLLOW_UP": return prepareFollowUp(message.jobNumber, message.techId, message.photoCount);
+        case "VERIFY_SAVED_FOLLOW_UP": return prepareFollowUp(message.jobNumber, message.techId, message.photoCount, true);
         case "UPLOAD_FOLLOW_UP_PHOTO": return uploadFollowUpPhoto(message.base64, message.fileName);
-        case "SAVE_FOLLOW_UP": return saveFollowUp(message.note);
+        case "SAVE_FOLLOW_UP": return saveFollowUp(message.note, message.photoCount);
         default: throw new Error("Unknown Catalyst command.");
       }
     })().then((result) => {

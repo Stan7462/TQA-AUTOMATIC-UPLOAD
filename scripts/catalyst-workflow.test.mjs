@@ -77,6 +77,7 @@ async function redo(from,to){
 }
 async function queue(){return (await ok(await routes.list.GET(new Request('http://localhost/qcs')))).qcs;}
 async function uploaded(id,reference='12345'){return ok(await routes.upload.PATCH(request({status:'uploaded',externalReference:reference},'PATCH'),context(id)));}
+async function uploadedFromToast(id){return ok(await routes.upload.PATCH(request({status:'uploaded'},'PATCH'),context(id)));}
 async function rejectedFolder(){return (await ok(await routes.profile.GET(new Request('http://localhost/profile?view=rejected')))).submissions;}
 
 test('redo and approve before upload: original Fail first, final Fix second, intermediate retries never queued',async()=>{
@@ -108,6 +109,18 @@ test('first Fail uploads before redo; deadline is not restarted; failed correcti
   await redo(first,second);await reject(second);assert.equal((await queue()).length,0);
   await redo(second,third);await approve(third);assert.equal((await queue())[0].id,third);
   await uploaded(third);assert.equal((await rejectedFolder()).length,0);
+ }finally{db.close();}
+});
+test('Observation Saved can confirm a first Fail before its optional Catalyst observation ID is known',async()=>{
+ const db=fixture();try{
+  await reject(first);
+  const result=await uploadedFromToast(first);
+  assert.equal(result.qc.uploadStatus,'uploaded');
+  assert.equal(result.qc.catalystObservationId,null);
+  assert.equal((await queue()).length,0);
+  const linked=await uploaded(first,'98765');
+  assert.equal(linked.alreadyUploaded,true);
+  assert.equal(linked.qc.catalystObservationId,'98765');
  }finally{db.close();}
 });
 test('a QC approved without rejection uploads only once',async()=>{

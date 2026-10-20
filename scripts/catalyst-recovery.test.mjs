@@ -31,6 +31,7 @@ test('interrupted failed QC reopens saved job and skips all previously confirmed
   setRun:async patch=>{run={...run,...patch};},stored:async()=>({run}),
   recovery:async(_id,patch)=>{if(patch===null)checkpoint=undefined;else if(patch)checkpoint={...checkpoint,...patch};return checkpoint;},
   orderedPhotos,exactJobMatches,recoveryPhotoIndex,safeError:e=>e.message,
+  logEvent:async()=>{},
   navigate:async(_tab,url)=>{paths.push(url);},JOBS_URL:'jobs',OBSERVATIONS_URL:'observations',observationUrl:id=>`job/${id}`,
   photoBase64:async()=>'',waitForSuccess:async()=> 'Observation Saved',
   report:async()=>({uploadStatus:'uploaded'}),
@@ -64,6 +65,7 @@ test('Catalyst save followed by reporting failure resumes without completing or 
  MAX_QC_ATTEMPTS:3,stopRequested:false,detail:async()=>qc,setRun:async patch=>{run={...run,...patch};},stored:async()=>({run}),
  recovery:async(_id,patch)=>{if(patch===null)checkpoint=undefined;else if(patch)checkpoint={...checkpoint,...patch};return checkpoint;},
  orderedPhotos,exactJobMatches,recoveryPhotoIndex,safeError:e=>e.message,navigate:async()=>{},JOBS_URL:'jobs',OBSERVATIONS_URL:'observations',observationUrl:id=>`job/${id}`,photoBase64:async()=>'',waitForSuccess:async()=> 'Observation Saved',
+ logEvent:async()=>{},
  report:async(_id,status,reference)=>{assert.equal(status,'uploaded');assert.equal(reference,'8432353');if(reports++===0)throw new Error('TQA temporarily unavailable');return {uploadStatus:'uploaded'};},
  pageCommand:async(_tab,command)=>{
  if(command==='FIND_JOB')return {rows:[{jobId:'166425706',jobNumber:'839450',techId:'R019'}]};
@@ -79,4 +81,62 @@ test('Catalyst save followed by reporting failure resumes without completing or 
  assert.equal(checkpoint.completionConfirmed,true);assert.equal(checkpoint.externalReference,'8432353');
  run.status='running';await process(qc,1,0,1,2,'After the Fact');
  assert.equal(uploads,3);assert.equal(completions,1);assert.equal(lookups,1);assert.equal(reports,2);assert.equal(checkpoint,undefined);
+});
+
+test('Observation Saved reports a failed QC even when optional observation ID lookup fails',async()=>{
+ let checkpoint,run={},reported=false;const keys=[];const events=[];
+ const qc={id:'failed',jobNumber:'849473',techId:'R02K',workflow:'observation',reviewStatus:'rejected',uploadStatus:'ready',outcome:'fail',photos:photos.map((p,i)=>({...p,order:i,url:p.id})),failureReasons:[],supervisorComment:'fix'};
+ const process=runInNewContext(`${processSource};processOne`,{
+  MAX_QC_ATTEMPTS:3,stopRequested:false,detail:async()=>qc,setRun:async patch=>{run={...run,...patch};},stored:async()=>({run}),
+  recovery:async(_id,patch)=>{if(patch===null)checkpoint=undefined;else if(patch)checkpoint={...checkpoint,...patch};return checkpoint;},
+  orderedPhotos,exactJobMatches,recoveryPhotoIndex,safeError:e=>e.message,JOBS_URL:'jobs',OBSERVATIONS_URL:'observations',observationUrl:id=>`job/${id}`,
+  navigate:async()=>{},photoBase64:async()=>'',waitForSuccess:async()=> 'Observation Saved',logEvent:async(...args)=>events.push(args),
+  report:async(_id,status,reference)=>{assert.equal(status,'uploaded');assert.equal(reference,undefined);reported=true;return {uploadStatus:'uploaded'};},
+  pageCommand:async(_tab,command)=>{
+   if(command==='FIND_JOB')return {rows:[{jobId:'166425706',jobNumber:'849473',techId:'R02K'}]};
+   if(command==='INSPECT_OBSERVATION')return {photoKeys:[...keys]};
+   if(command==='PREPARE')return {technicianName:'Viktor Shcherbakov'};
+   if(command==='UPLOAD_PHOTO'){keys.push(`thumb${keys.length+1}`);return {};}
+   if(command==='FIND_COMPLETED_OBSERVATION')throw new Error('Catalyst could not find technician Viktor Shcherbakov.');
+   return {};
+  }
+ });
+ const result=await process(qc,1,0,1,1,'After the Fact');
+ assert.equal(result.status,'uploaded');assert.equal(reported,true);assert.equal(checkpoint,undefined);
+ assert(events.some(([,step,message])=>step==='observation ID'&&message.includes('Observation Saved was confirmed')));
+});
+
+test('saved follow-up reports success without reuploading, and retries only reporting after an API failure',async()=>{
+ let checkpoint,run={},reports=0,opens=0;
+ const qc={id:'fixed',jobNumber:'839450',techId:'R019',workflow:'follow_up',reviewStatus:'approved',uploadStatus:'failed',outcome:'pass',catalystObservationId:'8432353',photos:photos.map((p,i)=>({...p,order:i,url:p.id,kind:'live_photo'}))};
+ const process=runInNewContext(`${processSource};processOne`,{
+ MAX_QC_ATTEMPTS:3,stopRequested:false,detail:async()=>qc,setRun:async patch=>{run={...run,...patch};},stored:async()=>({run}),
+ recovery:async(_id,patch)=>{if(patch===null)checkpoint=undefined;else if(patch)checkpoint={...checkpoint,...patch};return checkpoint;},
+ orderedPhotos,safeError:e=>e.message,navigate:async()=>{opens++;},completedObservationUrl:id=>`observation?id=${id}`,
+ report:async(_id,status,reference)=>{assert.equal(status,'uploaded');assert.equal(reference,'8432353');if(reports++===0)throw new Error('TQA unavailable');return {uploadStatus:'uploaded'};},
+ pageCommand:async(_tab,command,data)=>{assert.equal(command,'PREPARE_FOLLOW_UP');assert.equal(data.photoCount,3);return {completed:true};}
+ });
+ await assert.rejects(process(qc,1,0,1,1,'After the Fact'),/TQA unavailable/);
+ assert.equal(checkpoint.completionConfirmed,true);assert.equal(run.status,'needs_review');
+ run.status='running';await process(qc,1,0,1,2,'After the Fact');
+ assert.equal(opens,1);assert.equal(reports,2);assert.equal(checkpoint,undefined);
+});
+
+test('new correction is verified from persisted Catalyst state before reporting',async()=>{
+ let checkpoint,run={},uploads=0,saves=0,verified=false,reports=0;
+ const qc={id:'fixed',jobNumber:'839450',techId:'R019',workflow:'follow_up',reviewStatus:'approved',uploadStatus:'ready',outcome:'pass',catalystObservationId:'8432353',photos:photos.map((p,i)=>({...p,order:i,url:p.id,kind:'live_photo'}))};
+ const process=runInNewContext(`${processSource};processOne`,{
+ MAX_QC_ATTEMPTS:3,stopRequested:false,detail:async()=>qc,setRun:async patch=>{run={...run,...patch};},stored:async()=>({run}),
+ recovery:async(_id,patch)=>{if(patch===null)checkpoint=undefined;else if(patch)checkpoint={...checkpoint,...patch};return checkpoint;},
+ orderedPhotos,safeError:e=>e.message,navigate:async()=>{},completedObservationUrl:id=>`observation?id=${id}`,photoBase64:async()=>'',
+ report:async()=>{assert.equal(verified,true);reports++;return {uploadStatus:'uploaded'};},
+ pageCommand:async(_tab,command)=>{
+  if(command==='PREPARE_FOLLOW_UP')return {prepared:true};
+  if(command==='UPLOAD_FOLLOW_UP_PHOTO'){uploads++;return {};}
+  if(command==='SAVE_FOLLOW_UP'){saves++;return {clicked:true};}
+  if(command==='VERIFY_SAVED_FOLLOW_UP'){verified=true;return {completed:true};}
+  assert.fail(command);
+ }
+ });
+ await process(qc,1,0,1,1,'After the Fact');assert.equal(uploads,3);assert.equal(saves,1);assert.equal(reports,1);
 });

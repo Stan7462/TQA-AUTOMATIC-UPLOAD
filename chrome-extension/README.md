@@ -37,3 +37,19 @@ Version 0.7.8 adds **Confirm already uploaded** to each observation queue card, 
 ### v0.7.9
 
 Supports multiple selected rejection reasons within the same TQA category. All selected reasons are retained in Catalyst’s Additional Information field. Update the extension before uploading QCs with multiple reasons under one category.
+
+### v0.7.10
+
+Fixed correction follow-ups: select Status = Complete first, then wait for Catalyst to reveal Disposition before uploading corrected photos and saving Issues Corrected. Preparation has a longer command timeout to allow the conditional fields to load.
+
+### v0.7.11
+
+Fixed saved-correction reporting. Follow-ups are verified from persisted Complete / Issues Corrected fields, a completed work-log entry, and the expected corrected-photo count rather than an Observation Saved toast. Retrying an already saved correction reports success to TQA without uploading or saving again. Confirmed reporting progress is retained if the TQA API is temporarily unavailable. Existing photos in unfinished follow-ups cause a review stop instead of duplicate uploads.
+
+### v0.7.12
+
+Fixed delayed loading of completed follow-ups. Catalyst can render disabled Complete / Issues Corrected fields and the completed work log before the correction photos and file input. The extension now waits for the saved record and expected photo count rather than falling back to an editable Status field. Read-only verification no longer depends on the upload input being mounted.
+
+### v0.7.13
+
+Treats Catalyst's **Observation Saved** message as the successful upload confirmation for both passing and failed observations. A failed observation is reported to TQA and removed from the queue even when Catalyst cannot find the technician in its completed-observation name search. The extension still saves the Catalyst observation ID whenever that optional lookup succeeds.
