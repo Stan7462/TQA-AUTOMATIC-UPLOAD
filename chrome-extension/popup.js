@@ -30,11 +30,15 @@ function render() {
   $("status").textContent = run.stage === "waiting" && Number.isFinite(run.waitRemainingSeconds)
     ? `Next QC begins in ${run.waitRemainingSeconds} second${run.waitRemainingSeconds === 1 ? "" : "s"}.`
     : run.message || "Ready.";
-  $("counts").textContent = run.status === "running" || run.status === "needs_review"
-    ? `QC ${run.index || 0} of ${run.total || 0} · Photo ${run.photoIndex || 0} of ${run.photoTotal || 0}`
-    : "";
-  $("progress").max = Math.max(1, run.total || queue.length);
-  $("progress").value = Math.min(run.index || 0, run.total || queue.length || 1);
+  const progressTotal = Math.max(0, run.total || queue.length);
+  const progressIndex = Math.min(run.index || 0, progressTotal);
+  const progressPercent = progressTotal ? Math.round((progressIndex / progressTotal) * 100) : 0;
+  $("counts").textContent = `QC ${run.index || 0} of ${progressTotal} · Photo ${run.photoIndex || 0} of ${run.photoTotal || 0}`;
+  $("progress-label").textContent = run.jobNumber ? `Job ${run.jobNumber}` : "Queue progress";
+  $("progress-percent").textContent = `${progressPercent}%`;
+  $("progress").max = Math.max(1, progressTotal);
+  $("progress").value = progressIndex;
+  $("progress").setAttribute("aria-valuetext", `${progressPercent}% · QC ${run.index || 0} of ${progressTotal}`);
   $("start").disabled = !authenticated || run.status === "running" || run.status === "needs_review";
   $("stop").disabled = run.status !== "running";
   $("resume-review").hidden = run.status !== "needs_review";
@@ -133,6 +137,12 @@ $("login-form").addEventListener("submit", (event) => {
   }, "auth-error");
 });
 $("disconnect").addEventListener("click", () => action(() => send("DISCONNECT")));
+
+$("settings-toggle").addEventListener("click", () => {
+  const expanded = $("settings-toggle").getAttribute("aria-expanded") === "true";
+  $("settings-toggle").setAttribute("aria-expanded", String(!expanded));
+  $("upload-settings").hidden = expanded;
+});
 
 $("refresh").addEventListener("click", () => action(() => send("REFRESH")));
 $("start").addEventListener("click", () => action(() => send("START")));

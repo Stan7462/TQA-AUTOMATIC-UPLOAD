@@ -57,3 +57,7 @@ Treats Catalyst's **Observation Saved** message as the successful upload confirm
 ### v0.7.14
 
 Moves the uploader from Chrome's temporary toolbar popup into a persistent side panel. The panel stays open when Catalyst refreshes or navigates to another job and adapts to the panel width. Click the extension icon to open it.
+
+### v0.7.15
+
+Moves the wait-time and Ride Along percentage sliders into a compact **Settings** dropdown. The queue progress display now uses a thicker high-contrast bar with the current job, percentage, QC position, and photo position.
