@@ -17,7 +17,7 @@
 }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-body{margin:0;width:760px;min-width:760px;max-height:720px;overflow:auto;background:radial-gradient(circle at 0 0,#1b2b39 0,transparent 42%),var(--page);color:var(--text)}
+body{margin:0;width:100%;min-width:320px;min-height:100vh;overflow:auto;background:radial-gradient(circle at 0 0,#1b2b39 0,transparent 42%),var(--page);color:var(--text)}
 body::-webkit-scrollbar,.logs::-webkit-scrollbar{width:8px}
 body::-webkit-scrollbar-thumb,.logs::-webkit-scrollbar-thumb{background:#405362;border-radius:99px;border:2px solid var(--panel)}
 main{padding:24px 26px}
@@ -44,7 +44,7 @@ h1{margin:2px 0 0;font-size:24px;line-height:1.15;letter-spacing:-.02em}
 .login-form input{display:block;width:100%;height:42px;margin-top:5px;border:1px solid var(--line);border-radius:10px;background:#101c25;color:var(--text);padding:0 11px;font:13px Arial,Helvetica,sans-serif;outline:none}
 .login-form input:focus{border-color:#8fb0ca;box-shadow:0 0 0 2px #8fb0ca25}
 .auth-error{margin:12px 0 0;padding:10px 12px;border:1px solid #754750;border-radius:10px;background:#3b252c;color:var(--red);font-size:11px;overflow-wrap:anywhere}
-body.signed-out{width:520px;min-width:520px;max-height:560px}
+body.signed-out{width:100%;min-width:320px;min-height:100vh}
 body.signed-out main{padding:28px}
 body.signed-out .app-header{margin-bottom:22px}
 body.signed-out .connection-dot{background:#8092a0;box-shadow:0 0 0 4px #8092a01c}
@@ -116,3 +116,24 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#87b3db,#d8e9f
 .log-entry.error .log-meta span{color:var(--red)}
 .log-entry.success .log-meta span{color:var(--green)}
 .log-entry pre{margin:5px 0 0;color:#d7e2eb;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+
+@media (max-width:620px){
+  main{padding:18px 16px}
+  body.signed-out main{padding:20px 16px}
+  .login-form{grid-template-columns:1fr}
+  .actions{grid-template-columns:1fr 1fr}
+  .actions #stop{grid-column:1/-1}
+  .qc{align-items:flex-start;flex-direction:column}
+  .qc .badge{align-self:flex-start}
+}
+
+@media (max-width:400px){
+  main,body.signed-out main{padding:16px 12px}
+  .app-header{grid-template-columns:46px minmax(0,1fr) 9px;gap:10px}
+  .brand-mark{width:46px;height:46px;border-radius:13px}
+  h1{font-size:20px}
+  .auth-summary{grid-template-columns:34px minmax(0,1fr)}
+  .auth-summary #disconnect{grid-column:1/-1}
+  .actions{grid-template-columns:1fr}
+  .actions #stop{grid-column:auto}
+}

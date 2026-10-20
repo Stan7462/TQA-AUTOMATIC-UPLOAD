@@ -10,6 +10,19 @@ const DEFAULT_QC_DELAY_SECONDS = 30;
 const DEFAULT_RIDE_ALONG_PERCENTAGE = 50;
 const MAX_QC_ATTEMPTS = 3;
 
+async function configureSidePanel() {
+  if (!chrome.sidePanel?.setPanelBehavior) return;
+  try {
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  } catch (error) {
+    await logEvent("error", "Extension panel", `Could not enable the persistent side panel: ${safeError(error)}`);
+  }
+}
+
+chrome.runtime.onInstalled.addListener(() => { void configureSidePanel(); });
+chrome.runtime.onStartup.addListener(() => { void configureSidePanel(); });
+void configureSidePanel();
+
 function logEvent(level, step, message) {
   const entry = { at: new Date().toISOString(), level, step, message: safeError(message) };
   logChain = logChain.catch(() => {}).then(async () => {
