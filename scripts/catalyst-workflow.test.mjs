@@ -80,6 +80,35 @@ async function uploaded(id,reference='12345'){return ok(await routes.upload.PATC
 async function uploadedFromToast(id){return ok(await routes.upload.PATCH(request({status:'uploaded'},'PATCH'),context(id)));}
 async function rejectedFolder(){return (await ok(await routes.profile.GET(new Request('http://localhost/profile?view=rejected')))).submissions;}
 
+test('approval feedback reaches the technician and remains a normal passing QC after upload',async()=>{
+ const db=fixture();try{
+  const feedback='Secure the cable more neatly next time.';
+  await ok(await routes.review.POST(request({status:'approved',reviewNote:`  ${feedback}  `,failureReasons:[failure]}),context(first)));
+  const row=db.prepare('SELECT status,review_note,catalyst_failures,correction_deadline_at FROM qc_submissions WHERE id=?').get(first);
+  assert.equal(row.status,'approved');assert.equal(row.review_note,feedback);
+  assert.equal(row.catalyst_failures,null);assert.equal(row.correction_deadline_at,null);
+  const tech=await ok(await routes.profile.GET(new Request('http://localhost/profile?view=captured')));
+  assert.equal(tech.submissions.find(q=>q.id===first).reviewNote,feedback);
+  assert.equal((await rejectedFolder()).length,0);
+  const queued=(await queue())[0];assert.equal(queued.outcome,'pass');assert.deepEqual(queued.failureReasons,[]);
+  await uploaded(first);
+  const after=await ok(await routes.profile.GET(new Request('http://localhost/profile?view=uploaded')));
+  assert.equal(after.submissions.find(q=>q.id===first).reviewNote,feedback);
+ }finally{db.close();}
+});
+
+test('feedback validation preserves pending QCs and comment-only rejection still requires a Catalyst reason',async()=>{
+ const db=fixture();try{
+  for(const reviewNote of [42,'x'.repeat(1001)]){
+   assert.equal((await routes.review.POST(request({status:'approved',reviewNote}),context(first))).status,400);
+  }
+  assert.equal((await routes.review.POST(request({status:'rejected',reviewNote:'Needs attention'}),context(first))).status,400);
+  assert.equal(db.prepare('SELECT status FROM qc_submissions WHERE id=?').get(first).status,'pending');
+  await ok(await routes.review.POST(request({status:'approved',reviewNote:'  '}),context(first)));
+  assert.equal(db.prepare('SELECT review_note FROM qc_submissions WHERE id=?').get(first).review_note,null);
+ }finally{db.close();}
+});
+
 test('redo and approve before upload: original Fail first, final Fix second, intermediate retries never queued',async()=>{
  const db=fixture();try{
   await reject(first);const deadline=db.prepare('SELECT correction_deadline_at AS value FROM qc_submissions').get().value;
