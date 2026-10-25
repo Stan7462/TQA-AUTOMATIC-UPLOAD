@@ -31,14 +31,17 @@ function render() {
     ? `Next QC begins in ${run.waitRemainingSeconds} second${run.waitRemainingSeconds === 1 ? "" : "s"}.`
     : run.message || "Ready.";
   const progressTotal = Math.max(0, run.total || queue.length);
-  const progressIndex = Math.min(run.index || 0, progressTotal);
+  const queueComplete = runStatus === "done";
+  const progressIndex = queueComplete ? progressTotal : Math.min(run.index || 0, progressTotal);
   const progressPercent = progressTotal ? Math.round((progressIndex / progressTotal) * 100) : 0;
-  $("counts").textContent = `QC ${run.index || 0} of ${progressTotal} · Photo ${run.photoIndex || 0} of ${run.photoTotal || 0}`;
-  $("progress-label").textContent = run.jobNumber ? `Job ${run.jobNumber}` : "Queue progress";
+  $("counts").textContent = queueComplete
+    ? (progressTotal ? `QC ${progressTotal} of ${progressTotal}` : "No QCs to process")
+    : `QC ${run.index || 0} of ${progressTotal} · Photo ${run.photoIndex || 0} of ${run.photoTotal || 0}`;
+  $("progress-label").textContent = queueComplete ? "Queue complete" : run.jobNumber ? `Job ${run.jobNumber}` : "Queue progress";
   $("progress-percent").textContent = `${progressPercent}%`;
   $("progress").max = Math.max(1, progressTotal);
   $("progress").value = progressIndex;
-  $("progress").setAttribute("aria-valuetext", `${progressPercent}% · QC ${run.index || 0} of ${progressTotal}`);
+  $("progress").setAttribute("aria-valuetext", `${progressPercent}% · QC ${progressIndex} of ${progressTotal}`);
   $("start").disabled = !authenticated || run.status === "running" || run.status === "needs_review";
   $("stop").disabled = run.status !== "running";
   $("resume-review").hidden = run.status !== "needs_review";

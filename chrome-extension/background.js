@@ -412,7 +412,12 @@ async function runQueue(preferredQcId = null) {
     const rideAlongCount = pending.filter((item) => item.observationType === "Ride Along").length;
     await setRun({ status: "running", total: queue.length, index: 0, rideAlongPercentage: percentage, rideAlongCount,
       stage: "starting", message: `${queue.length} Catalyst QCs to process; ${rideAlongCount} observations randomly selected as Ride Along (${percentage}%).` });
-    if (!queue.length) { await setRun({ status: "done", stage: "done", message: "No QCs are ready to upload." }); return; }
+    if (!queue.length) {
+      await setRun({ status: "done", stage: "done", message: "No QCs are ready to upload.",
+        currentQcId: null, jobId: null, jobNumber: null, techId: null, index: 0, total: 0,
+        photoIndex: 0, photoTotal: 0, attempt: null, maxAttempts: null, observationType: null });
+      return;
+    }
     const tab = await chrome.tabs.create({ url: JOBS_URL, active: true });
     tabId = tab.id;
     await setRun({ tabId });
@@ -448,8 +453,13 @@ async function runQueue(preferredQcId = null) {
     const failedSummary = exhausted.length
       ? `Queue finished. ${exhausted.length} QC${exhausted.length === 1 ? "" : "s"} failed after ${MAX_QC_ATTEMPTS} attempts: ${exhausted.join(", ")}.`
       : "Queue finished.";
-    await setRun({ status: stopRequested ? "stopped" : "done", stage: exhausted.length ? "done with failures" : "done",
-      message: stopRequested ? "Stopped." : failedSummary });
+    if (stopRequested) {
+      await setRun({ status: "stopped", stage: "stopped", message: "Stopped." });
+    } else {
+      await setRun({ status: "done", stage: exhausted.length ? "done with failures" : "done", message: failedSummary,
+        currentQcId: null, jobId: null, jobNumber: null, techId: null, index: queue.length, total: queue.length,
+        photoIndex: 0, photoTotal: 0, attempt: null, maxAttempts: null, observationType: null });
+    }
   } catch (error) {
     const { run } = await stored();
     if (run?.status !== "needs_review") await setRun({ status: "error", stage: "error", message: safeError(error) });

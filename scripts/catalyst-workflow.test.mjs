@@ -169,6 +169,7 @@ test('extension uploads Fail then newly unlocked approved Fix in the same run',a
    stopRequested:false,activeRun:null,MAX_QC_ATTEMPTS:3,waitBeforeNextQc:async()=>{},safeError:String,
   });
   assert.deepEqual(processed,[first,second]);assert.equal(run.status,'done');assert.equal(run.total,2);
+  assert.equal(run.index,2);assert.equal(run.jobNumber,null);assert.equal(run.photoIndex,0);assert.equal(run.photoTotal,0);
   assert.equal((await queue()).length,0);
  }finally{db.close();}
 });
