@@ -61,3 +61,7 @@ Moves the uploader from Chrome's temporary toolbar popup into a persistent side 
 ### v0.7.15
 
 Moves the wait-time and Ride Along percentage sliders into a compact **Settings** dropdown. The queue progress display now uses a thicker high-contrast bar with the current job, percentage, QC position, and photo position.
+
+### v0.7.16
+
+Collapses the Activity log into a compact row by default. The log count and dropdown arrow remain visible; opening the row reveals Copy log, Clear log, and the full timestamped history.

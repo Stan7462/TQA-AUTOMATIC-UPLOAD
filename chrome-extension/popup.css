@@ -108,10 +108,12 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#5ba9dc,#d8e9f
 .badge.uploaded{background:#24453c;color:var(--green)}
 .empty{margin:7px 0;padding:18px 14px;border:1px dashed #405362;border-radius:14px;color:var(--muted);text-align:center}
 .log-card{padding:0;overflow:hidden;margin:0}
-.log-card summary{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 14px;cursor:pointer;list-style:none}
+.log-card summary{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:48px;padding:10px 14px;cursor:pointer;list-style:none}
 .log-card summary::-webkit-details-marker{display:none}
-.log-card summary>span:first-child{display:block}
-.log-card summary strong{display:block;margin-top:2px;font-size:14px}
+.log-card summary strong{font-size:14px}
+.log-summary-right{display:flex;align-items:center;gap:9px}
+.log-arrow{display:inline-block;color:var(--accent);font-size:18px;line-height:1;transition:transform .18s ease}
+.log-card[open] .log-arrow{transform:rotate(180deg)}
 .log-card[open] summary{background:#1d2c37;border-bottom:1px solid var(--line)}
 .log-actions{display:flex;gap:7px;padding:10px 12px 8px}
 .log-actions button{min-height:32px;padding:5px 10px;font-size:11px}
