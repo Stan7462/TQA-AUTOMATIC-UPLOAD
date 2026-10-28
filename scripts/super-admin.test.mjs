@@ -12,7 +12,7 @@ const previous={login:process.env.SUPER_LOGIN,password:process.env.SUPER_PASSWOR
 process.env.SUPER_LOGIN='owner@example.test';process.env.SUPER_PASSWORD='local-test-password-12345';
 async function module(file){const output=join(temp,file.replaceAll('/','-')+'.mjs');await build({entryPoints:[join(root,file)],outfile:output,bundle:true,platform:'node',format:'esm',plugins:[{name:'super-fixture',setup(b){b.onResolve({filter:/^next\/(headers|navigation)$/},args=>({path:args.path,namespace:'next-fixture'}));b.onLoad({filter:/.*/,namespace:'next-fixture'},args=>({contents:args.path==='next/headers'?"export async function cookies(){return {get(name){const value=(globalThis.superFixture.cookie??'').split('; ').find(c=>c.startsWith(name+'='))?.slice(name.length+1);return value?{value}:undefined;}};}":"export function redirect(url){throw Error('redirect: '+url);}"}));b.onResolve({filter:/^@\//},args=>args.path==='@/lib/local-env'?{path:'env',namespace:'test'}:{path:join(root,args.path.slice(2)+(/\.(mjs|json)$/.test(args.path)?'':'.ts'))});b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:'export const env=new Proxy({}, {get:(_,key)=>globalThis.superFixture.env[key]});'}));}}]});return import(output);}
 const auth=await module('lib/super-auth.ts'),techAuth=await module('lib/tech-auth.ts'),pageAuth=await module('app/chatgpt-auth.ts');
-const routes={trustList:await module('app/api/integrations/trust/qcs/route.ts'),trustDetail:await module('app/api/integrations/trust/qcs/[id]/route.ts'),version:await module('app/api/extension/version/route.ts'),extensionDownload:await module('app/api/extension/download/route.ts'),catalystSettings:await module('app/api/catalyst-settings/route.ts'),login:await module('app/api/super-admin/login/route.ts'),logout:await module('app/api/super-admin/logout/route.ts'),companies:await module('app/api/super-admin/companies/route.ts'),update:await module('app/api/super-admin/companies/[id]/route.ts'),context:await module('app/api/super-admin/context/route.ts'),leave:await module('app/api/super-admin/leave/route.ts'),profileLogin:await module('app/api/profile/login/route.ts'),profile:await module('app/api/profile/route.ts'),upload:await module('app/api/qc-upload/route.ts'),trust:await module('lib/trust-api.ts'),legacyCompanies:await module('app/api/companies/route.ts')};
+const routes={sharedLogin:await module('app/api/login/route.ts'),companyCredentials:await module('app/api/super-admin/companies/[id]/credentials/route.ts'),adminSetup:await module('app/api/profile/admin-setup/route.ts'),trustList:await module('app/api/integrations/trust/qcs/route.ts'),trustDetail:await module('app/api/integrations/trust/qcs/[id]/route.ts'),version:await module('app/api/extension/version/route.ts'),extensionDownload:await module('app/api/extension/download/route.ts'),catalystSettings:await module('app/api/catalyst-settings/route.ts'),login:await module('app/api/super-admin/login/route.ts'),logout:await module('app/api/super-admin/logout/route.ts'),companies:await module('app/api/super-admin/companies/route.ts'),update:await module('app/api/super-admin/companies/[id]/route.ts'),context:await module('app/api/super-admin/context/route.ts'),leave:await module('app/api/super-admin/leave/route.ts'),profileLogin:await module('app/api/profile/login/route.ts'),profile:await module('app/api/profile/route.ts'),upload:await module('app/api/qc-upload/route.ts'),trust:await module('lib/trust-api.ts'),legacyCompanies:await module('app/api/companies/route.ts')};
 const origin='https://qc.example.test';
 function request(body,cookie='',method='POST',path='/test',requestOrigin=origin){return new Request(origin+path,{method,headers:{Origin:requestOrigin,Cookie:cookie,'Content-Type':'application/json'},...(method==='GET'?{}:{body:JSON.stringify(body)})});}
 async function ok(response){assert(response.ok,`${response.status}: ${await response.clone().text()}`);return response.json();}
@@ -89,6 +89,56 @@ test('demo companies cannot use Catalyst even with valid supervisor credentials,
   const both=cookie+'; '+techCookie;assert.equal((await techAuth.getTechSessionContext(request(null,both,'GET'),globalThis.superFixture.env.DB)).tenantId,demo.company.id);
   db.prepare('UPDATE super_admin_sessions SET context_expires_at=0').run();assert.equal((await techAuth.getTechSessionContext(request(null,both,'GET'),globalThis.superFixture.env.DB)).tenantId,'default');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM tech_sessions').get().n,2);
+ }finally{db.close();}
+});
+test('shared login routes all roles correctly and keeps company credentials separate from super admin',async()=>{
+ const {db}=fixture();try{
+  assert.equal((await routes.sharedLogin.GET(request(null,'','GET'))).status,401);
+  const tech=await addTech(db,'default','WORKER');
+  const worker=await ok(await routes.sharedLogin.POST(request({login:'worker',password:'58326'})));assert.equal(worker.role,'technician');assert.equal(worker.destination,'/capture');
+  const techCurrent=await ok(await routes.sharedLogin.GET(request(null,tech,'GET')));assert.equal(techCurrent.destination,'/capture');
+  await addTech(db,'default','ADMINTEST','password12345',1);
+  const admin=await ok(await routes.sharedLogin.POST(request({login:'ADMINTEST',password:'password12345'},'','POST','/api/login?return_to=%2Fextension')));assert.equal(admin.role,'supervisor');assert.equal(admin.destination,'/extension');
+  const superResponse=await routes.sharedLogin.POST(request({login:process.env.SUPER_LOGIN.toUpperCase(),password:process.env.SUPER_PASSWORD},tech));
+  const superResult=await ok(superResponse);assert.equal(superResult.role,'super_admin');assert.equal(superResult.destination,'/super-admin');
+  const cookies=superResponse.headers.getSetCookie();assert(cookies.some(c=>c.startsWith('tqa_tech_session=;')));const cookie=cookies.find(c=>c.startsWith('tqa_super_session=')).split(';')[0];
+  const superCurrent=await ok(await routes.sharedLogin.GET(request(null,cookie,'GET')));assert.equal(superCurrent.role,'super_admin');
+  assert.equal((await routes.companies.GET(request(null,tech,'GET'))).status,401);
+  const workerAgain=await routes.sharedLogin.POST(request({login:'WORKER',password:'58326'},cookie));assert.equal((await ok(workerAgain)).role,'technician');assert(workerAgain.headers.getSetCookie().some(c=>c.startsWith('tqa_super_session=;')));assert.equal(await auth.getSuperSession(request(null,cookie,'GET')),null);
+  const unsafe=await ok(await routes.sharedLogin.POST(request({login:'ADMINTEST',password:'password12345'},'','POST','/api/login?return_to=https%3A%2F%2Fevil.test')));assert.equal(unsafe.destination,'/');
+  assert.equal((await routes.sharedLogin.POST(request({login:'WORKER',password:'58326'},'','POST','/api/login','https://evil.test'))).status,403);
+  assert.equal((await routes.sharedLogin.POST(request({login:process.env.SUPER_LOGIN,password:'incorrect-password'}))).status,401);
+  const superCookie=await login(),created=await ok(await routes.companies.POST(request({name:'Setup Routing'},superCookie)));
+  const setup=await ok(await routes.sharedLogin.POST(request({login:created.setup.adminId,password:created.setup.pin})));assert.equal(setup.destination,'/admin-setup');
+ }finally{db.close();}
+});
+test('shared sign-in handles identical company and super IDs according to the complete credentials and keeps throttling',async()=>{
+ const {db}=fixture(),oldLogin=process.env.SUPER_LOGIN;try{
+  process.env.SUPER_LOGIN='ADMINTEST';await addTech(db,'default','ADMINTEST','password12345',1);
+  const admin=await ok(await routes.sharedLogin.POST(request({login:'ADMINTEST',password:'password12345'})));assert.equal(admin.role,'supervisor');
+  const superResult=await ok(await routes.sharedLogin.POST(request({login:'ADMINTEST',password:process.env.SUPER_PASSWORD})));assert.equal(superResult.role,'super_admin');
+  for(let i=0;i<10;i++)await routes.sharedLogin.POST(request({login:'ADMINTEST',password:'bad-password'}));
+  assert.equal((await routes.sharedLogin.POST(request({login:'ADMINTEST',password:process.env.SUPER_PASSWORD}))).status,429);
+ }finally{process.env.SUPER_LOGIN=oldLogin;db.close();}
+});
+test('only super admin can copy company setup and current supervisor credentials on demand',async()=>{
+ const {db}=fixture();try{
+  const cookie=await login(),created=await ok(await routes.companies.POST(request({name:'Copy Login Company'},cookie))),id=created.company.id,context={params:Promise.resolve({id})};
+  const supervisor=await ok(await routes.profileLogin.POST(request({techId:created.setup.adminId,pin:created.setup.pin})));
+  assert.equal(supervisor.requiresAdminSetup,true);
+  assert.equal((await routes.companyCredentials.POST(request({}),context)).status,401);
+  const ordinary=await addTech(db,'default','ADMINTEST','password12345',1);
+  assert.equal((await routes.companyCredentials.POST(request({},ordinary),context)).status,401);
+  assert.equal((await routes.companyCredentials.POST(request({},cookie,'POST','/test','https://evil.test'),context)).status,403);
+  const setupResponse=await routes.companyCredentials.POST(request({},cookie),context);assert.match(setupResponse.headers.get('cache-control'),/no-store/);
+  const setup=await ok(setupResponse);assert.equal(setup.password,created.setup.pin);assert.equal(setup.adminId,created.setup.adminId);assert.equal(setup.setupPending,true);
+  const setupLogin=await routes.profileLogin.POST(request({techId:created.setup.adminId,pin:created.setup.pin}));await ok(setupLogin);const setupCookie=setupLogin.headers.get('set-cookie').split(';')[0];
+  const password='CompanyExamplePassword12345';await ok(await routes.adminSetup.POST(request({adminId:'COMPANYADMIN',password},setupCookie)));
+  const current=await ok(await routes.companyCredentials.POST(request({},cookie),context));assert.equal(current.adminId,'COMPANYADMIN');assert.equal(current.password,password);assert.equal(current.setupPending,false);
+  const overview=await ok(await routes.companies.GET(request(null,cookie,'GET')));const company=overview.companies.find(c=>c.id===id);assert(!('password' in company));assert(!('pin' in company));assert(!JSON.stringify(overview).includes(password));
+  const events=db.prepare("SELECT details FROM super_admin_audit WHERE action='company.copy_login'").all();assert.equal(events.length,2);assert(events.every(e=>!e.details.includes(password)&&!e.details.includes(created.setup.pin)));
+  db.prepare('UPDATE technicians SET pin_ciphertext=NULL WHERE tenant_id=? AND is_admin=1').run(id);
+  assert.equal((await routes.companyCredentials.POST(request({},cookie),context)).status,409);
  }finally{db.close();}
 });
 test('new QCs require the deployed extension version, including older clients without a version header',async()=>{
