@@ -33,6 +33,7 @@ async function handler(file,name){
  }}]});
  return import(output);
 }
+const observationTypes=await handler('lib/qc-observation-type.ts','observation-types');
 const routes={
  dashboard:await handler('app/api/qc-submissions/route.ts','dashboard'),
  activity:await handler('app/api/catalyst-activity/route.ts','activity'),
@@ -271,6 +272,18 @@ test('original failed observation counts as After the Fact after redo; fixed fol
   assert.deepEqual(await monthlyTotals(),[{techId:'TECH',rideAlong:0,afterTheFact:1,unknown:0}]);
   assert.equal(db.prepare('SELECT catalyst_observation_type FROM qc_submission_attempts WHERE submission_id=?').get(first).catalyst_observation_type,'After the Fact');
   assert.equal(db.prepare('SELECT catalyst_observation_type FROM qc_submissions WHERE id=?').get(second).catalyst_observation_type,null);
+  const details=await ok(await routes.dashboard.GET(versionedRequest(`http://localhost/api/qc-submissions?status=all&qc=${second}`)));
+  assert.equal(details.submissions[0].catalystObservationType,'After the Fact');
+  assert.equal(details.submissions[0].previousAttempts[0].catalystObservationType,'After the Fact');
+  // Do not infer an upload type when a historical failed upload has no record.
+  db.prepare('UPDATE qc_submission_attempts SET catalyst_observation_type=NULL WHERE submission_id=?').run(first);
+  const older=await ok(await routes.dashboard.GET(versionedRequest(`http://localhost/api/qc-submissions?status=all&qc=${second}`)));
+  assert.equal(older.submissions[0].catalystObservationType,null);
+  assert.equal(observationTypes.uploadedQcType(older.submissions[0]),'not_recorded');
+  db.prepare("UPDATE qc_submission_attempts SET tenant_id='b',catalyst_observation_type='Ride Along' WHERE submission_id=?").run(first);
+  const isolated=await ok(await routes.dashboard.GET(versionedRequest(`http://localhost/api/qc-submissions?status=all&qc=${second}`)));
+  assert.equal(isolated.submissions[0].catalystObservationType,null);
+  assert.equal(isolated.submissions[0].previousAttempts.length,0);
  }finally{db.close();}
 });
 
@@ -286,5 +299,28 @@ test('PostgreSQL migrations and monthly counters handle confirmed uploads withou
   await pg.query("INSERT INTO qc_submissions(id,tenant_id,root_submission_id,tech_id,job_number,screenshot_id,photo_ids,status,submitted_at) VALUES($1,'a',$1,'TECH','776499',$2,$3,'approved',$4)",[first,picture,JSON.stringify([picture]),Date.now()]);
   for(let i=0;i<2;i++)await ok(await routes.upload.PATCH(request({status:'uploaded',observationType:'Ride Along'},'PATCH'),context(first)));
   const totals=await monthlyTotals();assert.equal(totals.length,1);assert.equal(Number(totals[0].rideAlong),1);assert.equal(Number(totals[0].afterTheFact),0);
+  let dashboard=await ok(await routes.dashboard.GET(versionedRequest('http://localhost/api/qc-submissions?status=all')));
+  assert.equal(dashboard.submissions[0].catalystObservationType,'Ride Along');
+  // A completed follow-up inherits its original observation type in PostgreSQL too.
+  await pg.query("UPDATE qc_submissions SET trust_upload_kind='follow_up',root_submission_id=$1,catalyst_observation_type=NULL WHERE id=$2",[second,first]);
+  await pg.query("INSERT INTO qc_submission_attempts(submission_id,tenant_id,root_submission_id,attempt_number,tech_id,job_number,screenshot_id,photo_ids,status,submitted_at,catalyst_observation_type,trust_upload_status) VALUES($1,'a',$1,1,'TECH','776499',$2,'[]','rejected',$3,'After the Fact','uploaded')",[second,picture,Date.now()]);
+  dashboard=await ok(await routes.dashboard.GET(versionedRequest(`http://localhost/api/qc-submissions?status=all&qc=${first}`)));
+  assert.equal(dashboard.submissions[0].catalystObservationType,'After the Fact');
+  assert.equal(dashboard.submissions[0].previousAttempts[0].catalystObservationType,'After the Fact');
  }finally{await pg.close();}
+});
+
+
+test('upload type filters distinguish confirmed types, older unknowns, and QCs awaiting upload',()=>{
+ const uploaded=type=>({trustUploadStatus:'uploaded',catalystObservationType:type});
+ assert.equal(observationTypes.matchesQcUploadType(uploaded('Ride Along'),'ride_along'),true);
+ assert.equal(observationTypes.matchesQcUploadType(uploaded('After the Fact'),'ride_along'),false);
+ assert.equal(observationTypes.matchesQcUploadType(uploaded('After the Fact'),'after_the_fact'),true);
+ for(const missing of [null,undefined,'unexpected'])assert.equal(observationTypes.matchesQcUploadType(uploaded(missing),'not_recorded'),true);
+ for(const state of ['ready','failed']){
+  const qc={trustUploadStatus:state,catalystObservationType:null};
+  assert.equal(observationTypes.uploadedQcType(qc),null);
+  assert.equal(observationTypes.matchesQcUploadType(qc,'not_recorded'),false);
+  assert.equal(observationTypes.matchesQcUploadType(qc,'all'),true);
+ }
 });

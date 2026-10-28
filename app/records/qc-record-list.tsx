@@ -1,6 +1,8 @@
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages -- vinext's client Link router currently throws in production; native links keep navigation reliable. */
 
+import QcUploadTypeBadge from "@/app/qc-upload-type-badge";
+import {matchesQcUploadType} from "@/lib/qc-observation-type";
 import FailedQcUploadBadge from "@/app/failed-qc-upload-badge";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDownToLine, ChevronRight } from "lucide-react";
@@ -12,7 +14,7 @@ import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export type RecordView = "all" | "needs-review" | "approved";
 type Status = "pending" | "approved" | "rejected";
-type Submission = { id: string; techId: string; jobNumber: string; screenshotId: string; photoIds: string[]; status: Status; correctionPending: number; attemptNumber: number; submittedAt: number; reviewedAt: number | null; reviewNote: string | null; trustUploadStatus: "ready" | "failed" | "uploaded"; trustUploadedAt: number | null };
+type Submission = { id: string; techId: string; jobNumber: string; screenshotId: string; photoIds: string[]; status: Status; correctionPending: number; attemptNumber: number; submittedAt: number; reviewedAt: number | null; reviewNote: string | null; catalystObservationType?:string|null; trustUploadStatus: "ready" | "failed" | "uploaded"; trustUploadedAt: number | null };
 const pages: Record<RecordView, { title: string; status: "all" | Status; description: string }> = {
   all: { title: "All records", status: "all", description: "Every technician QC, including pending, approved, and rejected submissions." },
   "needs-review": { title: "Needs review", status: "pending", description: "Technician QCs waiting for your decision." },
@@ -76,6 +78,7 @@ export default function QcRecordList({ view, historyMode = false }: { view: Reco
     const range = filters.month ? fiscalMonthBounds(filters.month) : null;
     const filtered = items.filter(item => selectedId ? item.id === selectedId :
       (!range || (item.submittedAt >= range.start && item.submittedAt < range.end)) &&
+      matchesQcUploadType(item,filters.uploadType) &&
       (!filters.tech || filters.tech === item.techId) &&
       (filters.status === "all" || (filters.status === "rejected" ? item.status === "rejected" || (item.attemptNumber > 1 && item.status === "approved" && item.trustUploadStatus !== "uploaded") : filters.status === "fixed" ? item.status === "rejected" && item.correctionPending === 1 : filters.status === "uploaded" ? item.status === "approved" && item.trustUploadStatus === "uploaded" : filters.status === "approved" ? item.status === "approved" && item.trustUploadStatus !== "uploaded" : filters.status === item.status)) &&
       `${item.techId} ${item.jobNumber}`.toLowerCase().includes(search));
@@ -114,7 +117,7 @@ export default function QcRecordList({ view, historyMode = false }: { view: Reco
       {!selectedId && <QcFilterBar value={filters} onChange={setFilters} techIds={items.map(item => item.techId)} currentMonthOnly={!historyMode} monthRequired={historyMode}/>}
       <div className="qc-record-toolbar"><span>{loading ? "Loading…" : `${shown} ${shown === 1 ? "QC" : "QCs"}`}</span></div>
       {error && <p className="form-error" role="alert">{error}</p>}
-      {(loading || !ready) && !items.length ? <div className="qc-empty">Loading QC records…</div> : !shown ? <div className="qc-empty">{error ? "QC records could not load." : "No QCs match these filters."}</div> : <div className="qc-record-groups">{groups.map(([techId, group]) => <section className="qc-record-group" key={techId}><h2>Tech {techId} <small>{group?.length} {group?.length === 1 ? "QC" : "QCs"}</small></h2><div className="qc-record-rows">{group?.map((item) => <article className="qc-record-row" key={item.id}><div className="qc-record-meta"><div className="qc-record-line"><strong>Job {item.jobNumber || "—"}</strong><span className={`qc-status ${item.status}`}>{item.status === "pending" ? "Needs review" : item.status === "approved" ? "Approved" : "Rejected"}</span><FailedQcUploadBadge {...item}/>{historyMode && <span className="qc-trust-status">View only</span>}{item.status === "approved" && <span className={`qc-trust-status ${item.trustUploadStatus}`}>Catalyst: {item.trustUploadStatus === "uploaded" ? "Uploaded" : item.trustUploadStatus === "failed" ? "Retry needed" : "Ready"}</span>}</div><small>Tech {item.techId} · {new Date(item.submittedAt).toLocaleString()}</small>{item.reviewNote && <span className="qc-record-note" title={item.reviewNote}>Note: {item.reviewNote}</span>}{!historyMode && item.status === "pending" && <a className="qc-record-review" href={`/captures?qc=${item.id}`}>Review QC <ChevronRight size={15}/></a>}</div><PhotoStrip item={item}/></article>)}</div></section>)}</div>}
+      {(loading || !ready) && !items.length ? <div className="qc-empty">Loading QC records…</div> : !shown ? <div className="qc-empty">{error ? "QC records could not load." : "No QCs match these filters."}</div> : <div className="qc-record-groups">{groups.map(([techId, group]) => <section className="qc-record-group" key={techId}><h2>Tech {techId} <small>{group?.length} {group?.length === 1 ? "QC" : "QCs"}</small></h2><div className="qc-record-rows">{group?.map((item) => <article className="qc-record-row" key={item.id}><div className="qc-record-meta"><div className="qc-record-line"><strong>Job {item.jobNumber || "—"}</strong><span className={`qc-status ${item.status}`}>{item.status === "pending" ? "Needs review" : item.status === "approved" ? "Approved" : "Rejected"}</span><FailedQcUploadBadge {...item}/><QcUploadTypeBadge {...item}/>{historyMode && <span className="qc-trust-status">View only</span>}{item.status === "approved" && <span className={`qc-trust-status ${item.trustUploadStatus}`}>Catalyst: {item.trustUploadStatus === "uploaded" ? "Uploaded" : item.trustUploadStatus === "failed" ? "Retry needed" : "Ready"}</span>}</div><small>Tech {item.techId} · {new Date(item.submittedAt).toLocaleString()}</small>{item.reviewNote && <span className="qc-record-note" title={item.reviewNote}>Note: {item.reviewNote}</span>}{!historyMode && item.status === "pending" && <a className="qc-record-review" href={`/captures?qc=${item.id}`}>Review QC <ChevronRight size={15}/></a>}</div><PhotoStrip item={item}/></article>)}</div></section>)}</div>}
     </div>
     </div>
   </AdminShell>;
