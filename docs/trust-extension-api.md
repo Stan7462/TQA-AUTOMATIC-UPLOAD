@@ -1,10 +1,16 @@
 # TQA Automatic Upload → Trust extension API
 
-Version: 3 (2026-10-10)
+Version: 4 (2026-10-27)
 
 Base URL: `{{TQA_BASE_URL}}`
 
 This document is the contract for the browser extension that uploads passing observations, failed observations, and corrected follow-ups into Catalyst. The API runs on the TQA server. Catalyst login and page automation belong to the extension.
+
+## Mandatory extension versions
+
+`GET /api/extension/version` returns the deployed `version`, `requiredVersion`, and `/extension` download page without account data. Every newly deployed extension version is mandatory. Send `X-TQA-Extension-Version: <installed manifest version>` on integration requests. QC queue and detail reads return HTTP 426 with `EXTENSION_UPDATE_REQUIRED` when the version is missing or does not exactly match the deployed version. Photo reads and upload-result PATCH requests remain available for authenticated clients so an already-started QC can finish and report across a deployment. Recheck before each new QC and stop at the boundary when an update is required. Never begin a QC from cached queue data without reading its current detail.
+
+The extension checks at startup, when its panel opens, every five minutes, and between QCs. A failed version check blocks new QCs until verification succeeds. Download the replacement ZIP from the app, replace the extracted extension files, and reload it in Chrome. Extensions installed before v0.7.20 cannot show the new update badge; their queue/detail requests are still blocked by the server after this feature is deployed.
 
 ## Required extension workflow
 

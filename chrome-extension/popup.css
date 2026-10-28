@@ -148,3 +148,4 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#5ba9dc,#d8e9f
   .actions{grid-template-columns:1fr}
   .actions #stop{grid-column:auto}
 }
+.extension-update{border:1px solid #d18b56;background:#352b24;color:#fff0d7;padding:16px;margin-bottom:16px}.extension-update strong{color:#ffce89}.extension-update p{font-size:13px;line-height:1.6}.extension-update[hidden]{display:none}

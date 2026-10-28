@@ -71,3 +71,7 @@ Creating a demo provisions three sample technician accounts and six QCs with gen
 ## Optional Catalyst account screenshots
 
 Supervisors can use **Settings → Catalyst uploads → Include account screenshots**. The company-wide setting defaults to on. Turning it off removes the account screenshot from the extension photo lists for passing observations, first failed observations, and approved correction follow-ups. Screenshots remain stored and visible in the app, and OCR is unchanged. Change the setting before starting uploads and refresh the extension queue; existing Catalyst pictures are not removed, and interrupted upload photo checks still prevent duplication.
+
+## Mandatory extension updates
+
+Starting with v0.7.20, the extension shows an in-panel update banner and Chrome toolbar badge. Every deployed manifest version is required for new QC uploads; the server rejects outdated or missing version headers on QC queue/detail requests. An already-started QC may finish and report its result, then the uploader blocks the next QC. Version checks run on startup, panel opening, every five minutes, and between QCs. Network failures block new QCs until version verification succeeds. Older installed extensions need one manual update to receive the badge; they are still blocked by the server. ZIP installation updates remain manual through the download button and Chrome Reload.

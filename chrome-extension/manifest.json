@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TQA Catalyst Uploader",
-  "version": "0.7.19",
+  "version": "0.7.20",
   "description": "Uploads passing and failed TQA QCs, plus corrected follow-ups, to Catalyst.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -10,7 +10,7 @@
     "128": "icons/icon-128.png"
   },
   "minimum_chrome_version": "116",
-  "permissions": ["storage", "tabs", "sidePanel"],
+  "permissions": ["storage", "tabs", "sidePanel", "alarms"],
   "host_permissions": [
     "https://catalystqms.comcast.net/*",
     "https://qc.leadtechx.com/*"

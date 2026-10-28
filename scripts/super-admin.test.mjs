@@ -12,7 +12,7 @@ const previous={login:process.env.SUPER_LOGIN,password:process.env.SUPER_PASSWOR
 process.env.SUPER_LOGIN='owner@example.test';process.env.SUPER_PASSWORD='local-test-password-12345';
 async function module(file){const output=join(temp,file.replaceAll('/','-')+'.mjs');await build({entryPoints:[join(root,file)],outfile:output,bundle:true,platform:'node',format:'esm',plugins:[{name:'super-fixture',setup(b){b.onResolve({filter:/^next\/(headers|navigation)$/},args=>({path:args.path,namespace:'next-fixture'}));b.onLoad({filter:/.*/,namespace:'next-fixture'},args=>({contents:args.path==='next/headers'?"export async function cookies(){return {get(name){const value=(globalThis.superFixture.cookie??'').split('; ').find(c=>c.startsWith(name+'='))?.slice(name.length+1);return value?{value}:undefined;}};}":"export function redirect(url){throw Error('redirect: '+url);}"}));b.onResolve({filter:/^@\//},args=>args.path==='@/lib/local-env'?{path:'env',namespace:'test'}:{path:join(root,args.path.slice(2)+(/\.(mjs|json)$/.test(args.path)?'':'.ts'))});b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:'export const env=new Proxy({}, {get:(_,key)=>globalThis.superFixture.env[key]});'}));}}]});return import(output);}
 const auth=await module('lib/super-auth.ts'),techAuth=await module('lib/tech-auth.ts'),pageAuth=await module('app/chatgpt-auth.ts');
-const routes={extensionDownload:await module('app/api/extension/download/route.ts'),catalystSettings:await module('app/api/catalyst-settings/route.ts'),login:await module('app/api/super-admin/login/route.ts'),logout:await module('app/api/super-admin/logout/route.ts'),companies:await module('app/api/super-admin/companies/route.ts'),update:await module('app/api/super-admin/companies/[id]/route.ts'),context:await module('app/api/super-admin/context/route.ts'),leave:await module('app/api/super-admin/leave/route.ts'),profileLogin:await module('app/api/profile/login/route.ts'),profile:await module('app/api/profile/route.ts'),upload:await module('app/api/qc-upload/route.ts'),trust:await module('lib/trust-api.ts'),legacyCompanies:await module('app/api/companies/route.ts')};
+const routes={trustList:await module('app/api/integrations/trust/qcs/route.ts'),trustDetail:await module('app/api/integrations/trust/qcs/[id]/route.ts'),version:await module('app/api/extension/version/route.ts'),extensionDownload:await module('app/api/extension/download/route.ts'),catalystSettings:await module('app/api/catalyst-settings/route.ts'),login:await module('app/api/super-admin/login/route.ts'),logout:await module('app/api/super-admin/logout/route.ts'),companies:await module('app/api/super-admin/companies/route.ts'),update:await module('app/api/super-admin/companies/[id]/route.ts'),context:await module('app/api/super-admin/context/route.ts'),leave:await module('app/api/super-admin/leave/route.ts'),profileLogin:await module('app/api/profile/login/route.ts'),profile:await module('app/api/profile/route.ts'),upload:await module('app/api/qc-upload/route.ts'),trust:await module('lib/trust-api.ts'),legacyCompanies:await module('app/api/companies/route.ts')};
 const origin='https://qc.example.test';
 function request(body,cookie='',method='POST',path='/test',requestOrigin=origin){return new Request(origin+path,{method,headers:{Origin:requestOrigin,Cookie:cookie,'Content-Type':'application/json'},...(method==='GET'?{}:{body:JSON.stringify(body)})});}
 async function ok(response){assert(response.ok,`${response.status}: ${await response.clone().text()}`);return response.json();}
@@ -89,6 +89,18 @@ test('demo companies cannot use Catalyst even with valid supervisor credentials,
   const both=cookie+'; '+techCookie;assert.equal((await techAuth.getTechSessionContext(request(null,both,'GET'),globalThis.superFixture.env.DB)).tenantId,demo.company.id);
   db.prepare('UPDATE super_admin_sessions SET context_expires_at=0').run();assert.equal((await techAuth.getTechSessionContext(request(null,both,'GET'),globalThis.superFixture.env.DB)).tenantId,'default');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM tech_sessions').get().n,2);
+ }finally{db.close();}
+});
+test('new QCs require the deployed extension version, including older clients without a version header',async()=>{
+ const {db}=fixture();try{
+  const admin=await addTech(db,'default','ADMINTEST','password12345',1),authorization=`Session ${admin.split('=')[1]}`;
+  const info=await ok(await routes.version.GET());assert.equal(info.version,JSON.parse(readFileSync('chrome-extension/manifest.json','utf8')).version);
+  for(const version of [null,'0.7.19','999.0.0']){
+   const headers={authorization,...(version?{'X-TQA-Extension-Version':version}:{})};
+   const blocked=await routes.trustList.GET(new Request(origin+'/qcs',{headers}));assert.equal(blocked.status,426);assert.equal((await blocked.json()).error.code,'EXTENSION_UPDATE_REQUIRED');
+   const detail=await routes.trustDetail.GET(new Request(origin+'/qcs/test',{headers}),{params:Promise.resolve({id:crypto.randomUUID()})});assert.equal(detail.status,426);
+  }
+  const current=await routes.trustList.GET(new Request(origin+'/qcs',{headers:{authorization,'X-TQA-Extension-Version':info.version}}));assert.equal(current.status,200);
  }finally{db.close();}
 });
 test('extension ZIP download requires supervisor access and returns a versioned installable package',async()=>{

@@ -9,6 +9,44 @@ const DELAY_OPTIONS_SECONDS = [5, 15, 30, 60, 90, 120];
 const DEFAULT_QC_DELAY_SECONDS = 30;
 const DEFAULT_RIDE_ALONG_PERCENTAGE = 50;
 const MAX_QC_ATTEMPTS = 3;
+const INSTALLED_VERSION = chrome.runtime.getManifest().version;
+let updateCheck = null;
+function updateError(message,code='EXTENSION_UPDATE_REQUIRED') {const error=new Error(message);error.code=code;return error;}
+async function saveUpdateInfo(info) {
+  await chrome.storage.local.set({updateInfo:{...info,installedVersion:INSTALLED_VERSION,checkedAt:Date.now()}});
+  const required=info.status==='update_required',unavailable=info.status==='unavailable';
+  await chrome.action.setBadgeText({text:required?'UPD':unavailable?'?':''});
+  if(required||unavailable)await chrome.action.setBadgeBackgroundColor({color:required?'#b43d44':'#946319'});
+  await chrome.action.setTitle({title:required?`TQA update required: v${info.latestVersion}`:'TQA Catalyst Uploader'});
+  return info;
+}
+async function checkForUpdate() {
+  await storageReady;
+  if(updateCheck)return updateCheck;
+  updateCheck=(async()=>{
+    try{
+      const response=await fetch(`${TQA_APP_ORIGIN}/api/extension/version`,{cache:'no-store',signal:AbortSignal.timeout(15000)});
+      const data=await response.json();
+      if(!response.ok||!/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(data.version)||data.requiredVersion!==data.version)throw Error('Could not verify the latest extension version.');
+      return await saveUpdateInfo({status:data.version===INSTALLED_VERSION?'current':'update_required',latestVersion:data.version});
+    }catch{
+      const {updateInfo}=await chrome.storage.local.get('updateInfo');
+      if(updateInfo?.status==='update_required')return updateInfo;
+      return await saveUpdateInfo({status:'unavailable',message:'Could not check for updates. Reconnect and check again before uploading.'});
+    }
+  })();
+  try{return await updateCheck;}finally{updateCheck=null;}
+}
+async function assertCurrentVersion(){
+  const info=await checkForUpdate();
+  if(info.status==='update_required')throw updateError(`Update to v${info.latestVersion} before starting another QC. Open the TQA app to download the latest extension.`);
+  if(info.status!=='current')throw updateError(info.message,'EXTENSION_VERSION_UNAVAILABLE');
+}
+async function initializeUpdates(){
+  await chrome.alarms.create('extension-update-check',{periodInMinutes:5});
+  await checkForUpdate();
+}
+chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name==='extension-update-check')void checkForUpdate();});
 
 async function configureSidePanel() {
   if (!chrome.sidePanel?.setPanelBehavior) return;
@@ -19,9 +57,10 @@ async function configureSidePanel() {
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => { void configureSidePanel(); });
-chrome.runtime.onStartup.addListener(() => { void configureSidePanel(); });
+chrome.runtime.onInstalled.addListener(() => { void configureSidePanel(); void initializeUpdates(); });
+chrome.runtime.onStartup.addListener(() => { void configureSidePanel(); void initializeUpdates(); });
 void configureSidePanel();
+void initializeUpdates();
 
 function logEvent(level, step, message) {
   const entry = { at: new Date().toISOString(), level, step, message: safeError(message) };
@@ -33,7 +72,7 @@ function logEvent(level, step, message) {
   return logChain;
 }
 
-async function stored() { await storageReady; return chrome.storage.local.get(["sessionToken", "connectedTechId", "tenantName", "queue", "run", "logs", "qcDelaySeconds", "rideAlongPercentage"]); }
+async function stored() { await storageReady; return chrome.storage.local.get(["sessionToken", "connectedTechId", "tenantName", "queue", "run", "logs", "qcDelaySeconds", "rideAlongPercentage", "updateInfo"]); }
 async function recovery(qcId, patch) {
   await storageReady;
   const { recoveryCheckpoints = {} } = await chrome.storage.local.get('recoveryCheckpoints');
@@ -82,7 +121,7 @@ async function api(path, options = {}) {
     response = await fetch(`${auth.apiOrigin}${path}`, {
       ...options,
       cache: "no-store",
-      headers: { Authorization: auth.header, ...(options.body ? { "Content-Type": "application/json" } : {}) }
+      headers: { Authorization: auth.header, 'X-TQA-Extension-Version':INSTALLED_VERSION, ...(options.body ? { "Content-Type": "application/json" } : {}) }
     });
   } catch (error) {
     await logEvent("error", "TQA API", `${method} ${path}: ${safeError(error)}`);
@@ -90,7 +129,12 @@ async function api(path, options = {}) {
   }
   if (!response.ok) {
     let message = `TQA API returned HTTP ${response.status}`;
-    try { message = (await response.json()).error?.message || message; } catch { /* keep status */ }
+    let failure;
+    try { failure=(await response.json()).error;message = failure?.message || message; } catch { /* keep status */ }
+    if(failure?.code==='EXTENSION_UPDATE_REQUIRED'){
+      await saveUpdateInfo({status:'update_required',latestVersion:failure.latestVersion});
+      throw updateError(message);
+    }
     await logEvent("error", "TQA API", `${method} ${path}: HTTP ${response.status}: ${message}`);
     if (response.status === 401 && auth.mode === "session") await chrome.storage.local.remove(["sessionToken", "queue"]);
     throw new Error(message);
@@ -362,6 +406,7 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
     checkpoint = await recovery(qc.id,{completionConfirmed:true,successMessage});
     return await reportSavedObservation(qc, tabId, checkpoint);
   } catch (error) {
+    if(['EXTENSION_UPDATE_REQUIRED','EXTENSION_VERSION_UNAVAILABLE'].includes(error.code))throw error;
     const reason = safeError(error);
     const { run } = await stored();
     const jobNumber = qc?.jobNumber || qcSummary.jobNumber || qcSummary.id;
@@ -415,6 +460,7 @@ async function reportSavedObservation(qc, tabId, checkpoint) {
 async function runQueue(preferredQcId = null) {
   let tabId;
   try {
+    await assertCurrentVersion();
     const queue = await loadQueue();
     // Record forced After-the-Fact failures before choosing types for passing
     // QCs, so this batch can also correct the resulting monthly imbalance.
@@ -436,9 +482,12 @@ async function runQueue(preferredQcId = null) {
     const exhausted = [];
     while (pending.length) {
       if (stopRequested) break;
+      await assertCurrentVersion();
       const item = pending.shift();
       const result = await processOne(item.qc, tabId, item.index, queue.length, item.attempt, item.observationType);
       if ((await stored()).run?.status === "needs_review") return;
+      // Recheck only after the current QC has saved and reported its result.
+      await assertCurrentVersion();
       if (result.status === "uploaded" && !stopRequested) {
         // A completed first Fail can unlock its approved Fix during this same run.
         const unlocked = (await loadQueue()).filter(qc => qc.workflow === "follow_up" && !queue.some(known => known.id === qc.id));
@@ -474,6 +523,10 @@ async function runQueue(preferredQcId = null) {
     }
   } catch (error) {
     const { run } = await stored();
+    if(['EXTENSION_UPDATE_REQUIRED','EXTENSION_VERSION_UNAVAILABLE'].includes(error.code)){
+      await setRun({status:'update_required',stage:'update required',message:safeError(error)});
+      return;
+    }
     if (run?.status !== "needs_review") await setRun({ status: "error", stage: "error", message: safeError(error) });
   } finally {
     activeRun = null;
@@ -498,10 +551,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   (async () => {
     switch (message?.command) {
+      case "CHECK_UPDATE": return await checkForUpdate();
+      case "OPEN_UPDATE": return await chrome.tabs.create({url:`${TQA_APP_ORIGIN}/extension`,active:true});
       case "GET_STATE": {
         const data = await stored();
         const auth = await authentication();
-        return { queue: data.queue || [], run: data.run || {}, logs: data.logs || [], qcDelaySeconds: DELAY_OPTIONS_SECONDS.includes(data.qcDelaySeconds) ? data.qcDelaySeconds : DEFAULT_QC_DELAY_SECONDS, rideAlongPercentage: validRideAlongPercentage(data.rideAlongPercentage) ? data.rideAlongPercentage : DEFAULT_RIDE_ALONG_PERCENTAGE, hasAuth: auth.available, connectedTechId: auth.connectedTechId, tenantName: auth.tenantName };
+        return { queue: data.queue || [], run: data.run || {}, logs: data.logs || [], updateInfo:data.updateInfo||{status:'checking',installedVersion:INSTALLED_VERSION}, qcDelaySeconds: DELAY_OPTIONS_SECONDS.includes(data.qcDelaySeconds) ? data.qcDelaySeconds : DEFAULT_QC_DELAY_SECONDS, rideAlongPercentage: validRideAlongPercentage(data.rideAlongPercentage) ? data.rideAlongPercentage : DEFAULT_RIDE_ALONG_PERCENTAGE, hasAuth: auth.available, connectedTechId: auth.connectedTechId, tenantName: auth.tenantName };
       }
       case "CONNECT": {
         if (!/^[A-Z0-9_-]{4,32}$/.test(message.techId || "") || !((/^\d{5}$/.test(message.pin || "")) || ((message.pin || "").length >= 8 && /[A-Za-z]/.test(message.pin) && /\d/.test(message.pin)))) throw new Error("Enter the Admin ID and password.");

@@ -73,3 +73,7 @@ The Ride Along slider is a per-technician **fiscal-month target (22nd–21st)**,
 Passing uploads made before type tracking was available have an unknown type. The log identifies these; their actual types need to be reconciled from Catalyst to include them in the balance. Types are never guessed. Odd totals or more failures than the selected target allows can prevent an exact split.
 
 Deploy the app's observation-type migration and API before using this extension version.
+
+### v0.7.20 — required updates
+
+Every newly deployed extension version is mandatory. The panel displays an update banner with a link to the TQA download page, and Chrome's toolbar icon displays an UPD badge. Checks run when Chrome/the extension starts, when the panel opens, every five minutes, and at QC boundaries. New uploads require a verified matching server version. An in-progress QC finishes saving and reporting before the next QC is blocked. The app also rejects queue/detail requests from outdated clients, including older versions without a version header. Photo reads and reporting remain available so deployments do not interrupt current QC completion. Network/check failures block new QCs without discarding saved progress. Replace the extracted files and reload the extension to update; ZIP installations do not self-update.

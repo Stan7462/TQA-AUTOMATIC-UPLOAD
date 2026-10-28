@@ -13,6 +13,14 @@ function render() {
   const run = state.run || {};
   const runStatus = run.status || "ready";
   const authenticated = Boolean(state.hasAuth);
+  const update=state.updateInfo||{status:'checking'};
+  const current=update.status==='current';
+  $("extension-update").hidden=current||update.status==='checking';
+  $("update-heading").textContent=update.status==='update_required'?'Update available · uploads locked':'Update check unavailable';
+  $("update-message").textContent=update.status==='update_required'
+    ? `Installed v${update.installedVersion}. Latest v${update.latestVersion}. ${run.status==='running'?'The current QC will finish; the next QC is blocked.':'Update and reload the extension before uploading QCs.'}`
+    : update.message||'Checking for the latest extension version…';
+  $("download-update").hidden=update.status!=='update_required';
   document.body.classList.toggle("signed-out", !authenticated);
   $("authenticated-content").hidden = !authenticated;
   $("auth-title").textContent = authenticated ? (state.tenantName || "TQA admin connected") : "Connect your TQA app";
@@ -24,7 +32,7 @@ function render() {
   $("login-form").hidden = authenticated;
   $("disconnect").hidden = !authenticated;
   if (authenticated) $("auth-error").hidden = true;
-  $("run-state").textContent = runStatus === "running" ? "Uploading" : runStatus === "needs_review" ? "Needs review" : ["failed", "error"].includes(runStatus) ? "Attention" : "Ready";
+  $("run-state").textContent = runStatus === "running" ? "Uploading" : !current ? "Update required" : runStatus === "needs_review" ? "Needs review" : ["failed", "error"].includes(runStatus) ? "Attention" : "Ready";
   $("run-state").className = `state-pill ${runStatus}`;
   $("total").textContent = String(queue.length);
   $("status").textContent = run.stage === "waiting" && Number.isFinite(run.waitRemainingSeconds)
@@ -42,7 +50,9 @@ function render() {
   $("progress").max = Math.max(1, progressTotal);
   $("progress").value = progressIndex;
   $("progress").setAttribute("aria-valuetext", `${progressPercent}% · QC ${progressIndex} of ${progressTotal}`);
-  $("start").disabled = !authenticated || run.status === "running" || run.status === "needs_review";
+  $("start").disabled = !authenticated || !current || run.status === "running" || run.status === "needs_review";
+  $("resume-review").disabled=!current;
+  $("confirm-reviewed").disabled=!current;
   $("stop").disabled = run.status !== "running";
   $("resume-review").hidden = run.status !== "needs_review";
   $("ack-review").hidden = run.status !== "needs_review";
@@ -119,6 +129,8 @@ $("login-form").addEventListener("submit", (event) => {
   }, "auth-error");
 });
 $("disconnect").addEventListener("click", () => action(() => send("DISCONNECT")));
+$("download-update").addEventListener("click",()=>action(()=>send("OPEN_UPDATE")));
+$("check-update").addEventListener("click",()=>action(()=>send("CHECK_UPDATE")));
 
 $("settings-toggle").addEventListener("click", () => {
   const expanded = $("settings-toggle").getAttribute("aria-expanded") === "true";
@@ -154,8 +166,9 @@ $("ride-along-percentage").addEventListener("change", () => action(() => {
 chrome.storage.onChanged.addListener(() => { void refreshState(); });
 void (async () => {
   try {
+    await send("CHECK_UPDATE");
     await refreshState();
-    if (state.hasAuth) { await send("REFRESH"); await refreshState(); }
+    if (state.hasAuth && state.updateInfo?.status==='current') { await send("REFRESH"); await refreshState(); }
   } catch (error) {
     await refreshState().catch(() => {});
     const target = state.hasAuth ? $("status") : $("auth-error");

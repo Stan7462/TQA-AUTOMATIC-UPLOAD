@@ -22,7 +22,7 @@ const mocks={
 async function handler(file,name){
  const output=join(temp,`${name}.mjs`);
  await build({entryPoints:[join(root,file)],outfile:output,bundle:true,platform:'node',format:'esm',plugins:[{name:'workflow-fixtures',setup(b){
-  b.onResolve({filter:/^@\//},args=>args.path in mocks||args.path==='@/lib/trust-api'?{path:args.path,namespace:'fixture'}:{path:join(root,args.path.slice(2)+'.ts')});
+  b.onResolve({filter:/^@\//},args=>args.path in mocks||args.path==='@/lib/trust-api'?{path:args.path,namespace:'fixture'}:{path:join(root,args.path.slice(2)+(args.path.endsWith('.json')?'':'.ts'))});
   b.onLoad({filter:/.*/,namespace:'fixture'},args=>{
    if(args.path in mocks)return{contents:mocks[args.path],loader:'ts'};
    let source=readFileSync(join(root,'lib/trust-api.ts'),'utf8').replace(/^import .*;\n/gm,'');
@@ -67,7 +67,9 @@ function fixture(){
  globalThis.workflowTest={tenant:'a',env:{DB:{prepare(sql){const statement=database.prepare(sql);return {bind(...args){const bound=statement.bind(...args);return{first:()=>bound.first(),run:()=>bound.run(),all:async()=>({results:await bound.all()}),sql:bound.sql,values:bound.values};}};},batch:database.batch},BUCKET:{put:async(k,v)=>bucket.set(k,v),delete:async k=>bucket.delete(k),get:async k=>bucket.has(k)?{body:bucket.get(k)}:null}}};
  return db;
 }
-function request(body,method='POST'){return new Request('http://localhost/test',{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
+const extensionVersion=JSON.parse(readFileSync(join(root,'chrome-extension/manifest.json'),'utf8')).version;
+function versionedRequest(url,options={}){const headers=new Headers(options.headers);headers.set('X-TQA-Extension-Version',extensionVersion);return new Request(url,{...options,headers});}
+function request(body,method='POST'){return versionedRequest('http://localhost/test',{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
 const context=id=>({params:Promise.resolve({id})});
 async function ok(response){assert(response.ok,`${response.status}: ${await response.clone().text()}`);return response.json();}
 async function reject(id){return ok(await routes.review.POST(request({status:'rejected',reviewNote:'Missing terminators',failureReasons:[failure]}),context(id)));}
@@ -78,18 +80,26 @@ async function redo(from,to){
  for(let slot=0;slot<3;slot++)await ok(await routes.redo.POST(request({...details,action:'photo',slot,image:bytes.toString('base64')})));
  await ok(await routes.redo.POST(request({...details,action:'finalize',photoCount:2})));
 }
-async function queue(){return (await ok(await routes.list.GET(new Request('http://localhost/qcs')))).qcs;}
+async function queue(){return (await ok(await routes.list.GET(versionedRequest('http://localhost/qcs')))).qcs;}
 async function uploaded(id,reference='12345'){return ok(await routes.upload.PATCH(request({status:'uploaded',externalReference:reference},'PATCH'),context(id)));}
 async function uploadedFromToast(id){return ok(await routes.upload.PATCH(request({status:'uploaded'},'PATCH'),context(id)));}
-async function rejectedFolder(){return (await ok(await routes.profile.GET(new Request('http://localhost/profile?view=rejected')))).submissions;}
+async function rejectedFolder(){return (await ok(await routes.profile.GET(versionedRequest('http://localhost/profile?view=rejected')))).submissions;}
 
+test('a started QC can finish reading photos and report success on the older version',async()=>{
+ const db=fixture();try{
+  await approve(first);
+  const photo=await routes.photo.GET(new Request('http://localhost/photo',{headers:{'X-TQA-Extension-Version':'0.7.19'}}),context(picture));assert.equal(photo.status,200);
+  const result=await routes.upload.PATCH(new Request('http://localhost/upload',{method:'PATCH',headers:{'Content-Type':'application/json','X-TQA-Extension-Version':'0.7.19'},body:JSON.stringify({status:'uploaded',externalReference:'12345'})}),context(first));
+  assert.equal(result.status,200);assert.equal((await result.json()).qc.uploadStatus,'uploaded');
+ }finally{db.close();}
+});
 test('Catalyst screenshot toggle filters passing queue and detail without changing stored review pictures',async()=>{
  const db=fixture();try{
   await approve(first);
   assert.equal((await queue())[0].photos.length,3);
   assert.equal((await queue())[0].photos[0].kind,'account_screenshot');
   db.prepare('UPDATE tenants SET catalyst_include_screenshot=0').run();
-  const qc=(await queue())[0],detail=(await ok(await routes.detail.GET(new Request('http://localhost/qcs/'+first),context(first)))).qc;
+  const qc=(await queue())[0],detail=(await ok(await routes.detail.GET(versionedRequest('http://localhost/qcs/'+first),context(first)))).qc;
   assert.equal(qc.photos.length,2);assert(qc.photos.every(p=>p.kind==='live_photo'));assert.deepEqual(qc.photos.map(p=>p.order),[0,1]);assert.deepEqual(qc.photos,detail.photos);
   const stored=db.prepare('SELECT screenshot_id,photo_ids FROM qc_submissions WHERE id=?').get(first);assert.equal(stored.screenshot_id,picture);assert.equal(JSON.parse(stored.photo_ids).length,2);
   db.prepare('UPDATE tenants SET catalyst_include_screenshot=1').run();assert.equal((await queue())[0].photos.length,3);
@@ -111,12 +121,12 @@ test('approval feedback reaches the technician and remains a normal passing QC a
   const row=db.prepare('SELECT status,review_note,catalyst_failures,correction_deadline_at FROM qc_submissions WHERE id=?').get(first);
   assert.equal(row.status,'approved');assert.equal(row.review_note,feedback);
   assert.equal(row.catalyst_failures,null);assert.equal(row.correction_deadline_at,null);
-  const tech=await ok(await routes.profile.GET(new Request('http://localhost/profile?view=captured')));
+  const tech=await ok(await routes.profile.GET(versionedRequest('http://localhost/profile?view=captured')));
   assert.equal(tech.submissions.find(q=>q.id===first).reviewNote,feedback);
   assert.equal((await rejectedFolder()).length,0);
   const queued=(await queue())[0];assert.equal(queued.outcome,'pass');assert.deepEqual(queued.failureReasons,[]);
   await uploaded(first);
-  const after=await ok(await routes.profile.GET(new Request('http://localhost/profile?view=uploaded')));
+  const after=await ok(await routes.profile.GET(versionedRequest('http://localhost/profile?view=uploaded')));
   assert.equal(after.submissions.find(q=>q.id===first).reviewNote,feedback);
  }finally{db.close();}
 });
@@ -141,17 +151,17 @@ test('redo and approve before upload: original Fail first, final Fix second, int
   await redo(second,third);await approve(third);
   assert.deepEqual((await rejectedFolder()).map(q=>q.id),[third]);
   assert.deepEqual((await queue()).map(q=>[q.id,q.outcome,q.workflow]),[[first,'fail','observation']]);
-  const original=await ok(await routes.detail.GET(new Request('http://localhost/qc'),context(first)));
+  const original=await ok(await routes.detail.GET(versionedRequest('http://localhost/qc'),context(first)));
   assert.equal(original.qc.photos[0].id,picture);assert.deepEqual(original.qc.failureReasons,[failure]);
-  const photo=await routes.photo.GET(new Request('http://localhost/photo'),context(picture));assert.equal(photo.status,200);
+  const photo=await routes.photo.GET(versionedRequest('http://localhost/photo'),context(picture));assert.equal(photo.status,200);
   const result=await uploaded(first);assert.equal(result.qc.catalystObservationId,'12345');
   assert(deadline>0);
   assert.deepEqual((await queue()).map(q=>[q.id,q.outcome,q.workflow,q.catalystObservationId]),[[third,'pass','follow_up','12345']]);
   assert.equal((await uploaded(first)).alreadyUploaded,true);
   await uploaded(third);assert.equal((await queue()).length,0);assert.equal((await rejectedFolder()).length,0);
-  const all=await ok(await routes.list.GET(new Request('http://localhost/qcs?uploadStatus=uploaded')));
+  const all=await ok(await routes.list.GET(versionedRequest('http://localhost/qcs?uploadStatus=uploaded')));
   assert.deepEqual(all.qcs.map(q=>q.id),[first,third]);
-  globalThis.workflowTest.tenant='b';assert.equal((await queue()).length,0);assert.equal((await routes.detail.GET(new Request('http://localhost/qc'),context(first))).status,404);
+  globalThis.workflowTest.tenant='b';assert.equal((await queue()).length,0);assert.equal((await routes.detail.GET(versionedRequest('http://localhost/qc'),context(first))).status,404);
  }finally{db.close();}
 });
 test('first Fail uploads before redo; deadline is not restarted; failed corrections remain redoable',async()=>{
@@ -186,7 +196,7 @@ test('extension uploads Fail then newly unlocked approved Fix in the same run',a
   const background=readFileSync(join(root,'chrome-extension/background.js'),'utf8');
   const source=background.slice(background.indexOf('async function runQueue('),background.indexOf('chrome.runtime.onMessage.addListener'));
   await runInNewContext(source+';runQueue()',{
-   loadQueue:queue,rideAlongPercentage:async()=>50,observationTypeAssignments,
+   assertCurrentVersion:async()=>{},loadQueue:queue,rideAlongPercentage:async()=>50,observationTypeAssignments,
    setRun:async patch=>{run={...run,...patch};},stored:async()=>({run}),
    chrome:{tabs:{create:async()=>({id:1})}},JOBS_URL:'https://example.test',
    processOne:async qc=>{processed.push(qc.id);await uploaded(qc.id);return{status:'uploaded',jobNumber:qc.jobNumber};},
@@ -209,16 +219,16 @@ test('activity drill-down finds an earlier submission uploaded today, including 
  const chart=await (await routes.activity.GET()).json();
  assert.equal(chart.uploads.length,1);
  const url=`http://localhost/api/qc-submissions?status=all&start=${chart.start}&end=${chart.end}`;
- const submitted=await (await routes.dashboard.GET(new Request(url))).json();
+ const submitted=await (await routes.dashboard.GET(versionedRequest(url))).json();
  assert.equal(submitted.submissions.length,0);
- const uploaded=await (await routes.dashboard.GET(new Request(url+'&dateBasis=uploaded'))).json();
+ const uploaded=await (await routes.dashboard.GET(versionedRequest(url+'&dateBasis=uploaded'))).json();
  assert.equal(uploaded.submissions.length,1);
  assert.equal(uploaded.submissions[0].id,chart.uploads[0].id);
  assert.equal(uploaded.submissions[0].trustUploadedAt,now);
  // Another company and an unuploaded QC must not appear in the selected chart's records.
  db.prepare("INSERT INTO qc_submissions(id,tenant_id,tech_id,job_number,photo_ids,status,submitted_at,trust_upload_status,trust_uploaded_at) VALUES(?,'other','TECH','123','[]','approved',?,'uploaded',?)").run(second,now,now);
  db.prepare("INSERT INTO qc_submissions(id,tenant_id,tech_id,job_number,photo_ids,status,submitted_at,trust_upload_status) VALUES(?,'a','TECH','124','[]','approved',?,'ready')").run(third,now);
- const filtered=await (await routes.dashboard.GET(new Request(url+'&dateBasis=uploaded'))).json();
+ const filtered=await (await routes.dashboard.GET(versionedRequest(url+'&dateBasis=uploaded'))).json();
  assert.deepEqual(filtered.submissions.map(q=>q.id),[first]);
  db.close();
 });
@@ -231,12 +241,12 @@ test('review saves and queues multiple exact reasons from the same TQA category'
   const response=await routes.review.POST(request({status:'rejected',reviewNote:'No house box and unsuitable fittings',failureReasons:reasons}),{params:Promise.resolve({id:first})});
   assert.equal(response.status,200);
   assert.deepEqual(JSON.parse(db.prepare('SELECT catalyst_failures FROM qc_submissions WHERE id=?').get(first).catalyst_failures),reasons);
-  const detail=await (await routes.detail.GET(new Request('http://localhost/test'),{params:Promise.resolve({id:first})})).json();
+  const detail=await (await routes.detail.GET(versionedRequest('http://localhost/test'),{params:Promise.resolve({id:first})})).json();
   assert.deepEqual(detail.qc.failureReasons,reasons);
  }finally{db.close();}
 });
 
-async function monthlyTotals(){return (await ok(await routes.totals.GET(new Request('http://localhost/totals')))).technicians;}
+async function monthlyTotals(){return (await ok(await routes.totals.GET(versionedRequest('http://localhost/totals')))).technicians;}
 test('monthly upload history records confirmed types once, isolates companies, and reports unknown older types',async()=>{
  const db=fixture();try{
   await approve(first);

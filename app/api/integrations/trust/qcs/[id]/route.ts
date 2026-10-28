@@ -1,4 +1,5 @@
 import { env } from "@/lib/local-env";
+import {requireCurrentExtension} from '@/lib/extension-version';
 import { qcIdPattern, requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, trustQcSource, trustQcEligible, catalystIncludesScreenshot, type TrustQcRow } from "@/lib/trust-api";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
@@ -7,6 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const key = await requireTrustKey(request);
   if (key instanceof Response) return key;
+  const updateRequired=requireCurrentExtension(request);if(updateRequired)return updateRequired;
   const { id } = await context.params;
   if (!qcIdPattern.test(id)) return trustError(404, "NOT_FOUND", "Approved QC not found.");
   try {

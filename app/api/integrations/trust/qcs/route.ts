@@ -1,4 +1,5 @@
 import { env } from "@/lib/local-env";
+import {requireCurrentExtension} from '@/lib/extension-version';
 import { requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, trustQcSource, trustQcEligible, catalystIncludesScreenshot, type TrustQcRow } from "@/lib/trust-api";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
@@ -7,6 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const key = await requireTrustKey(request);
   if (key instanceof Response) return key;
+  const updateRequired=requireCurrentExtension(request);if(updateRequired)return updateRequired;
   const url = new URL(request.url);
   const uploadStatus = url.searchParams.get("uploadStatus") ?? "uploadable";
   if (!["uploadable", "uploaded", "all"].includes(uploadStatus)) return trustError(400, "INVALID_FILTER", "uploadStatus must be uploadable, uploaded, or all.");
