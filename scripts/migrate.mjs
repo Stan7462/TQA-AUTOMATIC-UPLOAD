@@ -102,6 +102,8 @@ reconcileRuntimeMigration("0018_company_notification_policy.sql", "2026100803000
 reconcileRuntimeMigration("0021_qc_address.sql", "20261009000000_qc_address", "qc_submissions", ["address"]);
 reconcileRuntimeMigration("0022_catalyst_failure_workflow.sql", "20261010000000_catalyst_failure_workflow", "qc_submissions", ["catalyst_failures", "trust_upload_kind", "catalyst_observation_id"], ["idx_qc_submissions_tenant_workflow"]);
 reconcileRuntimeMigration("0023_catalyst_observation_type.sql", "20261027000000_catalyst_observation_type", "qc_submissions", ["catalyst_observation_type"]);
+reconcileRuntimeMigration("0024_super_admin.sql", "20261028000000_super_admin", "super_admin_sessions", ["token_hash", "credential_version", "selected_tenant_id"]);
+reconcileRuntimeMigration("0025_catalyst_screenshot.sql", "20261028010000_catalyst_screenshot", "tenants", ["catalyst_include_screenshot"]);
 runPrisma("migrate", "deploy");
 
 }

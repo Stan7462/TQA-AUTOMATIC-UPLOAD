@@ -67,27 +67,6 @@ function render() {
     details.textContent = `Tech ${qc.techId} · ${qc.photos.length} photos · ${workflow}`;
     const badge = document.createElement("span"); badge.className = `badge ${qc.uploadStatus}`; badge.textContent = qc.uploadStatus === "failed" ? "Retry needed" : qc.uploadStatus === "uploaded" ? "Uploaded" : "Ready";
     meta.append(name, details);
-    if (qc.workflow !== "follow_up") {
-      const recover = document.createElement("button");
-      recover.textContent = "Keep existing photos and resume";
-      recover.disabled = run.status === "running";
-      recover.addEventListener("click",()=>action(async()=>{
-        const jobId = prompt(`Enter the Catalyst job ID for job ${qc.jobNumber} (the number after jobid= in its URL).`);
-        if (!jobId) return;
-        if (!confirm(`Have you checked that this incomplete Catalyst observation contains exactly the ${qc.photos.length} photos from this QC? They will be kept, skipped during upload, and the QC upload will resume now.`)) return;
-        await send("ATTACH_EXISTING_JOB",{qcId:qc.id,jobId:jobId.trim(),photosVerified:true});
-      }));
-      meta.append(recover);
-      const confirmUploaded = document.createElement("button");
-      confirmUploaded.textContent = "Confirm already uploaded";
-      confirmUploaded.disabled = run.status === "running";
-      confirmUploaded.addEventListener("click",()=>action(async()=>{
-        const observationId = prompt(`Enter the completed Catalyst observation ID for job ${qc.jobNumber} (the number after id=, not jobid=, in its completed observation URL).`);
-        if (!observationId) return;
-        await send("CONFIRM_EXISTING_OBSERVATION",{qcId:qc.id,observationId:observationId.trim()});
-      }));
-      meta.append(confirmUploaded);
-    }
     card.append(meta, badge); $("queue").append(card);
   }
   const logs = state.logs || [];

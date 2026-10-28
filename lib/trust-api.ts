@@ -1,3 +1,4 @@
+import { companyAccess } from "@/lib/company-access";
 import { env } from "@/lib/local-env";
 import { getTechSessionFromCookie, hashToken, TECH_COOKIE } from "@/lib/tech-auth";
 
@@ -32,6 +33,12 @@ export function trustError(status: number, code: string, message: string): Respo
   return Response.json({ error: { code, message } }, { status, headers: trustNoStore });
 }
 
+async function catalystAccess(key: TrustKey): Promise<TrustKey | Response> {
+  const access = await companyAccess(key.tenantId);
+  if (access.kind === "demo") return trustError(403, "DEMO_COMPANY", "Demo companies cannot upload to live Catalyst.");
+  if (!access.allowed) return trustError(403, "SUBSCRIPTION_PAUSED", access.message);
+  return key;
+}
 export async function requireTrustKey(request: Request): Promise<TrustKey | Response> {
   const header = request.headers.get("authorization") ?? "";
   const keyMatch = /^Bearer (tqa_trust_[a-f0-9]{64})$/.exec(header);
@@ -41,7 +48,7 @@ export async function requireTrustKey(request: Request): Promise<TrustKey | Resp
     if (sessionMatch) {
       const session = await getTechSessionFromCookie(`${TECH_COOKIE}=${sessionMatch[1]}`, env.DB);
       return session?.isAdmin && !session.mustSetup
-        ? { id: null, label: "Admin extension session", tenantId: session.tenantId }
+        ? await catalystAccess({ id: null, label: "Admin extension session", tenantId: session.tenantId })
         : trustError(401, "UNAUTHORIZED", "Sign in to TQA as an admin.");
     }
     const hash = await hashToken(keyMatch![1]);
@@ -50,14 +57,20 @@ export async function requireTrustKey(request: Request): Promise<TrustKey | Resp
     if (!key.lastUsedAt || key.lastUsedAt < Date.now() - 300_000) {
       await env.DB.prepare("UPDATE trust_api_keys SET last_used_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL").bind(Date.now(), key.tenantId, key.id).run();
     }
-    return { id: key.id, label: key.label, tenantId: key.tenantId };
+    return catalystAccess({ id: key.id, label: key.label, tenantId: key.tenantId });
   } catch (error) {
     console.error("Trust API authentication failed", error);
     return trustError(503, "UNAVAILABLE", "Trust API is temporarily unavailable.");
   }
 }
 
-export function trustQc(request: Request, row: TrustQcRow) {
+export async function catalystIncludesScreenshot(tenantId: string): Promise<boolean> {
+  const company = await env.DB.prepare('SELECT catalyst_include_screenshot AS includeScreenshot FROM tenants WHERE id=?').bind(tenantId).first<{includeScreenshot:number}>();
+  if (!company) throw new Error('Company settings not found');
+  return company.includeScreenshot !== 0;
+}
+
+export function trustQc(request: Request, row: TrustQcRow, includeScreenshot = true) {
   const requestUrl = new URL(request.url);
   const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
   if (forwardedProtocol === "https" || forwardedProtocol === "http") requestUrl.protocol = `${forwardedProtocol}:`;
@@ -65,8 +78,8 @@ export function trustQc(request: Request, row: TrustQcRow) {
   const ids = JSON.parse(row.photoIds) as unknown;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && photoIdPattern.test(id))) throw new Error("Invalid QC photos");
   const photos = [
-    { id: row.screenshotId, kind: "account_screenshot" as const, order: 0 },
-    ...ids.map((id, index) => ({ id: id as string, kind: "live_photo" as const, order: index + 1 })),
+    ...(includeScreenshot ? [{ id: row.screenshotId, kind: "account_screenshot" as const, order: 0 }] : []),
+    ...ids.map((id, index) => ({ id: id as string, kind: "live_photo" as const, order: index + (includeScreenshot ? 1 : 0) })),
   ];
   if (!photoIdPattern.test(row.screenshotId)) throw new Error("Invalid QC screenshot");
   return {

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import CompanyAccessBanner from "@/app/company-access-banner";
 import AdminNav from "@/app/admin-nav";
 
 type AdminPage = "records" | "approvals" | "history" | "settings";
@@ -11,6 +12,7 @@ export default function AdminShell({ active, children }: { active: AdminPage; ch
         <div className="top-title"><small>TQA AUTOMATIC UPLOAD</small><strong>Review workspace</strong></div>
       </header>
       <div className="workspace-nav"><AdminNav active={active}/></div>
+      <CompanyAccessBanner/>
       {children}
     </main>
   </div>;

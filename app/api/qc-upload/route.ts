@@ -1,3 +1,4 @@
+import { companySubmissionError } from "@/lib/company-access";
 import { normalizeAddress } from "@/lib/address-ocr";
 import { env } from "@/lib/local-env";
 import { getTechSessionContext, normalizeTechId, sameOrigin } from "@/lib/tech-auth";
@@ -52,15 +53,14 @@ export async function POST(request: Request) {
   if (redoSourceId && body?.action === "finalize" && body.redoChanged !== true) return Response.json({ error: "Change the job number or at least one picture before resubmitting this QC." }, { status: 409 });
   const session = await getTechSessionContext(request, env.DB);
   if (session?.techId !== techId) return Response.json({ error: "Sign in with this Tech ID and PIN before submitting." }, { status: 401 });
+  const subscriptionError = await companySubmissionError(session.tenantId);
+  if (subscriptionError) return subscriptionError;
   const removal = await env.DB.prepare("SELECT state FROM technician_removals WHERE tenant_id = ? AND tech_id = ?").bind(session.tenantId, techId).first();
   if (removal) return Response.json({ error: "This Tech ID is no longer available. Contact your supervisor." }, { status: 403 });
   const prior = await env.DB.prepare("SELECT tech_id AS techId, job_number AS jobNumber FROM qc_submissions WHERE tenant_id = ? AND id = ?").bind(session.tenantId, submissionId).first<{ techId: string; jobNumber: string }>();
   if (prior) return prior.techId === techId && prior.jobNumber === jobNumber
     ? Response.json({ complete: true }, { headers: { "Cache-Control": "no-store" } })
     : Response.json({ error: "Submission ID already used." }, { status: 409 });
-
-  const subscribed = await env.DB.prepare("SELECT 1 FROM push_accounts WHERE tenant_id = ? AND tech_id = ? AND enabled = 1").bind(session.tenantId, techId).first();
-  if (!subscribed) return Response.json({ error: "Enable push notifications on your phone before submitting a QC." }, { status: 403 });
 
   if (body?.action === "photo") {
     if (!Number.isInteger(body.slot) || (body.slot as number) < 0 || (body.slot as number) > 10 || typeof body.image !== "string" || body.image.length > 350_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(body.image)) {

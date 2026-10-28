@@ -157,6 +157,13 @@ model PushCompanyPreferences {
 }
 
 model Tenant {
+  catalystIncludeScreenshot Int @default(1) @map("catalyst_include_screenshot")
+  companyKind String @default("customer") @map("company_kind")
+  subscriptionStatus String @default("active") @map("subscription_status")
+  planName String @default("Standard") @map("plan_name")
+  renewalAt BigInt? @map("renewal_at")
+  contactEmail String? @map("contact_email")
+  subscriptionNotes String? @map("subscription_notes")
   id            String @id
   name          String
   active        Int    @default(1)
@@ -220,4 +227,30 @@ model LocalMigration {
   name String @id
 
   @@map("local_migrations")
+}
+
+model SuperAdminSession {
+ tokenHash String @id @map("token_hash")
+ credentialVersion String @map("credential_version")
+ expiresAt BigInt @map("expires_at")
+ createdAt BigInt @map("created_at")
+ selectedTenantId String? @map("selected_tenant_id")
+ contextExpiresAt BigInt? @map("context_expires_at")
+ @@map("super_admin_sessions")
+}
+model SuperAdminLoginLimit {
+ bucket String @id
+ failures Int @default(0)
+ windowStart BigInt @map("window_start")
+ @@map("super_admin_login_limits")
+}
+model SuperAdminAudit {
+ id String @id
+ actor String
+ action String
+ tenantId String? @map("tenant_id")
+ details String
+ createdAt BigInt @map("created_at")
+ @@index([createdAt], map: "idx_super_admin_audit_created")
+ @@map("super_admin_audit")
 }

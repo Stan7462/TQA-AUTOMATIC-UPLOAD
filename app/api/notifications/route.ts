@@ -8,6 +8,7 @@ const headers = { "Cache-Control": "private, no-store" };
 export async function GET(request: Request) {
   const config = pushConfig();
   const session = await getTechSessionContext(request, env.DB);
+  if (session?.isSuperAdmin) return Response.json({ appId: config.appId, account: null, configured: false, sendingEnabled: false }, { headers });
   if (!session || session.mustSetup) return Response.json({ appId: config.appId, account: null }, { headers });
   await env.DB.prepare("INSERT OR IGNORE INTO push_accounts (tenant_id, tech_id, external_id) VALUES (?, ?, ?)").bind(session.tenantId, session.techId, crypto.randomUUID()).run();
   const account = await env.DB.prepare("SELECT p.external_id AS externalId, p.enabled,p.supervisor_summary AS supervisorSummary,p.escalation, COALESCE(c.rejected,1) AS rejected, COALESCE(c.deadline,1) AS deadline, COALESCE(c.overdue,1) AS overdue, COALESCE(c.monthly,1) AS monthly FROM push_accounts p LEFT JOIN push_company_preferences c ON c.tenant_id=p.tenant_id WHERE p.tenant_id = ? AND p.tech_id = ?").bind(session.tenantId, session.techId).first();
@@ -18,6 +19,7 @@ export async function PUT(request: Request) {
   if (!sameOrigin(request)) return Response.json({ error: "Invalid origin." }, { status: 403 });
   const session = await getTechSessionContext(request, env.DB);
   if (!session || session.mustSetup) return Response.json({ error: "Sign in first." }, { status: 401 });
+  if (session.isSuperAdmin) return Response.json({error:"Manage notification subscriptions using the company’s own supervisor account."},{status:403});
   const body = await request.json().catch(() => null) as { enabled?: unknown; rejected?: unknown; deadline?: unknown; overdue?: unknown; monthly?: unknown; supervisorSummary?: unknown; escalation?: unknown } | null;
   if (!body || typeof body.enabled !== "boolean") return Response.json({ error: "Invalid notification preferences." }, { status: 400 });
   if (!session.isAdmin && ["rejected", "deadline", "overdue", "monthly", "supervisorSummary", "escalation"].some(key => key in body)) return Response.json({ error: "Only supervisors can change alert types." }, { status: 403 });

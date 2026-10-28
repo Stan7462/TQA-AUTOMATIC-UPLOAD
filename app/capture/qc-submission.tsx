@@ -1,5 +1,6 @@
 "use client";
 
+import CompanyAccessBanner from "@/app/company-access-banner";
 import { useEffect, useRef, useState } from "react";
 import { Camera, Check, ChevronRight, FileText, Flashlight, FlashlightOff, ImagePlus, LogOut, MapPin, RotateCcw, Send, Trash2, X } from "lucide-react";
 import { screenshotAddress } from "@/lib/address-ocr";
@@ -793,9 +794,9 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     finally { setBusy(false); setUploadProgress(null); }
   }
 
-  if (!draftReady) return <main className="capture-shell qc-dark-shell"><div className="camera-app qc-form"><p role="status">Checking for your unfinished QC…</p></div></main>;
+  if (!draftReady) return <main className="capture-shell qc-dark-shell"><CompanyAccessBanner/><div className="camera-app qc-form"><p role="status">Checking for your unfinished QC…</p></div></main>;
 
-  return <main className={`capture-shell qc-dark-shell qc-reference${cameraOn ? " qc-camera-active" : ""}`}>
+  return <main className={`capture-shell qc-dark-shell qc-reference${cameraOn ? " qc-camera-active" : ""}`}><CompanyAccessBanner/>
     <div className="camera-app qc-form">
       <header className="camera-header qc-reference-header"><div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>New QC submission</h1></div><div className="qc-header-actions"><a className="button light qc-logout qc-notification-settings" href="/notifications">Notifications</a><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => { setResetError(""); setResetConfirmation(true); }}><RotateCcw size={17}/>Start new QC</button><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => void logOut()}><LogOut size={17}/>{logoutBusy ? "Logging out…" : "Log out"}</button></div><p>Tech {techId} · Photos → screenshot → job number.</p></header>
       <dialog ref={resetDialog} className="qc-reset-dialog" aria-labelledby="qc-reset-title" aria-describedby="qc-reset-description" onCancel={(event) => { event.preventDefault(); if (!clearingDraft.current) setResetConfirmation(false); }}>

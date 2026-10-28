@@ -24,7 +24,7 @@ The extension saves the matched Catalyst job ID and confirmed photo identifiers 
 
 **Retry after cleanup** resets the saved photo progress but retains the job ID. Use it only after removing the partial photos and verifying the observation is still incomplete. If photos remain, the next run pauses instead of duplicating them.
 
-For an observation interrupted by an older extension, choose **Keep existing photos and resume** on its queue card. Enter the number after `jobid=` in the Catalyst URL. Confirm only after inspecting that it is incomplete and contains exactly this QC's photos. The extension checks job number, technician, and photo count before attaching the existing photos. It cannot reconstruct the identities of historical photos without your verification. After verification, upload resumes automatically with those photos retained. Failed QCs always use **After the Fact** and **Customer Contact: No**, including recovered observations. The reason dropdown uses a keyboard fallback if Catalyst ignores the mouse event and verifies the selected value before proceeding.
+The legacy per-QC manual recovery buttons were removed in v0.7.19. Use the run-level review controls for interrupted uploads with saved progress. Failed QCs always use **After the Fact** and **Customer Contact: No**, including recovered observations. The reason dropdown uses a keyboard fallback if Catalyst ignores the mouse event and verifies the selected value before proceeding.
 
 Recovery checkpoints belong to the local Chrome extension installation. Uninstalling it or clearing its storage removes them. Correction follow-ups still use the existing manual review protections after interruption.
 
@@ -32,7 +32,7 @@ Version 0.7.6 recognizes both single-value fields and multi-select reason tags. 
 
 Version 0.7.7 waits until both Observer/Technician search controls have loaded, matches completed rows by exact job number and Tech ID, and saves confirmed completion separately from success reporting. If reporting fails after Catalyst saves, resuming retries only observation lookup/reporting, without uploading photos or completing a second observation. For earlier saved-but-unreported QCs, use **Confirm already uploaded** after reviewing the completed Catalyst record.
 
-Version 0.7.8 adds **Confirm already uploaded** to each observation queue card, including after reconnecting. Enter the completed observation ID from `id=` (not `jobid=`). The extension verifies the exact job and technician, completed/read-only state, Pass/Fail outcome, and photo count before reporting success. It does not upload photos or complete the QC again.
+Version 0.7.8 introduced **Confirm already uploaded** on each observation queue card. Those per-QC buttons were removed in v0.7.19; confirmation remains available in the run-level needs-review controls.
 
 ### v0.7.9
 

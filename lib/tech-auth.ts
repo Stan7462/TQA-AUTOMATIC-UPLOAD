@@ -1,3 +1,4 @@
+import { superCompanyContext } from "@/lib/super-auth";
 import { requestHostname } from "@/lib/tenant";
 
 export const TECH_COOKIE = "tqa_tech_session";
@@ -8,7 +9,7 @@ export const TECH_SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 30;
 // workerd rejects PBKDF2 calls above 100,000 iterations.
 const PIN_HASH_ITERATIONS = 100_000;
 
-export type AuthenticatedTech = { tenantId: string; tenantName: string; techId: string; isAdmin: boolean; mustSetup: boolean; expiresAt: number };
+export type AuthenticatedTech = { tenantId: string; tenantName: string; techId: string; isAdmin: boolean; mustSetup: boolean; expiresAt: number; isSuperAdmin?: boolean; superLogin?: string };
 
 function hex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -82,6 +83,8 @@ export async function getTechSessionContext(request: Request, db: typeof import(
 }
 
 export async function getTechSessionFromCookie(cookieHeader: string | null, db: typeof import("./local-env").DB, tenantId?: string): Promise<AuthenticatedTech | null> {
+  const superContext = await superCompanyContext(cookieHeader, db);
+  if (superContext && (!tenantId || tenantId === superContext.tenantId)) return superContext;
   const entry = cookieHeader?.split(";").map((part) => part.trim()).find((part) => part.startsWith(TECH_COOKIE + "="));
   const token = entry ? entry.slice(TECH_COOKIE.length + 1) : null;
   if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;

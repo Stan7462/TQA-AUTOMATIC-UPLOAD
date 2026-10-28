@@ -7,6 +7,7 @@ import NotificationSettings from "@/app/notifications/settings";
 import CompanySettings from "@/app/settings/company-settings";
 import TechnicianWatch from "@/app/settings/technician-watch";
 import TechnicianGoal from "@/app/settings/technician-goal";
+import CatalystUploadSettings from "@/app/settings/catalyst-upload-settings";
 import MonthlyGoalSettings from "@/app/settings/monthly-goal-settings";
 
 type Technician = { techId: string; qcCount: number; monthlyGoal: number | null; deviceStatus: string | null; deviceCheckedAt: number | null; notificationsEnabled: number | null; hasPin: number; isAdmin: boolean; pin: string | null; state: "active" | "disabled" };
@@ -21,7 +22,7 @@ function PushStatusBadge({ tech }: { tech: Technician }) {
   return <span className={`tech-push-badge ${status.color}`} aria-label={`Tech ${tech.techId} push notifications: ${status.label}. ${checked}`} title={`Push notifications · ${checked}`}><span aria-hidden="true" className="tech-push-dot"/>{status.label}</span>;
 }
 
-export default function TechnicianSettings({ canManageCompanies = false }: { canManageCompanies?: boolean }) {
+export default function TechnicianSettings({ canManageCompanies = false, extensionVersion }: { canManageCompanies?: boolean; extensionVersion: string }) {
   const [fixedIds,setFixedIds] = useState<string[]>([]);
   const [watchedIds, setWatchedIds] = useState<string[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
@@ -34,14 +35,14 @@ export default function TechnicianSettings({ canManageCompanies = false }: { can
   const [disableBusy, setDisableBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [section, setSection] = useState<"technicians" | "notifications" | "monthly-goal" | "companies">("technicians");
+  const [section, setSection] = useState<"technicians" | "notifications" | "monthly-goal" | "catalyst" | "companies">("technicians");
   const [search, setSearch] = useState("");
   useEffect(() => {
-    const sync = () => setSection(location.hash === "#notifications-settings" ? "notifications" : location.hash === "#monthly-goal-settings" ? "monthly-goal" : location.hash === "#companies-settings" && canManageCompanies ? "companies" : "technicians");
+    const sync = () => setSection(location.hash === "#notifications-settings" ? "notifications" : location.hash === "#catalyst-settings" ? "catalyst" : location.hash === "#monthly-goal-settings" ? "monthly-goal" : location.hash === "#companies-settings" && canManageCompanies ? "companies" : "technicians");
     sync(); window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, [canManageCompanies]);
-  function selectSection(next: "technicians" | "notifications" | "monthly-goal" | "companies") {
+  function selectSection(next: "technicians" | "notifications" | "monthly-goal" | "catalyst" | "companies") {
     history.replaceState(null, "", `#${next}-settings`);
     setSection(next);
   }
@@ -89,7 +90,7 @@ export default function TechnicianSettings({ canManageCompanies = false }: { can
 
   return <AdminShell active="settings">
     <section className="intro"><div><h1>Settings</h1><p>{canManageCompanies ? "Manage technicians, notifications, and companies." : "Manage technicians and notifications."}</p></div></section>
-    <nav className="settings-tabs" aria-label="Settings sections"><button type="button" aria-pressed={section === "notifications"} onClick={() => selectSection("notifications")}>Notifications</button><button type="button" aria-pressed={section === "technicians"} onClick={() => selectSection("technicians")}>Technicians</button><button type="button" aria-pressed={section === "monthly-goal"} onClick={() => selectSection("monthly-goal")}>Monthly goal</button>{canManageCompanies && <button type="button" aria-pressed={section === "companies"} onClick={() => selectSection("companies")}><Building2 size={16}/>Companies</button>}</nav>
+    <nav className="settings-tabs" aria-label="Settings sections"><button type="button" aria-pressed={section === "notifications"} onClick={() => selectSection("notifications")}>Notifications</button><button type="button" aria-pressed={section === "technicians"} onClick={() => selectSection("technicians")}>Technicians</button><button type="button" aria-pressed={section === "monthly-goal"} onClick={() => selectSection("monthly-goal")}>Monthly goal</button><button type="button" aria-pressed={section === "catalyst"} onClick={() => selectSection("catalyst")}>Catalyst uploads</button>{canManageCompanies && <button type="button" aria-pressed={section === "companies"} onClick={() => selectSection("companies")}><Building2 size={16}/>Companies</button>}</nav>
     <div className="admin-page-content settings-page">
     <div className="settings-content">
     <div hidden={section !== "technicians"}>
@@ -98,6 +99,7 @@ export default function TechnicianSettings({ canManageCompanies = false }: { can
       </div>
       <div hidden={section !== "monthly-goal"}><MonthlyGoalSettings /></div>
       {section === "notifications" && <NotificationSettings supervisor/>}
+      {section === "catalyst" && <CatalystUploadSettings extensionVersion={extensionVersion}/>}
       {canManageCompanies && <div hidden={section !== "companies"}><CompanySettings/></div>}
       {notice && <p className="qc-notice" role="status">{notice}</p>}{error && <p className="form-error" role="alert">{error}</p>}
     </div>

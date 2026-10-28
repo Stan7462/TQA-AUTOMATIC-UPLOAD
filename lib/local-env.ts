@@ -33,6 +33,7 @@ if (sqlite) {
     "0011_global_login_id_unique.sql",
     "0012_company_scoped_technicians.sql",
     "0013_qc_attempts.sql",
+    "0014_rejection_deadline.sql",
     "0015_tenant_monthly_qc_goal.sql",
     "0016_technician_monthly_qc_goal.sql",
     "0017_push_notifications.sql",
@@ -42,13 +43,15 @@ if (sqlite) {
     "0021_qc_address.sql",
     "0022_catalyst_failure_workflow.sql",
     "0023_catalyst_observation_type.sql",
+    "0024_super_admin.sql",
+    "0025_catalyst_screenshot.sql",
   ]) {
     if (sqlite.prepare("SELECT 1 FROM local_migrations WHERE name = ?").get(name)) continue;
     const sql = readFileSync(join(process.cwd(), "drizzle", name), "utf8").replaceAll("--> statement-breakpoint", "");
     sqlite.exec("BEGIN");
     try {
       sqlite.exec(sql);
-      sqlite.prepare("INSERT INTO local_migrations (name) VALUES (?)").run(name);
+      sqlite.prepare("INSERT OR IGNORE INTO local_migrations (name) VALUES (?)").run(name);
       sqlite.exec("COMMIT");
     } catch (error) {
       sqlite.exec("ROLLBACK");

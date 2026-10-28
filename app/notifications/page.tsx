@@ -2,12 +2,14 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { env } from "@/lib/local-env";
 import { getTechSessionFromCookie, TECH_COOKIE } from "@/lib/tech-auth";
+import { SUPER_COOKIE } from "@/lib/super-auth";
 import NotificationSettings from "./settings";
 export const dynamic = "force-dynamic";
 
 export default async function NotificationsPage() {
   const jar = await cookies();
-  const session = await getTechSessionFromCookie(`${TECH_COOKIE}=${jar.get(TECH_COOKIE)?.value || ""}`, env.DB);
+  const header = [TECH_COOKIE,SUPER_COOKIE].map(name=>`${name}=${jar.get(name)?.value || ""}`).join('; ');
+  const session = await getTechSessionFromCookie(header, env.DB);
   if (!session) redirect("/login?return_to=%2Fnotifications");
   if (session.mustSetup) redirect("/admin-setup");
   if (session.isAdmin) redirect("/settings#notifications-settings");

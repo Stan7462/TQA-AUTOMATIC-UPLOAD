@@ -1,5 +1,5 @@
 import { env } from "@/lib/local-env";
-import { qcIdPattern, requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, trustQcSource, trustQcEligible, type TrustQcRow } from "@/lib/trust-api";
+import { qcIdPattern, requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, trustQcSource, trustQcEligible, catalystIncludesScreenshot, type TrustQcRow } from "@/lib/trust-api";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +24,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (body.status === "failed" && (typeof errorMessage !== "string" || !errorMessage.trim() || errorMessage.trim().length > 500)) return trustError(400, "INVALID_ERROR", "errorMessage must be 1 to 500 characters.");
   if (body.status === "uploaded" && errorMessage !== undefined || body.status === "failed" && reference !== undefined) return trustError(400, "INVALID_BODY", "Unexpected field for upload status.");
   try {
+    const includeScreenshot = await catalystIncludesScreenshot(key.tenantId);
     const range = fiscalMonthBounds(fiscalMonthKey());
     const current = await env.DB.prepare(`SELECT ${trustQcSelect} FROM ${trustQcSource} WHERE tenant_id = ? AND id = ?`).bind(key.tenantId, id).first<TrustQcRow>();
     if (!current) return trustError(404, "NOT_FOUND", "QC not found.");
@@ -48,9 +49,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         }));
         await env.DB.batch(["qc_submissions", "qc_submission_attempts"].map(table => env.DB.prepare(`UPDATE ${table} SET catalyst_observation_id = ? WHERE tenant_id = ? AND root_submission_id = ? AND catalyst_observation_id IS NULL`).bind(observationId, key.tenantId, current.rootSubmissionId)));
         const linked = await env.DB.prepare(`SELECT ${trustQcSelect} FROM ${trustQcSource} WHERE tenant_id = ? AND id = ?`).bind(key.tenantId, id).first<TrustQcRow>();
-        if (linked) return Response.json({ qc: trustQc(request, linked), alreadyUploaded: true }, { headers: trustNoStore });
+        if (linked) return Response.json({ qc: trustQc(request, linked, includeScreenshot), alreadyUploaded: true }, { headers: trustNoStore });
       }
-      return Response.json({ qc: trustQc(request, current), alreadyUploaded: true }, { headers: trustNoStore });
+      return Response.json({ qc: trustQc(request, current, includeScreenshot), alreadyUploaded: true }, { headers: trustNoStore });
     }
     if (firstFail && body.status === "uploaded" && reference !== undefined && (typeof reference !== "string" || !/^\d+$/.test(reference.trim()))) return trustError(400, "INVALID_REFERENCE", "A Catalyst observation ID must contain digits only.");
     const now = Date.now();
@@ -69,7 +70,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (!updated) return trustError(409, "QC_NOT_READY", "This QC is not ready for Catalyst.");
     const changed = results.slice(0, 2).some(result => result.meta.changes);
     if (!changed && updated.trustUploadStatus === "uploaded" && body.status === "failed") return trustError(409, "ALREADY_UPLOADED", "QC is already marked uploaded.");
-    return Response.json({ qc: trustQc(request, updated), alreadyUploaded: !changed && updated.trustUploadStatus === "uploaded" }, { headers: trustNoStore });
+    return Response.json({ qc: trustQc(request, updated, includeScreenshot), alreadyUploaded: !changed && updated.trustUploadStatus === "uploaded" }, { headers: trustNoStore });
   } catch (error) {
     console.error("Trust upload status update failed", error);
     return trustError(503, "UNAVAILABLE", "Could not update upload status.");

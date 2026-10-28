@@ -1,5 +1,5 @@
 import { env } from "@/lib/local-env";
-import { requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, trustQcSource, trustQcEligible, type TrustQcRow } from "@/lib/trust-api";
+import { requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, trustQcSource, trustQcEligible, catalystIncludesScreenshot, type TrustQcRow } from "@/lib/trust-api";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +17,7 @@ export async function GET(request: Request) {
   const match = cursor?.match(/^(\d{13}):([0-9a-f-]{36})$/);
   if (cursor && !match) return trustError(400, "INVALID_CURSOR", "Invalid cursor.");
   try {
+    const includeScreenshot = await catalystIncludesScreenshot(key.tenantId);
     const range = fiscalMonthBounds(fiscalMonthKey());
     const conditions = ["tenant_id = ?", trustQcEligible, "submitted_at >= ?", "submitted_at < ?"];
     const values: Array<string | number> = [key.tenantId, range.start, range.end];
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
     const eligible = trustQcEligible;
     const countWhere = uploadStatus === "uploadable" ? `${eligible} AND trust_upload_status IN ('ready', 'failed')` : uploadStatus === "uploaded" ? `${eligible} AND trust_upload_status = 'uploaded'` : eligible;
     const count = await env.DB.prepare(`SELECT COUNT(*) AS total FROM ${trustQcSource} WHERE tenant_id = ? AND ${countWhere} AND submitted_at >= ? AND submitted_at < ?`).bind(key.tenantId, range.start, range.end).first<{ total: number }>();
-    return Response.json({ qcs: page.map((row) => trustQc(request, row)), nextCursor: rows.results.length > limit && last ? `${String(last.reviewedAt ?? last.submittedAt).padStart(13, "0")}:${last.id}` : null, total: count?.total ?? 0 }, { headers: trustNoStore });
+    return Response.json({ qcs: page.map((row) => trustQc(request, row, includeScreenshot)), nextCursor: rows.results.length > limit && last ? `${String(last.reviewedAt ?? last.submittedAt).padStart(13, "0")}:${last.id}` : null, total: count?.total ?? 0 }, { headers: trustNoStore });
   } catch (error) {
     console.error("Trust QC list failed", error);
     return trustError(503, "UNAVAILABLE", "Could not load Catalyst QCs.");

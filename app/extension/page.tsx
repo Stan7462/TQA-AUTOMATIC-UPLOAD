@@ -1,3 +1,6 @@
+import {getChatGPTUser} from "@/app/chatgpt-auth";
+import {isOwner} from "@/app/access";
+import manifest from "@/chrome-extension/manifest.json";
 import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +10,8 @@ export const metadata: Metadata = {
   description: "Install and connect the TQA Catalyst Uploader Chrome extension.",
 };
 
-export default function ExtensionInstallPage() {
+export default async function ExtensionInstallPage() {
+  const signedIn=isOwner(await getChatGPTUser());
   const storeUrl = process.env.TQA_EXTENSION_STORE_URL?.trim();
 
   return <main className="management-page login-dark">
@@ -22,7 +26,9 @@ export default function ExtensionInstallPage() {
         <div role="listitem"><strong>Install the extension.</strong><span>Use Chrome on the computer that runs Catalyst.</span></div>
         <div role="listitem"><strong>Connect your company.</strong><span>Open the extension and enter the same permanent Admin ID and password.</span></div>
       </div>
-      {storeUrl ? <a className="button dark" href={storeUrl} target="_blank" rel="noreferrer">Install from Chrome Web Store</a> : <p className="qc-notice">The Chrome Web Store installation link is being prepared. Contact the TQA owner before installing the extension.</p>}
+      {storeUrl ? <a className="button dark" href={storeUrl} target="_blank" rel="noreferrer">Install from Chrome Web Store</a> : <p>Install the downloaded extension using Chrome Developer mode.</p>}
+      {signedIn ? <a className="button dark" href="/api/extension/download" download>Download latest extension · v{manifest.version}</a> : <a className="button dark" href="/login?return_to=%2Fextension">Sign in to download the extension</a>}
+      <p>Unzip the file. Open <b>chrome://extensions</b>, enable Developer mode, click <b>Load unpacked</b>, and select the extracted folder.</p>
       <p className="extension-install-note">The extension keeps only a short-lived company session. It does not save your admin password.</p>
     </section>
   </main>;

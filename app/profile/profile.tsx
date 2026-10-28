@@ -1,4 +1,5 @@
 "use client";
+import CompanyAccessBanner from "@/app/company-access-banner";
 import FailedQcUploadBadge from "@/app/failed-qc-upload-badge";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, LockKeyhole, RotateCcw } from "lucide-react";
@@ -69,7 +70,7 @@ export default function Profile(){
  useEffect(()=>{const controller=new AbortController();void load(controller.signal);return ()=>controller.abort();},[load]);
  useAutoRefresh(load,signedIn);
  async function login(event:React.FormEvent){event.preventDefault();setBusy(true);setError('');try{const response=await fetch('/api/profile/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({techId,pin})});const result=await response.json() as {error?:string};if(!response.ok)throw Error(result.error||'Could not sign in.');setPin('');await load();}catch(cause){setError(cause instanceof Error?cause.message:'Could not sign in.');}finally{setBusy(false);}}
- return <main className="management-page profile-page profile-dark"><div className="management-head"><a href="/capture" className="back-link"><ArrowLeft size={18}/>New QC submission</a><h1>{titles[view]}</h1><p>Track your QCs. Tap a row for details or a picture to enlarge it.</p></div>
+ return <main className="management-page profile-page profile-dark"><CompanyAccessBanner/><div className="management-head"><a href="/capture" className="back-link"><ArrowLeft size={18}/>New QC submission</a><h1>{titles[view]}</h1><p>Track your QCs. Tap a row for details or a picture to enlarge it.</p></div>
  <dialog ref={redoDialog} className="qc-reset-dialog" aria-labelledby="redo-title" aria-describedby="redo-description" onCancel={event=>{event.preventDefault();if(!redoBusy)setRedoTarget(null);}}>
  <h2 id="redo-title">Redo job {redoTarget?.jobNumber}?</h2>
  <p id="redo-description">This replaces your unfinished draft with this job’s existing photos and job number. You can remove or replace pictures before submitting.</p>

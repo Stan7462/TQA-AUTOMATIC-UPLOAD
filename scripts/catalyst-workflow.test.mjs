@@ -26,9 +26,9 @@ async function handler(file,name){
   b.onLoad({filter:/.*/,namespace:'fixture'},args=>{
    if(args.path in mocks)return{contents:mocks[args.path],loader:'ts'};
    let source=readFileSync(join(root,'lib/trust-api.ts'),'utf8').replace(/^import .*;\n/gm,'');
-   const start=source.indexOf('export async function requireTrustKey'); const end=source.indexOf('export function trustQc',start);
+   const start=source.indexOf('export async function requireTrustKey'); const end=source.indexOf('export async function catalystIncludesScreenshot',start);
    source=source.slice(0,start)+'export async function requireTrustKey(){return {id:null,label:"test",tenantId:globalThis.workflowTest.tenant};}\n'+source.slice(end);
-   return{contents:source,loader:'ts'};
+   return{contents:'import {env} from "@/lib/local-env";\n'+source,loader:'ts'};
   });
  }}]});
  return import(output);
@@ -55,6 +55,8 @@ function fixture(){
  const columns=`tenant_id TEXT NOT NULL,root_submission_id TEXT,attempt_number INTEGER DEFAULT 1,tech_id TEXT,job_number TEXT,address TEXT,screenshot_id TEXT,photo_ids TEXT,status TEXT,submitted_at INTEGER,reviewed_at INTEGER,review_note TEXT,trust_upload_status TEXT DEFAULT 'ready',trust_uploaded_at INTEGER,trust_external_reference TEXT,trust_upload_error TEXT,trust_upload_attempts INTEGER DEFAULT 0,trust_last_attempt_at INTEGER,trust_uploaded_by_key_id TEXT,location_status TEXT,location_latitude REAL,location_longitude REAL,location_accuracy REAL,location_captured_at INTEGER,catalyst_failures TEXT,trust_upload_kind TEXT DEFAULT 'observation',catalyst_observation_id TEXT,catalyst_observation_type TEXT`;
  db.exec(`CREATE TABLE qc_submissions(id TEXT PRIMARY KEY,${columns},correction_pending INTEGER DEFAULT 0,correction_deadline_at INTEGER);
  CREATE TABLE qc_submission_attempts(submission_id TEXT UNIQUE,${columns},UNIQUE(tenant_id,root_submission_id,attempt_number));
+ CREATE TABLE tenants(id TEXT PRIMARY KEY,name TEXT,active INTEGER,company_kind TEXT,subscription_status TEXT,catalyst_include_screenshot INTEGER DEFAULT 1);
+ INSERT INTO tenants VALUES('a','Demo',1,'customer','active',1),('b','Other',1,'customer','active',1);
  CREATE TABLE technician_removals(tenant_id TEXT,tech_id TEXT,state TEXT);
  CREATE TABLE push_accounts(tenant_id TEXT,tech_id TEXT,enabled INTEGER);
  CREATE TABLE qc_upload_photos(tenant_id TEXT,submission_id TEXT,tech_id TEXT,slot INTEGER,image BLOB,created_at INTEGER,PRIMARY KEY(tenant_id,submission_id,tech_id,slot));
@@ -81,6 +83,27 @@ async function uploaded(id,reference='12345'){return ok(await routes.upload.PATC
 async function uploadedFromToast(id){return ok(await routes.upload.PATCH(request({status:'uploaded'},'PATCH'),context(id)));}
 async function rejectedFolder(){return (await ok(await routes.profile.GET(new Request('http://localhost/profile?view=rejected')))).submissions;}
 
+test('Catalyst screenshot toggle filters passing queue and detail without changing stored review pictures',async()=>{
+ const db=fixture();try{
+  await approve(first);
+  assert.equal((await queue())[0].photos.length,3);
+  assert.equal((await queue())[0].photos[0].kind,'account_screenshot');
+  db.prepare('UPDATE tenants SET catalyst_include_screenshot=0').run();
+  const qc=(await queue())[0],detail=(await ok(await routes.detail.GET(new Request('http://localhost/qcs/'+first),context(first)))).qc;
+  assert.equal(qc.photos.length,2);assert(qc.photos.every(p=>p.kind==='live_photo'));assert.deepEqual(qc.photos.map(p=>p.order),[0,1]);assert.deepEqual(qc.photos,detail.photos);
+  const stored=db.prepare('SELECT screenshot_id,photo_ids FROM qc_submissions WHERE id=?').get(first);assert.equal(stored.screenshot_id,picture);assert.equal(JSON.parse(stored.photo_ids).length,2);
+  db.prepare('UPDATE tenants SET catalyst_include_screenshot=1').run();assert.equal((await queue())[0].photos.length,3);
+ }finally{db.close();}
+});
+test('screenshot exclusion also applies to archived first failures and approved correction follow-ups',async()=>{
+ const db=fixture();try{
+  await reject(first);await redo(first,second);await approve(second);
+  db.prepare('UPDATE tenants SET catalyst_include_screenshot=0').run();
+  const fail=(await queue())[0];assert.equal(fail.outcome,'fail');assert.equal(fail.photos.length,2);assert(fail.photos.every(p=>p.kind==='live_photo'));
+  await uploaded(first,'12345');
+  const fix=(await queue())[0];assert.equal(fix.workflow,'follow_up');assert.equal(fix.photos.length,2);assert(fix.photos.every(p=>p.kind==='live_photo'));
+ }finally{db.close();}
+});
 test('approval feedback reaches the technician and remains a normal passing QC after upload',async()=>{
  const db=fixture();try{
   const feedback='Secure the cable more neatly next time.';
@@ -246,7 +269,7 @@ test('PostgreSQL migrations and monthly counters handle confirmed uploads withou
  const {postgresSql}=await import('../lib/database.mjs');
  const pg=new PGlite();
  try{
-  for(const name of ['0001_baseline','0002_notification_summaries','0003_single_push_phone','0004_qc_address','0005_catalyst_failure_workflow','0006_catalyst_observation_type'])await pg.exec(readFileSync(join(root,`postgres/migrations/${name}.sql`),'utf8'));
+  for(const name of ['0001_baseline','0002_notification_summaries','0003_single_push_phone','0004_qc_address','0005_catalyst_failure_workflow','0006_catalyst_observation_type','0007_super_admin','0008_catalyst_screenshot'])await pg.exec(readFileSync(join(root,`postgres/migrations/${name}.sql`),'utf8'));
   const db={prepare(sql){return{bind(...values){return{first:async()=> (await pg.query(postgresSql(sql),values)).rows[0],all:async()=>({results:(await pg.query(postgresSql(sql),values)).rows}),run:async()=>({meta:{changes:(await pg.query(postgresSql(sql),values)).affectedRows}}),sql,values};}};},async batch(statements){await pg.exec('BEGIN');try{const r=[];for(const statement of statements)r.push(await statement.run());await pg.exec('COMMIT');return r;}catch(e){await pg.exec('ROLLBACK');throw e;}}};
   globalThis.workflowTest={tenant:'a',env:{DB:db}};
   await pg.query("INSERT INTO tenants(id,name,created_at) VALUES('a','Demo',1)");
