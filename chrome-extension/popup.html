@@ -47,9 +47,9 @@
         </div>
         <div class="delay-control">
           <div class="delay-heading"><label for="ride-along-percentage">Ride Along QCs</label><output id="ride-along-value" for="ride-along-percentage">50%</output></div>
-          <input id="ride-along-percentage" class="control-slider" type="range" min="0" max="100" step="10" value="50" aria-label="Percentage of QCs uploaded as Ride Along">
+          <input id="ride-along-percentage" class="control-slider" type="range" min="0" max="100" step="10" value="50" aria-label="Monthly Ride Along target for each technician">
           <div class="percentage-options" aria-hidden="true"><span>0%</span><span>20%</span><span>40%</span><span>60%</span><span>80%</span><span>100%</span></div>
-          <small class="control-help">Randomly selected for each upload run. Remaining QCs use After the Fact.</small>
+          <small class="control-help">Balances each technician’s confirmed uploads for the fiscal month across all batches. Failed QCs count as After the Fact; passing QCs balance the totals.</small>
         </div>
       </div>
       <div class="actions"><button id="refresh">Refresh queue</button><button id="start" class="primary">Start upload</button><button id="stop">Stop</button><button id="resume-review" hidden>Resume saved progress</button><button id="ack-review" hidden>Retry after cleanup</button><button id="confirm-reviewed" hidden>Confirm already uploaded</button></div>

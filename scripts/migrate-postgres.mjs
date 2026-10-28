@@ -49,6 +49,11 @@ async function upgradeCatalystFailureWorkflow(client) {
   if (!(await client.query("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='qc_submissions' AND column_name='catalyst_failures'")).rows.length) await client.query(readFileSync(new URL('../postgres/migrations/0005_catalyst_failure_workflow.sql', import.meta.url), 'utf8'));
   await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)', ['0005', Date.now(), '{}']);
 }
+async function upgradeObservationType(client) {
+  if ((await client.query("SELECT 1 FROM tqa_postgres_migrations WHERE version='0006'")).rows.length) return;
+  if (!(await client.query("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='qc_submissions' AND column_name='catalyst_observation_type'")).rows.length) await client.query(readFileSync(new URL('../postgres/migrations/0006_catalyst_observation_type.sql', import.meta.url), 'utf8'));
+  await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)', ['0006', Date.now(), '{}']);
+}
 export async function migratePostgres() {
   const directory=resolve(process.env.TQA_DATA_DIR || '.tqa-data');
   if(!existsSync(join(directory,'secrets.json'))) throw new Error('Existing application encryption secrets are required before database migration.');
@@ -65,6 +70,7 @@ export async function migratePostgres() {
       await upgradeSinglePhone(client);
       await upgradeAddress(client);
       await upgradeCatalystFailureWorkflow(client);
+      await upgradeObservationType(client);
       await client.query('COMMIT');
       console.log('PostgreSQL schema is current. SQLite is no longer used by the app.');
       return;
@@ -85,6 +91,7 @@ export async function migratePostgres() {
     if(source.prepare("PRAGMA table_info(push_accounts)").all().some(c=>c.name==='active_subscription_id')) await client.query(readFileSync(new URL('../postgres/migrations/0003_single_push_phone.sql',import.meta.url),'utf8'));
     if(source.prepare("PRAGMA table_info(qc_submissions)").all().some(c=>c.name==='address')) await client.query(readFileSync(new URL('../postgres/migrations/0004_qc_address.sql',import.meta.url),'utf8'));
     if(source.prepare("PRAGMA table_info(qc_submissions)").all().some(c=>c.name==='catalyst_failures')) await client.query(readFileSync(new URL('../postgres/migrations/0005_catalyst_failure_workflow.sql',import.meta.url),'utf8'));
+    if(source.prepare("PRAGMA table_info(qc_submissions)").all().some(c=>c.name==='catalyst_observation_type')) await client.query(readFileSync(new URL('../postgres/migrations/0006_catalyst_observation_type.sql',import.meta.url),'utf8'));
     const report=await importSqlite(source,client);
     await client.query('CREATE TABLE tqa_postgres_migrations(version TEXT PRIMARY KEY, applied_at BIGINT NOT NULL, verification TEXT NOT NULL)');
     await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)',['0001',Date.now(),JSON.stringify(report)]);
@@ -92,6 +99,7 @@ export async function migratePostgres() {
     await upgradeSinglePhone(client);
     await upgradeAddress(client);
     await upgradeCatalystFailureWorkflow(client);
+    await upgradeObservationType(client);
     await client.query('COMMIT');
     writeFileSync(join(backupDirectory,'verification.json'),JSON.stringify(report,null,2),{mode:0o600});
     console.log('PostgreSQL migration verified (row counts and SHA-256 of every column):',JSON.stringify(Object.fromEntries(Object.entries(report).map(([t,v])=>[t,v.count]))));

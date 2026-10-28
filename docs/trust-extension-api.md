@@ -191,3 +191,9 @@ For timeouts, connection loss, and other 5xx errors, retry with backoff. Do not 
 - The progress bar advances through individual photos and QCs and reports errors without claiming success.
 - After Trust confirms a QC, PATCH returns `uploaded`; reopening the extension no longer lists it.
 - A failed upload remains available for retry; a repeated uploaded PATCH is safe; revoked/invalid keys stop the workflow.
+
+## Monthly observation balance
+
+`GET /api/integrations/trust/observation-totals` uses the same authenticated company scope as the QC endpoints. It returns `{ month, start, end, technicians: [{ techId, rideAlong, afterTheFact, unknown }] }` for the current fiscal month (22nd through 21st), by confirmed upload date. Original failed observations count as After the Fact. Corrected follow-ups are excluded because they update the same observation. Older passing uploads without a recorded type are reported as `unknown`, not inferred.
+
+When reporting a confirmed initial upload with `PATCH /api/integrations/trust/qcs/:id/upload`, include `observationType: "Ride Along"` or `"After the Fact"`. The saved type is returned as `qc.observationType`. Retries are idempotent, and a confirmed type cannot be changed. Failed QCs cannot be reported as Ride Along. Legacy clients may omit the field; a passing observation then remains unknown. The updated extension reads monthly totals before choosing each new passing observation and records its actual selected type only after Catalyst confirms the save.

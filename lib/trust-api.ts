@@ -21,6 +21,7 @@ export type TrustQcRow = {
   catalystFailures: string | null;
   trustUploadKind: "observation" | "follow_up";
   catalystObservationId: string | null;
+  catalystObservationType: "Ride Along" | "After the Fact" | null;
 };
 
 export const trustNoStore = { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" };
@@ -78,6 +79,7 @@ export function trustQc(request: Request, row: TrustQcRow) {
     supervisorComment: row.reviewNote,
     failureReasons: row.catalystFailures ? JSON.parse(row.catalystFailures) : [],
     catalystObservationId: row.catalystObservationId,
+    observationType: row.catalystObservationType,
     uploadStatus: row.trustUploadStatus,
     submittedAt: new Date(row.submittedAt).toISOString(),
     approvedAt: row.reviewedAt ? new Date(row.reviewedAt).toISOString() : null,
@@ -89,8 +91,8 @@ export function trustQc(request: Request, row: TrustQcRow) {
   };
 }
 
-export const trustQcSelect = "id, COALESCE(root_submission_id, id) AS rootSubmissionId, tech_id AS techId, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, status, review_note AS reviewNote, catalyst_failures AS catalystFailures, trust_upload_kind AS trustUploadKind, catalyst_observation_id AS catalystObservationId, submitted_at AS submittedAt, reviewed_at AS reviewedAt, trust_upload_status AS trustUploadStatus, trust_uploaded_at AS trustUploadedAt, trust_external_reference AS trustExternalReference, trust_upload_error AS trustUploadError, trust_upload_attempts AS trustUploadAttempts";
+export const trustQcSelect = "id, COALESCE(root_submission_id, id) AS rootSubmissionId, tech_id AS techId, job_number AS jobNumber, screenshot_id AS screenshotId, photo_ids AS photoIds, status, review_note AS reviewNote, catalyst_failures AS catalystFailures, trust_upload_kind AS trustUploadKind, catalyst_observation_id AS catalystObservationId, catalyst_observation_type AS catalystObservationType, submitted_at AS submittedAt, reviewed_at AS reviewedAt, trust_upload_status AS trustUploadStatus, trust_uploaded_at AS trustUploadedAt, trust_external_reference AS trustExternalReference, trust_upload_error AS trustUploadError, trust_upload_attempts AS trustUploadAttempts";
 
 // The first Fail remains uploadable after the technician replaces the live row.
-export const trustQcSource = `(SELECT id, tenant_id, root_submission_id, attempt_number, tech_id, job_number, screenshot_id, photo_ids, status, review_note, catalyst_failures, trust_upload_kind, catalyst_observation_id, submitted_at, reviewed_at, trust_upload_status, trust_uploaded_at, trust_external_reference, trust_upload_error, trust_upload_attempts, trust_last_attempt_at, trust_uploaded_by_key_id FROM qc_submissions UNION ALL SELECT submission_id AS id, tenant_id, root_submission_id, attempt_number, tech_id, job_number, screenshot_id, photo_ids, status, review_note, catalyst_failures, trust_upload_kind, catalyst_observation_id, submitted_at, reviewed_at, trust_upload_status, trust_uploaded_at, trust_external_reference, trust_upload_error, trust_upload_attempts, trust_last_attempt_at, trust_uploaded_by_key_id FROM qc_submission_attempts WHERE attempt_number = 1 AND status = 'rejected' AND catalyst_failures IS NOT NULL) AS catalyst_qcs`;
+export const trustQcSource = `(SELECT id, tenant_id, root_submission_id, attempt_number, tech_id, job_number, screenshot_id, photo_ids, status, review_note, catalyst_failures, trust_upload_kind, catalyst_observation_id, catalyst_observation_type, submitted_at, reviewed_at, trust_upload_status, trust_uploaded_at, trust_external_reference, trust_upload_error, trust_upload_attempts, trust_last_attempt_at, trust_uploaded_by_key_id FROM qc_submissions UNION ALL SELECT submission_id AS id, tenant_id, root_submission_id, attempt_number, tech_id, job_number, screenshot_id, photo_ids, status, review_note, catalyst_failures, trust_upload_kind, catalyst_observation_id, catalyst_observation_type, submitted_at, reviewed_at, trust_upload_status, trust_uploaded_at, trust_external_reference, trust_upload_error, trust_upload_attempts, trust_last_attempt_at, trust_uploaded_by_key_id FROM qc_submission_attempts WHERE attempt_number = 1 AND status = 'rejected' AND catalyst_failures IS NOT NULL) AS catalyst_qcs`;
 export const trustQcEligible = "((status = 'approved' AND (trust_upload_kind = 'observation' OR catalyst_observation_id IS NOT NULL)) OR (status = 'rejected' AND attempt_number = 1 AND catalyst_failures IS NOT NULL))";

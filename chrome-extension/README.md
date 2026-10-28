@@ -65,3 +65,11 @@ Moves the wait-time and Ride Along percentage sliders into a compact **Settings*
 ### v0.7.16
 
 Collapses the Activity log into a compact row by default. The log count and dropdown arrow remain visible; opening the row reveals Copy log, Clear log, and the full timestamped history.
+
+### v0.7.18
+
+The Ride Along slider is a per-technician **fiscal-month target (22nd–21st)**, not a per-batch allocation. Before starting each new passing observation, the extension reads the company's confirmed monthly upload totals from TQA and chooses the type that gets that technician closest to the target. Original failed observations always use After the Fact and count in those totals. Corrected follow-ups update the original observation and do not count as another observation. Only confirmed uploads advance the totals; saved checkpoints retain their selected type through retries. The app stores the confirmed type so new batches and other connected supervisors use the same history.
+
+Passing uploads made before type tracking was available have an unknown type. The log identifies these; their actual types need to be reconciled from Catalyst to include them in the balance. Types are never guessed. Odd totals or more failures than the selected target allows can prevent an exact split.
+
+Deploy the app's observation-type migration and API before using this extension version.

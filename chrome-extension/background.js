@@ -122,9 +122,9 @@ async function detail(id) {
   return (await (await api(`/api/integrations/trust/qcs/${encodeURIComponent(id)}`)).json()).qc;
 }
 
-async function report(id, status, value) {
+async function report(id, status, value, observationType) {
   const body = status === "uploaded"
-    ? { status, externalReference: value }
+    ? { status, externalReference: value, observationType }
     : { status, errorMessage: value.slice(0, 500) };
   return (await (await api(`/api/integrations/trust/qcs/${encodeURIComponent(id)}/upload`, {
     method: "PATCH", body: JSON.stringify(body)
@@ -252,6 +252,13 @@ async function photoBase64(url) {
   return btoa(encoded);
 }
 
+async function monthlyObservationType(qc) {
+  const totals = await (await api("/api/integrations/trust/observation-totals")).json();
+  const row = totals.technicians.find(row => row.techId === qc.techId);
+  if (Number(row?.unknown) > 0) await logEvent("info", "monthly split", `Tech ${qc.techId}: ${row.unknown} older passing uploads have no recorded observation type. Monthly balancing uses confirmed known types; older types need reconciliation from Catalyst.`);
+  return observationTypeAssignments([qc],await rideAlongPercentage(),Math.random,totals.technicians)[0].observationType;
+}
+
 async function processOne(qcSummary, tabId, index, total, attempt, observationType) {
   let photoCount = 0;
   let qc = null;
@@ -296,6 +303,8 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
     await setRun({ currentQcId: qc.id, jobNumber: qc.jobNumber, techId: qc.techId, photoTotal: photos.length,
       stage: "finding job", message: `Finding job ${qc.jobNumber} (attempt ${attempt} of ${MAX_QC_ATTEMPTS})` });
     let checkpoint = await recovery(qc.id);
+    observationType = qc.outcome === "fail" || qc.reviewStatus === "rejected" ? "After the Fact" : checkpoint?.observationType || await monthlyObservationType(qc);
+    await setRun({observationType});
     let jobId = checkpoint?.jobId;
     if (!jobId) {
       await navigate(tabId, JOBS_URL);
@@ -326,7 +335,8 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
     }
     photoCount = startPhoto;
     await setRun({photoIndex:startPhoto});
-    const selectedType = qc.outcome === "fail" ? "After the Fact" : checkpoint.observationType;
+    const selectedType = observationType;
+    if (checkpoint.observationType !== selectedType) checkpoint = await recovery(qc.id,{observationType:selectedType});
     await setRun({stage:"observation setup",message:`Selecting ${selectedType} and Customer Contact No for job ${qc.jobNumber}`});
     const prepared = await pageCommand(tabId, "PREPARE", { jobNumber: qc.jobNumber, techId: qc.techId, observationType:selectedType }, 60000);
     await recovery(qc.id,{technicianName:prepared.technicianName});
@@ -395,7 +405,7 @@ async function reportSavedObservation(qc, tabId, checkpoint) {
     }
   }
   if (reference) await recovery(qc.id,{externalReference:reference});
-  const uploaded = await report(qc.id,"uploaded",reference);
+  const uploaded = await report(qc.id,"uploaded",reference,qc.outcome === "fail" ? "After the Fact" : checkpoint.observationType);
   if (uploaded.uploadStatus !== "uploaded") throw new Error("TQA did not confirm uploaded status.");
   await recovery(qc.id,null);
   await setRun({stage:"uploaded",message:`Job ${qc.jobNumber}: Catalyst save confirmed and TQA updated`});
@@ -406,12 +416,14 @@ async function runQueue(preferredQcId = null) {
   let tabId;
   try {
     const queue = await loadQueue();
+    // Record forced After-the-Fact failures before choosing types for passing
+    // QCs, so this batch can also correct the resulting monthly imbalance.
+    queue.sort((a,b)=>Number(b.outcome === "fail")-Number(a.outcome === "fail"));
     if (preferredQcId) queue.sort((a,b)=>Number(b.id===preferredQcId)-Number(a.id===preferredQcId));
     const percentage = await rideAlongPercentage();
-    const pending = observationTypeAssignments(queue, percentage);
-    const rideAlongCount = pending.filter((item) => item.observationType === "Ride Along").length;
-    await setRun({ status: "running", total: queue.length, index: 0, rideAlongPercentage: percentage, rideAlongCount,
-      stage: "starting", message: `${queue.length} Catalyst QCs to process; ${rideAlongCount} observations randomly selected as Ride Along (${percentage}%).` });
+    const pending = queue.map((qc,index)=>({qc,index,attempt:1,observationType:"After the Fact"}));
+    await setRun({ status: "running", total: queue.length, index: 0, rideAlongPercentage: percentage,
+      stage: "starting", message: `${queue.length} Catalyst QCs to process; using a ${percentage}% Ride Along target per technician for the fiscal month. Each QC uses the latest confirmed monthly totals. Failed QCs are After the Fact.` });
     if (!queue.length) {
       await setRun({ status: "done", stage: "done", message: "No QCs are ready to upload.",
         currentQcId: null, jobId: null, jobNumber: null, techId: null, index: 0, total: 0,
@@ -522,7 +534,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!validRideAlongPercentage(message.percentage)) throw new Error("Choose a Ride Along percentage from 0% to 100% in 10% steps.");
         await storageReady;
         await chrome.storage.local.set({ rideAlongPercentage: message.percentage });
-        await logEvent("info", "Settings", `Ride Along target set to ${message.percentage}% for the next upload run.`);
+        await logEvent("info", "Settings", `Ride Along target set to ${message.percentage}% per technician's monthly observations. Failed QCs stay After the Fact.`);
         return { rideAlongPercentage: message.percentage };
       }
       case "CLEAR_LOGS": {

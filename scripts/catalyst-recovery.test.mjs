@@ -58,6 +58,31 @@ test('Ride Along applies to passing observations only',()=>{
  assert.deepEqual(entries.map(e=>e.observationType),['After the Fact','After the Fact','Ride Along','After the Fact']);
 });
 
+test('Ride Along split is calculated separately for each technician, regardless of batch order',()=>{
+ const qcs=Array.from({length:10},(_,i)=>({id:String(i),techId:i%2?'R01T':'7462',outcome:'pass'}));
+ qcs.push({id:'extra1',techId:'R01T',outcome:'pass'},{id:'extra2',techId:'7462',outcome:'pass'});
+ for(const random of [()=>0,()=>0.99]){
+  const assigned=observationTypeAssignments(qcs,50,random);
+  for(const tech of ['R01T','7462']){
+   const group=assigned.filter(e=>e.qc.techId===tech);
+   assert.equal(group.length,6);
+   assert.equal(group.filter(e=>e.observationType==='Ride Along').length,3);
+  }
+  assert.deepEqual(assigned.map(e=>e.qc.id),qcs.map(q=>q.id));
+ }
+});
+
+test('per-technician rounding, endpoints, fails, and follow-ups stay independent',()=>{
+ const qcs=[...Array.from({length:3},()=>({techId:'A',outcome:'pass'})),...Array.from({length:8},()=>({techId:'B',outcome:'pass'})),{techId:'A',outcome:'fail'},{techId:'A',reviewStatus:'rejected'},{techId:'A',workflow:'follow_up',outcome:'pass'}];
+ for(const percentage of [0,30,50,100]){
+  const assigned=observationTypeAssignments(qcs,percentage,()=>0);
+  assert.equal(assigned.slice(0,3).filter(e=>e.observationType==='Ride Along').length,Math.round(3*percentage/100));
+  assert.equal(assigned.slice(3,11).filter(e=>e.observationType==='Ride Along').length,Math.round(8*percentage/100));
+  assert(assigned.slice(11).every(e=>e.observationType==='After the Fact'));
+ }
+ assert.deepEqual(observationTypeAssignments([],50),[]);
+});
+
 test('Catalyst save followed by reporting failure resumes without completing or uploading again',async()=>{
  let checkpoint,run={},uploads=0,completions=0,reports=0,lookups=0;const keys=[];
  const qc={id:'qc',jobNumber:'839450',techId:'R019',workflow:'observation',reviewStatus:'rejected',uploadStatus:'failed',outcome:'fail',photos:photos.map((p,i)=>({...p,order:i,url:p.id})),failureReasons:[],supervisorComment:'fix'};
@@ -139,4 +164,16 @@ test('new correction is verified from persisted Catalyst state before reporting'
  }
  });
  await process(qc,1,0,1,1,'After the Fact');assert.equal(uploads,3);assert.equal(saves,1);assert.equal(reports,1);
+});
+
+test('new batches use each technician monthly history, including failed observations',()=>{
+ const qc={id:'next',techId:'A',outcome:'pass'};
+ const history=[{techId:'A',rideAlong:0,afterTheFact:2},{techId:'B',rideAlong:3,afterTheFact:0}];
+ assert.equal(observationTypeAssignments([qc],50,()=>0.99,history)[0].observationType,'Ride Along');
+ history[0].rideAlong++;
+ assert.equal(observationTypeAssignments([qc],50,()=>0.99,history)[0].observationType,'Ride Along');
+ assert.equal(observationTypeAssignments([{...qc,techId:'B'}],50,()=>0,history)[0].observationType,'After the Fact');
+ assert.equal(observationTypeAssignments([{...qc,outcome:'fail'}],100,()=>0,history)[0].observationType,'After the Fact');
+ // Failed uploads do not advance server history: the next run makes the same choice.
+ assert.equal(observationTypeAssignments([qc],50,()=>0.99,history)[0].observationType,'Ride Along');
 });

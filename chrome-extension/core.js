@@ -13,22 +13,26 @@ export function orderedPhotos(qc) {
   return [...qc.photos].sort((a, b) => a.order - b.order);
 }
 
-export function observationTypeAssignments(qcs, rideAlongPercentage, random = Math.random) {
-  const percentage = Math.max(0, Math.min(100, Number(rideAlongPercentage) || 0));
-  const observationIndexes = qcs.map((qc, index) => qc.workflow === "follow_up" || qc.outcome === "fail" || qc.reviewStatus === "rejected" ? null : index).filter((index) => index !== null);
-  const rideAlongCount = Math.round(observationIndexes.length * percentage / 100);
-  const shuffled = [...observationIndexes];
-  for (let index = shuffled.length - 1; index > 0; index--) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
-  }
-  const rideAlong = new Set(shuffled.slice(0, rideAlongCount));
-  return qcs.map((qc, index) => ({
-    qc,
-    index,
-    attempt: 1,
-    observationType: rideAlong.has(index) ? "Ride Along" : "After the Fact",
-  }));
+export function observationTypeAssignments(qcs, rideAlongPercentage, random = Math.random, monthlyTotals = []) {
+  const fraction = Math.max(0, Math.min(100, Number(rideAlongPercentage) || 0)) / 100;
+  const totals = new Map(monthlyTotals.map(row => [String(row.techId).trim().toUpperCase(), {rideAlong:Number(row.rideAlong)||0, afterTheFact:Number(row.afterTheFact)||0}]));
+  return qcs.map((qc,index) => {
+    const key = String(qc.techId ?? "").trim().toUpperCase();
+    const count = totals.get(key) ?? {rideAlong:0,afterTheFact:0};
+    totals.set(key,count);
+    let observationType = "After the Fact";
+    if (qc.workflow !== "follow_up") {
+      if (qc.outcome !== "fail" && qc.reviewStatus !== "rejected") {
+        const target = (count.rideAlong + count.afterTheFact + 1) * fraction;
+        const rideError = Math.abs(count.rideAlong + 1 - target);
+        const afterError = Math.abs(count.rideAlong - target);
+        if (rideError < afterError || (Math.abs(rideError-afterError) < 1e-9 && random() < 0.5)) observationType = "Ride Along";
+      }
+      if (observationType === "Ride Along") count.rideAlong++;
+      else count.afterTheFact++;
+    }
+    return {qc,index,attempt:1,observationType};
+  });
 }
 
 export function safeError(error) {

@@ -73,6 +73,7 @@ model QcSubmission {
   correctionPending      Int     @default(0) @map("correction_pending")
   correctionDeadlineAt   BigInt? @map("correction_deadline_at")
   catalystFailures       String? @map("catalyst_failures")
+  catalystObservationType String? @map("catalyst_observation_type")
   trustUploadKind        String  @default("observation") @map("trust_upload_kind")
   catalystObservationId  String? @map("catalyst_observation_id")
 
@@ -110,6 +111,7 @@ model QcSubmissionAttempt {
   locationAccuracy       Float?  @map("location_accuracy")
   locationCapturedAt     BigInt? @map("location_captured_at")
   catalystFailures       String? @map("catalyst_failures")
+  catalystObservationType String? @map("catalyst_observation_type")
   trustUploadKind        String  @default("observation") @map("trust_upload_kind")
   catalystObservationId  String? @map("catalyst_observation_id")
 

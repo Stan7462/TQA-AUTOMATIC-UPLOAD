@@ -38,6 +38,7 @@ const routes={
  activity:await handler('app/api/catalyst-activity/route.ts','activity'),
  redo:await handler('app/api/qc-upload/route.ts','redo'),
  review:await handler('app/api/qc-submissions/[id]/route.ts','review'),
+ totals:await handler('app/api/integrations/trust/observation-totals/route.ts','totals'),
  list:await handler('app/api/integrations/trust/qcs/route.ts','list'),
  detail:await handler('app/api/integrations/trust/qcs/[id]/route.ts','detail'),
  upload:await handler('app/api/integrations/trust/qcs/[id]/upload/route.ts','upload'),
@@ -51,7 +52,7 @@ const failure={code:'TQA4',reason:'Unused ports terminated / NAP ports closed'};
 const picture='8000000000000-00000000-0000-4000-8000-000000000001.jpg';
 function fixture(){
  const db=new DatabaseSync(':memory:');
- const columns=`tenant_id TEXT NOT NULL,root_submission_id TEXT,attempt_number INTEGER DEFAULT 1,tech_id TEXT,job_number TEXT,address TEXT,screenshot_id TEXT,photo_ids TEXT,status TEXT,submitted_at INTEGER,reviewed_at INTEGER,review_note TEXT,trust_upload_status TEXT DEFAULT 'ready',trust_uploaded_at INTEGER,trust_external_reference TEXT,trust_upload_error TEXT,trust_upload_attempts INTEGER DEFAULT 0,trust_last_attempt_at INTEGER,trust_uploaded_by_key_id TEXT,location_status TEXT,location_latitude REAL,location_longitude REAL,location_accuracy REAL,location_captured_at INTEGER,catalyst_failures TEXT,trust_upload_kind TEXT DEFAULT 'observation',catalyst_observation_id TEXT`;
+ const columns=`tenant_id TEXT NOT NULL,root_submission_id TEXT,attempt_number INTEGER DEFAULT 1,tech_id TEXT,job_number TEXT,address TEXT,screenshot_id TEXT,photo_ids TEXT,status TEXT,submitted_at INTEGER,reviewed_at INTEGER,review_note TEXT,trust_upload_status TEXT DEFAULT 'ready',trust_uploaded_at INTEGER,trust_external_reference TEXT,trust_upload_error TEXT,trust_upload_attempts INTEGER DEFAULT 0,trust_last_attempt_at INTEGER,trust_uploaded_by_key_id TEXT,location_status TEXT,location_latitude REAL,location_longitude REAL,location_accuracy REAL,location_captured_at INTEGER,catalyst_failures TEXT,trust_upload_kind TEXT DEFAULT 'observation',catalyst_observation_id TEXT,catalyst_observation_type TEXT`;
  db.exec(`CREATE TABLE qc_submissions(id TEXT PRIMARY KEY,${columns},correction_pending INTEGER DEFAULT 0,correction_deadline_at INTEGER);
  CREATE TABLE qc_submission_attempts(submission_id TEXT UNIQUE,${columns},UNIQUE(tenant_id,root_submission_id,attempt_number));
  CREATE TABLE technician_removals(tenant_id TEXT,tech_id TEXT,state TEXT);
@@ -210,4 +211,47 @@ test('review saves and queues multiple exact reasons from the same TQA category'
   const detail=await (await routes.detail.GET(new Request('http://localhost/test'),{params:Promise.resolve({id:first})})).json();
   assert.deepEqual(detail.qc.failureReasons,reasons);
  }finally{db.close();}
+});
+
+async function monthlyTotals(){return (await ok(await routes.totals.GET(new Request('http://localhost/totals')))).technicians;}
+test('monthly upload history records confirmed types once, isolates companies, and reports unknown older types',async()=>{
+ const db=fixture();try{
+  await approve(first);
+  await ok(await routes.upload.PATCH(request({status:'uploaded',observationType:'Ride Along'},'PATCH'),context(first)));
+  await ok(await routes.upload.PATCH(request({status:'uploaded',observationType:'Ride Along'},'PATCH'),context(first)));
+  assert.deepEqual(await monthlyTotals(),[{techId:'TECH',rideAlong:1,afterTheFact:0,unknown:0}]);
+  assert.equal((await routes.upload.PATCH(request({status:'uploaded',observationType:'After the Fact'},'PATCH'),context(first))).status,409);
+  db.prepare("UPDATE qc_submissions SET catalyst_observation_type=NULL WHERE id=?").run(first);
+  assert.equal((await monthlyTotals())[0].unknown,1);
+  globalThis.workflowTest.tenant='other';assert.deepEqual(await monthlyTotals(),[]);
+  globalThis.workflowTest.tenant='a';
+  db.prepare('UPDATE qc_submissions SET trust_uploaded_at=? WHERE id=?').run(Date.now()-40*86400000,first);
+  assert.deepEqual(await monthlyTotals(),[]);
+ }finally{db.close();}
+});
+test('original failed observation counts as After the Fact after redo; fixed follow-up does not count twice',async()=>{
+ const db=fixture();try{
+  await reject(first);
+  assert.equal((await routes.upload.PATCH(request({status:'uploaded',observationType:'Ride Along'},'PATCH'),context(first))).status,400);
+  await uploaded(first);
+  await redo(first,second);await approve(second);await uploaded(second);
+  assert.deepEqual(await monthlyTotals(),[{techId:'TECH',rideAlong:0,afterTheFact:1,unknown:0}]);
+  assert.equal(db.prepare('SELECT catalyst_observation_type FROM qc_submission_attempts WHERE submission_id=?').get(first).catalyst_observation_type,'After the Fact');
+  assert.equal(db.prepare('SELECT catalyst_observation_type FROM qc_submissions WHERE id=?').get(second).catalyst_observation_type,null);
+ }finally{db.close();}
+});
+
+test('PostgreSQL migrations and monthly counters handle confirmed uploads without double counting',async()=>{
+ const {PGlite}=await import('@electric-sql/pglite');
+ const {postgresSql}=await import('../lib/database.mjs');
+ const pg=new PGlite();
+ try{
+  for(const name of ['0001_baseline','0002_notification_summaries','0003_single_push_phone','0004_qc_address','0005_catalyst_failure_workflow','0006_catalyst_observation_type'])await pg.exec(readFileSync(join(root,`postgres/migrations/${name}.sql`),'utf8'));
+  const db={prepare(sql){return{bind(...values){return{first:async()=> (await pg.query(postgresSql(sql),values)).rows[0],all:async()=>({results:(await pg.query(postgresSql(sql),values)).rows}),run:async()=>({meta:{changes:(await pg.query(postgresSql(sql),values)).affectedRows}}),sql,values};}};},async batch(statements){await pg.exec('BEGIN');try{const r=[];for(const statement of statements)r.push(await statement.run());await pg.exec('COMMIT');return r;}catch(e){await pg.exec('ROLLBACK');throw e;}}};
+  globalThis.workflowTest={tenant:'a',env:{DB:db}};
+  await pg.query("INSERT INTO tenants(id,name,created_at) VALUES('a','Demo',1)");
+  await pg.query("INSERT INTO qc_submissions(id,tenant_id,root_submission_id,tech_id,job_number,screenshot_id,photo_ids,status,submitted_at) VALUES($1,'a',$1,'TECH','776499',$2,$3,'approved',$4)",[first,picture,JSON.stringify([picture]),Date.now()]);
+  for(let i=0;i<2;i++)await ok(await routes.upload.PATCH(request({status:'uploaded',observationType:'Ride Along'},'PATCH'),context(first)));
+  const totals=await monthlyTotals();assert.equal(totals.length,1);assert.equal(Number(totals[0].rideAlong),1);assert.equal(Number(totals[0].afterTheFact),0);
+ }finally{await pg.close();}
 });
