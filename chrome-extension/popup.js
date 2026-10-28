@@ -15,6 +15,7 @@ function render() {
   const authenticated = Boolean(state.hasAuth);
   const update=state.updateInfo||{status:'checking'};
   const current=update.status==='current';
+  $("extension-version").textContent=`v${update.installedVersion||chrome.runtime.getManifest().version}`;
   $("extension-update").hidden=current||update.status==='checking';
   $("update-heading").textContent=update.status==='update_required'?'Update available · uploads locked':'Update check unavailable';
   $("update-message").textContent=update.status==='update_required'

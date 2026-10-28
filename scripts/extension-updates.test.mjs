@@ -37,11 +37,11 @@ test('panel shows update instructions and disables new uploads while the current
   const element=()=>({classList:{toggle(){}},setAttribute(){},replaceChildren(){},append(){}});
   const nodes=Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(match=>[match[1],element()]));
   const state={hasAuth:true,queue:[],run,updateInfo:{status,installedVersion:'0.7.20',latestVersion:'0.7.21'}};
-  runInNewContext(source+';state='+JSON.stringify(state)+';render();',{document:{getElementById:id=>nodes[id],body:element(),createElement:element}});
+  runInNewContext(source+';state='+JSON.stringify(state)+';render();',{chrome:{runtime:{getManifest:()=>({version:'0.7.20'})}},document:{getElementById:id=>nodes[id],body:element(),createElement:element}});
   return nodes;
  }
  const outdated=panel('update_required',{status:'running'});
  assert.equal(outdated['extension-update'].hidden,false);assert.equal(outdated.start.disabled,true);assert.match(outdated['update-message'].textContent,/current QC will finish/);assert.equal(outdated['download-update'].hidden,false);
- const current=panel('current');assert.equal(current['extension-update'].hidden,true);assert.equal(current.start.disabled,false);
+ const current=panel('current');assert.equal(current['extension-update'].hidden,true);assert.equal(current.start.disabled,false);assert.equal(current['extension-version'].textContent,'v0.7.20');
  const unavailable=panel('unavailable');assert.equal(unavailable.start.disabled,true);assert.equal(unavailable['extension-update'].hidden,false);
 });

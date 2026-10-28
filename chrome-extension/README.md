@@ -77,3 +77,7 @@ Deploy the app's observation-type migration and API before using this extension 
 ### v0.7.20 — required updates
 
 Every newly deployed extension version is mandatory. The panel displays an update banner with a link to the TQA download page, and Chrome's toolbar icon displays an UPD badge. Checks run when Chrome/the extension starts, when the panel opens, every five minutes, and at QC boundaries. New uploads require a verified matching server version. An in-progress QC finishes saving and reporting before the next QC is blocked. The app also rejects queue/detail requests from outdated clients, including older versions without a version header. Photo reads and reporting remain available so deployments do not interrupt current QC completion. Network/check failures block new QCs without discarding saved progress. Replace the extracted files and reload the extension to update; ZIP installations do not self-update.
+
+### v0.7.21
+
+Displays the installed extension version in a compact badge at the top-right of the persistent panel. The value comes from the installed manifest, so it stays accurate after every update.
