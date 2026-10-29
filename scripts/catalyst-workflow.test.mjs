@@ -37,6 +37,7 @@ const observationTypes=await handler('lib/qc-observation-type.ts','observation-t
 const routes={
  dashboard:await handler('app/api/qc-submissions/route.ts','dashboard'),
  activity:await handler('app/api/catalyst-activity/route.ts','activity'),
+ stats:await handler('app/api/qc-stats/route.ts','stats'),
  redo:await handler('app/api/qc-upload/route.ts','redo'),
  review:await handler('app/api/qc-submissions/[id]/route.ts','review'),
  totals:await handler('app/api/integrations/trust/observation-totals/route.ts','totals'),
@@ -63,6 +64,7 @@ function fixture(){
  CREATE TABLE qc_upload_photos(tenant_id TEXT,submission_id TEXT,tech_id TEXT,slot INTEGER,image BLOB,created_at INTEGER,PRIMARY KEY(tenant_id,submission_id,tech_id,slot));
  INSERT INTO push_accounts VALUES('a','TECH',1);`);
  db.prepare(`INSERT INTO qc_submissions(id,tenant_id,root_submission_id,tech_id,job_number,screenshot_id,photo_ids,status,submitted_at) VALUES(?,'a',?,'TECH','776499',?,?,'pending',?)`).run(first,first,picture,JSON.stringify([picture,picture]),Date.now());
+ db.exec("ALTER TABLE tenants ADD COLUMN monthly_qc_goal INTEGER DEFAULT 5; CREATE TABLE technicians(tenant_id TEXT,tech_id TEXT,active INTEGER,is_admin INTEGER,monthly_qc_goal INTEGER); INSERT INTO technicians VALUES('a','TECH',1,0,NULL);");
  const database=createDatabase({url:null,sqlite:db});
  const bucket=new Map([[`captures/${picture}`,Buffer.from('original-photo')]]);
  globalThis.workflowTest={tenant:'a',env:{DB:{prepare(sql){const statement=database.prepare(sql);return {bind(...args){const bound=statement.bind(...args);return{first:()=>bound.first(),run:()=>bound.run(),all:async()=>({results:await bound.all()}),sql:bound.sql,values:bound.values};}};},batch:database.batch},BUCKET:{put:async(k,v)=>bucket.set(k,v),delete:async k=>bucket.delete(k),get:async k=>bucket.has(k)?{body:bucket.get(k)}:null}}};
@@ -213,7 +215,6 @@ test.after(()=>{rmSync(temp,{recursive:true,force:true});delete globalThis.workf
 
 test('activity drill-down finds an earlier submission uploaded today, including older fiscal submissions', async()=>{
  const db=fixture();
- db.exec("CREATE TABLE technicians(tenant_id TEXT, tech_id TEXT, active INTEGER, is_admin INTEGER)");
  const now=Date.now();
  const old=now-45*86400000;
  db.prepare("UPDATE qc_submissions SET submitted_at=?, trust_upload_status='uploaded',trust_uploaded_at=?,status='approved' WHERE id=?").run(old,now,first);
@@ -312,6 +313,7 @@ test('PostgreSQL migrations and monthly counters handle confirmed uploads withou
   const local=await pg.query('SELECT rejection_upload_mode,review_note,catalyst_failures FROM qc_submissions WHERE id=$1',[third]);
   assert.deepEqual(local.rows[0],{rejection_upload_mode:'local',review_note:null,catalyst_failures:null});
   assert.deepEqual(await queue(),[]);
+  await ok(await routes.stats.GET(versionedRequest(`http://localhost/stats?start=${Date.now()-86400000}&end=${Date.now()+86400000}`)));
  }finally{await pg.close();}
 });
 
@@ -380,5 +382,29 @@ test('a local rejection of a correction retains the original Catalyst failure fo
   await uploaded(first,'77777');assert.deepEqual(await queue(),[]);
   await redo(second,third);await approve(third);
   assert.deepEqual((await queue()).map(q=>[q.id,q.workflow,q.catalystObservationId]),[[third,'follow_up','77777']]);
+ }finally{db.close();}
+});
+
+
+test('snapshot type counts use confirmed upload dates, exclude correction duplicates and disabled technicians, and preserve unknowns',async()=>{
+ const db=fixture();try{
+  await reject(first);await uploaded(first);await redo(first,second);await approve(second);await uploaded(second);
+  const now=Date.now(),old=now-40*86400000,start=now-86400000,end=now+86400000;
+  const insert=db.prepare("INSERT INTO qc_submissions(id,tenant_id,root_submission_id,attempt_number,tech_id,job_number,screenshot_id,photo_ids,status,submitted_at,trust_upload_kind,trust_upload_status,trust_uploaded_at,catalyst_observation_type) VALUES(?,?,?,1,?,'123456',?,'[]','approved',?,'observation',?,?,?)");
+  insert.run(third,'a',third,'TECH',picture,old,'uploaded',now,'Ride Along');
+  insert.run('legacy','a','legacy','TECH',picture,now,'uploaded',now,null);
+  insert.run('outside','a','outside','TECH',picture,now,'uploaded',old,'Ride Along');
+  insert.run('pending-upload','a','pending-upload','TECH',picture,now,'ready',null,'Ride Along');
+  insert.run('other','b','other','TECH',picture,now,'uploaded',now,'Ride Along');
+  insert.run('disabled','a','disabled','DISABLED',picture,now,'uploaded',now,'Ride Along');
+  insert.run('admin','a','admin','ADMIN',picture,now,'uploaded',now,'Ride Along');
+  db.exec("INSERT INTO technicians VALUES('a','ZERO',1,0,NULL),('a','DISABLED',0,0,NULL),('a','ADMIN',1,1,NULL),('b','TECH',1,0,NULL)");
+  // Even an archived/current duplicate of the same first failure counts once.
+  db.prepare("INSERT INTO qc_submissions(id,tenant_id,root_submission_id,attempt_number,tech_id,status,submitted_at,trust_upload_kind,trust_upload_status,trust_uploaded_at,catalyst_observation_type) SELECT submission_id,tenant_id,root_submission_id,attempt_number,tech_id,status,submitted_at,trust_upload_kind,trust_upload_status,trust_uploaded_at,catalyst_observation_type FROM qc_submission_attempts WHERE submission_id=?").run(first);
+  const url=`http://localhost/stats?start=${start}&end=${end}`;
+  let stats=(await ok(await routes.stats.GET(versionedRequest(url)))).technicians;
+  assert.deepEqual(stats.map(q=>[q.techId,q.rideAlong,q.afterTheFact,q.notRecorded]),[['TECH',1,1,1],['ZERO',0,0,0]]);
+  globalThis.workflowTest.tenant='b';stats=(await ok(await routes.stats.GET(versionedRequest(url)))).technicians;
+  assert.deepEqual(stats.map(q=>[q.techId,q.rideAlong,q.afterTheFact,q.notRecorded]),[['TECH',1,0,0]]);
  }finally{db.close();}
 });

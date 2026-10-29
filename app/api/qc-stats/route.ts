@@ -1,3 +1,4 @@
+import {trustQcSource} from "@/lib/trust-api";
 import { env } from "@/lib/local-env";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { isOwner } from "@/app/access";
@@ -12,12 +13,18 @@ export async function GET(request: Request) {
   const start = Number(url.searchParams.get("start"));
   const end = Number(url.searchParams.get("end"));
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end <= start || end - start > 32 * 86400000) return Response.json({ error: "Invalid month" }, { status: 400 });
-  const [roster, results, tenant, failures] = await Promise.all([
+  const [roster, results, tenant, failures, observationTypes] = await Promise.all([
     env.DB.prepare("SELECT tech_id AS techId, monthly_qc_goal AS monthlyGoal FROM technicians WHERE tenant_id = ? AND active = 1 AND is_admin = 0 ORDER BY tech_id").bind(user!.tenantId).all<{ techId: string; monthlyGoal: number | null }>(),
     env.DB.prepare("SELECT tech_id AS techId, COUNT(*) AS submitted, SUM(CASE WHEN status='approved' THEN 1 ELSE 0 END) AS approved, SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) AS rejected, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN status='approved' AND trust_upload_status='uploaded' THEN 1 ELSE 0 END) AS uploaded FROM qc_submissions WHERE tenant_id = ? AND submitted_at >= ? AND submitted_at < ? GROUP BY tech_id").bind(user!.tenantId, start, end).all<{ techId: string; submitted: number; approved: number; rejected: number; pending: number; uploaded: number }>(),
     env.DB.prepare("SELECT monthly_qc_goal AS monthlyGoal FROM tenants WHERE id = ?").bind(user!.tenantId).first<{ monthlyGoal: number }>(),
     env.DB.prepare(`SELECT tech_id AS techId, COUNT(DISTINCT COALESCE(root_submission_id, id)) AS failedUploaded FROM (SELECT id, tenant_id, root_submission_id, attempt_number, tech_id, status, trust_upload_status, submitted_at FROM qc_submissions UNION ALL SELECT submission_id AS id, tenant_id, root_submission_id, attempt_number, tech_id, status, trust_upload_status, submitted_at FROM qc_submission_attempts) AS failed_qcs WHERE tenant_id = ? AND status = 'rejected' AND trust_upload_status = 'uploaded' AND submitted_at >= ? AND submitted_at < ? GROUP BY tech_id`).bind(user!.tenantId, start, end).all<{ techId: string; failedUploaded: number }>(),
+    env.DB.prepare(`SELECT tech_id AS techId,
+      COUNT(DISTINCT CASE WHEN catalyst_observation_type = 'Ride Along' THEN id END) AS rideAlong,
+      COUNT(DISTINCT CASE WHEN catalyst_observation_type = 'After the Fact' THEN id END) AS afterTheFact,
+      COUNT(DISTINCT CASE WHEN catalyst_observation_type IS NULL OR catalyst_observation_type NOT IN ('Ride Along','After the Fact') THEN id END) AS notRecorded
+      FROM ${trustQcSource} WHERE tenant_id = ? AND trust_upload_status = 'uploaded' AND trust_upload_kind = 'observation' AND trust_uploaded_at >= ? AND trust_uploaded_at < ? GROUP BY tech_id`).bind(user!.tenantId,start,end).all<{techId:string;rideAlong:number;afterTheFact:number;notRecorded:number}>(),
   ]);
+  const typeCounts=new Map(observationTypes.results.map(row=>[row.techId,{rideAlong:Number(row.rideAlong),afterTheFact:Number(row.afterTheFact),notRecorded:Number(row.notRecorded)}]));
   const stats = new Map(results.results.map((row) => [row.techId, row]));
   const activeTechIds = new Set(roster.results.map(tech => tech.techId));
   for (const tech of roster.results) if (!stats.has(tech.techId)) stats.set(tech.techId, { techId: tech.techId, submitted: 0, approved: 0, rejected: 0, pending: 0, uploaded: 0 });
@@ -25,5 +32,5 @@ export async function GET(request: Request) {
   for (const row of failures.results) if (!stats.has(row.techId)) stats.set(row.techId, { techId: row.techId, submitted: 0, approved: 0, rejected: 0, pending: 0, uploaded: 0 });
   const failedCounts = new Map(failures.results.map(row => [row.techId, Number(row.failedUploaded)]));
   const goals = new Map(roster.results.map(tech => [tech.techId, tech.monthlyGoal ?? monthlyGoal]));
-  return Response.json({ technicians: [...stats.values()].filter(stat => activeTechIds.has(stat.techId)).map(stat => ({ ...stat, failedUploaded: failedCounts.get(stat.techId) ?? 0, monthlyGoal: goals.get(stat.techId) ?? monthlyGoal })).sort((a, b) => a.techId.localeCompare(b.techId, undefined, { numeric: true })), monthlyGoal }, { headers: { "Cache-Control": "private, no-store" } });
+  return Response.json({ technicians: [...stats.values()].filter(stat => activeTechIds.has(stat.techId)).map(stat => ({ ...stat, ...(typeCounts.get(stat.techId)??{rideAlong:0,afterTheFact:0,notRecorded:0}), failedUploaded: failedCounts.get(stat.techId) ?? 0, monthlyGoal: goals.get(stat.techId) ?? monthlyGoal })).sort((a, b) => a.techId.localeCompare(b.techId, undefined, { numeric: true })), monthlyGoal }, { headers: { "Cache-Control": "private, no-store" } });
 }

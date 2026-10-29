@@ -136,6 +136,9 @@ test('only super admin can copy company setup and current supervisor credentials
   const password='CompanyExamplePassword12345';await ok(await routes.adminSetup.POST(request({adminId:'COMPANYADMIN',password},setupCookie)));
   const current=await ok(await routes.companyCredentials.POST(request({},cookie),context));assert.equal(current.adminId,'COMPANYADMIN');assert.equal(current.password,password);assert.equal(current.setupPending,false);
   const overview=await ok(await routes.companies.GET(request(null,cookie,'GET')));const company=overview.companies.find(c=>c.id===id);assert(!('password' in company));assert(!('pin' in company));assert(!JSON.stringify(overview).includes(password));
+  const viewed=await ok(await routes.companyCredentials.POST(request({purpose:'view'},cookie),context));assert.equal(viewed.password,password);assert.equal(viewed.adminId,'COMPANYADMIN');
+  const views=db.prepare("SELECT details FROM super_admin_audit WHERE action='company.view_login'").all();assert.equal(views.length,1);assert(!views[0].details.includes(password));
+  assert.equal((await routes.companyCredentials.POST(request({purpose:'other'},cookie),context)).status,400);
   const events=db.prepare("SELECT details FROM super_admin_audit WHERE action='company.copy_login'").all();assert.equal(events.length,2);assert(events.every(e=>!e.details.includes(password)&&!e.details.includes(created.setup.pin)));
   db.prepare('UPDATE technicians SET pin_ciphertext=NULL WHERE tenant_id=? AND is_admin=1').run(id);
   assert.equal((await routes.companyCredentials.POST(request({},cookie),context)).status,409);

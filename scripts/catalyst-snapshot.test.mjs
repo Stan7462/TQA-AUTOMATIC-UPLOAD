@@ -25,3 +25,18 @@ test('snapshot counts confirmed first failures after corrections, once per job a
   assert.deepEqual(db.prepare(query).all('company', 50, 200).map(row => ({...row})), [{ techId: 'TECH', failedUploaded: 2 }]);
   db.close();
 });
+
+
+test('type split totals, percentages and shared image keep counts and unknown types visible',async()=>{
+ const {build}=await import('esbuild');const {runInNewContext}=await import('node:vm');
+ const output=await build({entryPoints:['lib/catalyst-snapshot.ts'],bundle:true,write:false,format:'iife',globalName:'snapshot',platform:'browser'});
+ const text=[],boxes=[];let canvas;
+ const context={createLinearGradient:()=>({addColorStop(){}}),fillRect(...args){boxes.push(args);},beginPath(){},moveTo(){},lineTo(){},stroke(){},fillText(value,x,y){text.push({value,x,y});}};
+ const sandbox={File,Uint8Array,atob,Intl,Date,document:{createElement(){canvas={width:0,height:0,getContext:()=>context,toDataURL:()=> 'data:image/png;base64,aGVsbG8='};return canvas;}}};
+ runInNewContext(output.outputFiles[0].text,sandbox);const {snapshotTypeTotals,snapshotPercentage,snapshotTypesPng}=sandbox.snapshot;
+ const stats=[{techId:'R001',uploaded:4,failedUploaded:1,monthlyGoal:5,rideAlong:1,afterTheFact:2,notRecorded:1},{techId:'ZERO',uploaded:0,failedUploaded:0,monthlyGoal:5,rideAlong:0,afterTheFact:0,notRecorded:0}];
+ assert.equal(snapshotPercentage(1,4),'25%');assert.equal(snapshotPercentage(0,0),'—');assert.equal(snapshotTypeTotals(stats).notRecorded,1);
+ const file=snapshotTypesPng(stats,{start:1000000000000,end:1002592000000},5);assert.match(file.name,/type-split/);assert.equal(file.type,'image/png');
+ for(const label of ['RIDE ALONG','AFTER THE FACT','NOT RECORDED','Tech R001','Tech ZERO','25%','50%','—'])assert(text.some(t=>t.value===label),label);
+ assert(text.every(t=>t.y>=0&&t.y<canvas.height));assert(boxes.every(b=>b[0]>=0&&b[1]>=0&&b[0]+b[2]<=canvas.width&&b[1]+b[3]<=canvas.height));
+});

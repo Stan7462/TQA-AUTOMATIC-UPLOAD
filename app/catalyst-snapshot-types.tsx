@@ -1,0 +1,8 @@
+import {observationTotal,snapshotPercentage,snapshotTypeTotals,type SnapshotStat} from '@/lib/catalyst-snapshot';
+export default function CatalystSnapshotTypes({stats,monthlyGoal}:{stats:SnapshotStat[];monthlyGoal:number}){
+ const totals=snapshotTypeTotals(stats),total=observationTotal(totals);
+ return <div className="qc-snapshot-types"><div className="qc-snapshot-type-summary">{[['Ride Along',totals.rideAlong],['After the Fact',totals.afterTheFact],['Not recorded',totals.notRecorded]].map(([label,count])=><div key={label}><span>{label}</span><strong>{count}</strong><small>{snapshotPercentage(Number(count),total)}</small></div>)}</div>
+  <p className="qc-snapshot-type-basis">{total} original Catalyst {total===1?'observation':'observations'} · By upload date</p>
+  <table className="qc-snapshot-type-table" aria-label="Technician Catalyst upload types"><thead><tr><th>Technician</th><th>Uploaded</th><th>Failed</th><th>Ride Along</th><th>After the Fact</th><th>Not recorded</th></tr></thead><tbody>{stats.map((stat,index)=><tr key={stat.techId}><td><small className="qc-snapshot-index">{index+1}</small><strong>Tech {stat.techId}</strong></td><td data-label="Uploaded"><strong>{stat.uploaded}</strong><small>of {stat.monthlyGoal??monthlyGoal}</small></td><td data-label="Failed" className="qc-snapshot-failed"><strong>{stat.failedUploaded??0}</strong></td>{[['Ride Along',stat.rideAlong??0],['After the Fact',stat.afterTheFact??0],['Not recorded',stat.notRecorded??0]].map(([label,count])=><td key={label} data-label={label}><strong>{count}</strong><small>{snapshotPercentage(Number(count),observationTotal(stat))}</small></td>)}</tr>)}</tbody></table>
+ </div>;
+}
