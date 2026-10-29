@@ -65,6 +65,11 @@ async function upgradeCatalystScreenshot(client) {
   if (!(await client.query("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='tenants' AND column_name='catalyst_include_screenshot'")).rows.length) await client.query(readFileSync(new URL('../postgres/migrations/0008_catalyst_screenshot.sql', import.meta.url), 'utf8'));
   await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)', ['0008',Date.now(),'{}']);
 }
+async function upgradeLocalRejection(client) {
+  if ((await client.query("SELECT 1 FROM tqa_postgres_migrations WHERE version='0009'")).rows.length) return;
+  if (!(await client.query("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='qc_submissions' AND column_name='rejection_upload_mode'")).rows.length) await client.query(readFileSync(new URL('../postgres/migrations/0009_local_rejection.sql', import.meta.url), 'utf8'));
+  await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)', ['0009',Date.now(),'{}']);
+}
 export async function migratePostgres() {
   const directory=resolve(process.env.TQA_DATA_DIR || '.tqa-data');
   if(!existsSync(join(directory,'secrets.json'))) throw new Error('Existing application encryption secrets are required before database migration.');
@@ -84,6 +89,7 @@ export async function migratePostgres() {
       await upgradeObservationType(client);
       await upgradeSuperAdmin(client);
       await upgradeCatalystScreenshot(client);
+      await upgradeLocalRejection(client);
       await client.query('COMMIT');
       console.log('PostgreSQL schema is current. SQLite is no longer used by the app.');
       return;
@@ -107,6 +113,7 @@ export async function migratePostgres() {
     if(source.prepare("PRAGMA table_info(qc_submissions)").all().some(c=>c.name==='catalyst_observation_type')) await client.query(readFileSync(new URL('../postgres/migrations/0006_catalyst_observation_type.sql',import.meta.url),'utf8'));
     if(source.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='super_admin_sessions'").get()) await client.query(readFileSync(new URL('../postgres/migrations/0007_super_admin.sql',import.meta.url),'utf8'));
     if(source.prepare("PRAGMA table_info(tenants)").all().some(c=>c.name==='catalyst_include_screenshot')) await client.query(readFileSync(new URL('../postgres/migrations/0008_catalyst_screenshot.sql',import.meta.url),'utf8'));
+    if(source.prepare("PRAGMA table_info(qc_submissions)").all().some(c=>c.name==='rejection_upload_mode')) await client.query(readFileSync(new URL('../postgres/migrations/0009_local_rejection.sql',import.meta.url),'utf8'));
     const report=await importSqlite(source,client);
     await client.query('CREATE TABLE tqa_postgres_migrations(version TEXT PRIMARY KEY, applied_at BIGINT NOT NULL, verification TEXT NOT NULL)');
     await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)',['0001',Date.now(),JSON.stringify(report)]);
@@ -117,6 +124,7 @@ export async function migratePostgres() {
     await upgradeObservationType(client);
     await upgradeSuperAdmin(client);
     await upgradeCatalystScreenshot(client);
+    await upgradeLocalRejection(client);
     await client.query('COMMIT');
     writeFileSync(join(backupDirectory,'verification.json'),JSON.stringify(report,null,2),{mode:0o600});
     console.log('PostgreSQL migration verified (row counts and SHA-256 of every column):',JSON.stringify(Object.fromEntries(Object.entries(report).map(([t,v])=>[t,v.count]))));

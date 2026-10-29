@@ -36,6 +36,7 @@ export const qcSubmissions = sqliteTable("qc_submissions", {
   reviewedAt: integer("reviewed_at"),
   correctionDeadlineAt: integer("correction_deadline_at"),
   reviewNote: text("review_note"),
+  rejectionUploadMode: text("rejection_upload_mode").notNull().default("catalyst"),
   catalystFailures: text("catalyst_failures"),
   trustUploadKind: text("trust_upload_kind").notNull().default("observation"),
   catalystObservationId: text("catalyst_observation_id"),

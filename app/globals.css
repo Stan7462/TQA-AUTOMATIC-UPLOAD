@@ -909,3 +909,5 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .catalyst-extension-download{padding-bottom:18px;margin-bottom:22px;border-bottom:1px solid #405362}.catalyst-extension-download h3{font-size:16px;color:#edf4fa}.catalyst-extension-download h3 small{font-size:12px;color:#aac1ce;margin-left:8px}.catalyst-extension-download p{font-size:12px;margin-top:14px}
 
 .qc-upload-type{display:inline-flex;align-items:center;vertical-align:middle;white-space:nowrap;border:1px solid #4a6578;border-radius:99px;padding:4px 8px;margin:4px 0 4px 6px;font-size:11px!important;font-weight:650;line-height:1.2;color:#c5def5;background:#21394b}.qc-upload-type.after_the_fact{color:#bde5d3;background:#203c35;border-color:#41665a}.qc-upload-type.not_recorded{color:#b7c4cd;background:#293740;border-color:#4b5b67}
+
+.admin-dark .qc-focus-reject-local.button.light{width:100%;min-height:48px;white-space:normal;color:#edc6cc;border-color:#80505a;margin-top:10px}.admin-dark .qc-focus-reject-local.button.light:hover:not(:disabled){background:#44313a}.qc-reject-local-hint{display:block;color:#aabcc9;font-size:11px;line-height:1.5;margin:7px 0 0}

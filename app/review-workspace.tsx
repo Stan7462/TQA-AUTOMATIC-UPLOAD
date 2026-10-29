@@ -12,7 +12,7 @@ import { useQcFilters } from "@/lib/use-qc-filters";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
-type Qc = { id: string; techId: string; jobNumber: string; address: string | null; status: string; catalystObservationType?:string|null; trustUploadStatus: string; submittedAt: number; trustUploadedAt: number | null; correctionDeadlineAt: number | null; photoIds: string[]; attemptNumber: number; correctionPending: number };
+type Qc = { id: string; techId: string; jobNumber: string; address: string | null; status: string; catalystObservationType?:string|null; rejectionUploadMode?:string;trustUploadStatus: string; submittedAt: number; trustUploadedAt: number | null; correctionDeadlineAt: number | null; photoIds: string[]; attemptNumber: number; correctionPending: number };
 type SnapshotStat = { techId: string; uploaded: number; failedUploaded: number; monthlyGoal: number };
 const statuses = [["pending", "Needs review"], ["all", "All records"], ["approved", "Approved"], ["uploaded", "Uploaded to Catalyst"], ["rejected", "Rejected"], ["fixed", "Fixed"]];
 const metricStatuses = statuses.filter(([value]) => value !== "pending" && value !== "fixed");

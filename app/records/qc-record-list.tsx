@@ -14,7 +14,7 @@ import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export type RecordView = "all" | "needs-review" | "approved";
 type Status = "pending" | "approved" | "rejected";
-type Submission = { id: string; techId: string; jobNumber: string; screenshotId: string; photoIds: string[]; status: Status; correctionPending: number; attemptNumber: number; submittedAt: number; reviewedAt: number | null; reviewNote: string | null; catalystObservationType?:string|null; trustUploadStatus: "ready" | "failed" | "uploaded"; trustUploadedAt: number | null };
+type Submission = { id: string; techId: string; jobNumber: string; screenshotId: string; photoIds: string[]; status: Status; correctionPending: number; attemptNumber: number; submittedAt: number; reviewedAt: number | null; reviewNote: string | null; catalystObservationType?:string|null; rejectionUploadMode?:string;trustUploadStatus: "ready" | "failed" | "uploaded"; trustUploadedAt: number | null };
 const pages: Record<RecordView, { title: string; status: "all" | Status; description: string }> = {
   all: { title: "All records", status: "all", description: "Every technician QC, including pending, approved, and rejected submissions." },
   "needs-review": { title: "Needs review", status: "pending", description: "Technician QCs waiting for your decision." },

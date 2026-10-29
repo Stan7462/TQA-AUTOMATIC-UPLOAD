@@ -104,6 +104,7 @@ reconcileRuntimeMigration("0022_catalyst_failure_workflow.sql", "20261010000000_
 reconcileRuntimeMigration("0023_catalyst_observation_type.sql", "20261027000000_catalyst_observation_type", "qc_submissions", ["catalyst_observation_type"]);
 reconcileRuntimeMigration("0024_super_admin.sql", "20261028000000_super_admin", "super_admin_sessions", ["token_hash", "credential_version", "selected_tenant_id"]);
 reconcileRuntimeMigration("0025_catalyst_screenshot.sql", "20261028010000_catalyst_screenshot", "tenants", ["catalyst_include_screenshot"]);
+reconcileRuntimeMigration("0026_local_rejection.sql", "20261028020000_local_rejection", "qc_submissions", ["rejection_upload_mode"]);
 runPrisma("migrate", "deploy");
 
 }

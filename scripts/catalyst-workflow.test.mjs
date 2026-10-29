@@ -53,7 +53,7 @@ const failure={code:'TQA4',reason:'Unused ports terminated / NAP ports closed'};
 const picture='8000000000000-00000000-0000-4000-8000-000000000001.jpg';
 function fixture(){
  const db=new DatabaseSync(':memory:');
- const columns=`tenant_id TEXT NOT NULL,root_submission_id TEXT,attempt_number INTEGER DEFAULT 1,tech_id TEXT,job_number TEXT,address TEXT,screenshot_id TEXT,photo_ids TEXT,status TEXT,submitted_at INTEGER,reviewed_at INTEGER,review_note TEXT,trust_upload_status TEXT DEFAULT 'ready',trust_uploaded_at INTEGER,trust_external_reference TEXT,trust_upload_error TEXT,trust_upload_attempts INTEGER DEFAULT 0,trust_last_attempt_at INTEGER,trust_uploaded_by_key_id TEXT,location_status TEXT,location_latitude REAL,location_longitude REAL,location_accuracy REAL,location_captured_at INTEGER,catalyst_failures TEXT,trust_upload_kind TEXT DEFAULT 'observation',catalyst_observation_id TEXT,catalyst_observation_type TEXT`;
+ const columns=`tenant_id TEXT NOT NULL,root_submission_id TEXT,attempt_number INTEGER DEFAULT 1,tech_id TEXT,job_number TEXT,address TEXT,screenshot_id TEXT,photo_ids TEXT,status TEXT,submitted_at INTEGER,reviewed_at INTEGER,review_note TEXT,trust_upload_status TEXT DEFAULT 'ready',trust_uploaded_at INTEGER,trust_external_reference TEXT,trust_upload_error TEXT,trust_upload_attempts INTEGER DEFAULT 0,trust_last_attempt_at INTEGER,trust_uploaded_by_key_id TEXT,location_status TEXT,location_latitude REAL,location_longitude REAL,location_accuracy REAL,location_captured_at INTEGER,catalyst_failures TEXT,trust_upload_kind TEXT DEFAULT 'observation',catalyst_observation_id TEXT,catalyst_observation_type TEXT,rejection_upload_mode TEXT NOT NULL DEFAULT 'catalyst'`;
  db.exec(`CREATE TABLE qc_submissions(id TEXT PRIMARY KEY,${columns},correction_pending INTEGER DEFAULT 0,correction_deadline_at INTEGER);
  CREATE TABLE qc_submission_attempts(submission_id TEXT UNIQUE,${columns},UNIQUE(tenant_id,root_submission_id,attempt_number));
  CREATE TABLE tenants(id TEXT PRIMARY KEY,name TEXT,active INTEGER,company_kind TEXT,subscription_status TEXT,catalyst_include_screenshot INTEGER DEFAULT 1);
@@ -292,7 +292,7 @@ test('PostgreSQL migrations and monthly counters handle confirmed uploads withou
  const {postgresSql}=await import('../lib/database.mjs');
  const pg=new PGlite();
  try{
-  for(const name of ['0001_baseline','0002_notification_summaries','0003_single_push_phone','0004_qc_address','0005_catalyst_failure_workflow','0006_catalyst_observation_type','0007_super_admin','0008_catalyst_screenshot'])await pg.exec(readFileSync(join(root,`postgres/migrations/${name}.sql`),'utf8'));
+  for(const name of ['0001_baseline','0002_notification_summaries','0003_single_push_phone','0004_qc_address','0005_catalyst_failure_workflow','0006_catalyst_observation_type','0007_super_admin','0008_catalyst_screenshot','0009_local_rejection'])await pg.exec(readFileSync(join(root,`postgres/migrations/${name}.sql`),'utf8'));
   const db={prepare(sql){return{bind(...values){return{first:async()=> (await pg.query(postgresSql(sql),values)).rows[0],all:async()=>({results:(await pg.query(postgresSql(sql),values)).rows}),run:async()=>({meta:{changes:(await pg.query(postgresSql(sql),values)).affectedRows}}),sql,values};}};},async batch(statements){await pg.exec('BEGIN');try{const r=[];for(const statement of statements)r.push(await statement.run());await pg.exec('COMMIT');return r;}catch(e){await pg.exec('ROLLBACK');throw e;}}};
   globalThis.workflowTest={tenant:'a',env:{DB:db}};
   await pg.query("INSERT INTO tenants(id,name,created_at) VALUES('a','Demo',1)");
@@ -307,6 +307,11 @@ test('PostgreSQL migrations and monthly counters handle confirmed uploads withou
   dashboard=await ok(await routes.dashboard.GET(versionedRequest(`http://localhost/api/qc-submissions?status=all&qc=${first}`)));
   assert.equal(dashboard.submissions[0].catalystObservationType,'After the Fact');
   assert.equal(dashboard.submissions[0].previousAttempts[0].catalystObservationType,'After the Fact');
+  await pg.query("INSERT INTO qc_submissions(id,tenant_id,root_submission_id,tech_id,job_number,screenshot_id,photo_ids,status,submitted_at) VALUES($1,'a',$1,'TECH','776499',$2,'[]','pending',$3)",[third,picture,Date.now()]);
+  await rejectLocally(third);
+  const local=await pg.query('SELECT rejection_upload_mode,review_note,catalyst_failures FROM qc_submissions WHERE id=$1',[third]);
+  assert.deepEqual(local.rows[0],{rejection_upload_mode:'local',review_note:null,catalyst_failures:null});
+  assert.deepEqual(await queue(),[]);
  }finally{await pg.close();}
 });
 
@@ -323,4 +328,57 @@ test('upload type filters distinguish confirmed types, older unknowns, and QCs a
   assert.equal(observationTypes.matchesQcUploadType(qc,'not_recorded'),false);
   assert.equal(observationTypes.matchesQcUploadType(qc,'all'),true);
  }
+});
+
+
+async function rejectLocally(id,note=''){
+ return ok(await routes.review.POST(request({status:'rejected',rejectionUploadMode:'local',reviewNote:note,failureReasons:[failure]}),context(id)));
+}
+test('local rejection allows optional notes, returns to the technician, and blocks queue, detail, and upload reporting',async()=>{
+ const db=fixture();try{
+  await rejectLocally(first);
+  let rejected=await rejectedFolder();assert.equal(rejected.length,1);assert.equal(rejected[0].reviewNote,null);assert.equal(rejected[0].rejectionUploadMode,'local');
+  assert.deepEqual(await queue(),[]);
+  assert.equal((await routes.detail.GET(versionedRequest('http://localhost/test'),context(first))).status,404);
+  assert.equal((await routes.upload.PATCH(request({status:'uploaded'},'PATCH'),context(first))).status,409);
+  await redo(first,second);
+  assert.equal(db.prepare('SELECT rejection_upload_mode FROM qc_submission_attempts WHERE submission_id=?').get(first).rejection_upload_mode,'local');
+  await approve(second);
+  const queued=await queue();assert.deepEqual(queued.map(q=>[q.id,q.workflow,q.outcome]),[[second,'observation','pass']]);
+  await uploaded(second);assert.deepEqual(await rejectedFolder(),[]);
+  assert.deepEqual(await queue(),[]);
+  assert.equal(db.prepare('SELECT trust_upload_status FROM qc_submission_attempts WHERE submission_id=?').get(first).trust_upload_status,'ready');
+ }finally{db.close();}
+});
+test('repeated local rejections preserve notes and upload only the final approved pictures',async()=>{
+ const db=fixture();try{
+  await rejectLocally(first,'Please retake a clear photo.');
+  assert.equal((await rejectedFolder())[0].reviewNote,'Please retake a clear photo.');
+  await redo(first,second);await rejectLocally(second);await redo(second,third);await approve(third);
+  const q=await queue();assert.deepEqual(q.map(q=>q.id),[third]);assert.equal(q[0].workflow,'observation');
+  assert.equal(q[0].photos[1].id,JSON.parse(db.prepare('SELECT photo_ids FROM qc_submissions WHERE id=?').get(third).photo_ids)[0]);
+  const old=await routes.detail.GET(versionedRequest('http://localhost/test'),context(first));assert.equal(old.status,404);
+ }finally{db.close();}
+});
+test('a regular rejection after a local rejection creates the first Catalyst fail, then an approved follow-up',async()=>{
+ const db=fixture();try{
+  await rejectLocally(first);await redo(first,second);await reject(second);
+  let q=await queue();assert.deepEqual(q.map(q=>[q.id,q.outcome]),[[second,'fail']]);
+  await redo(second,third);await approve(third);
+  q=await queue();assert.deepEqual(q.map(q=>q.id),[second]);
+  await uploaded(second,'77777');q=await queue();assert.deepEqual(q.map(q=>[q.id,q.workflow]),[[third,'follow_up']]);
+  await uploaded(third);
+  const details=await ok(await routes.dashboard.GET(versionedRequest(`http://localhost/api/qc-submissions?status=all&qc=${third}`)));
+  assert.equal(details.submissions[0].catalystObservationType,'After the Fact');
+  assert.deepEqual(await monthlyTotals(),[{techId:'TECH',rideAlong:0,afterTheFact:1,unknown:0}]);
+ }finally{db.close();}
+});
+test('a local rejection of a correction retains the original Catalyst failure for the final follow-up',async()=>{
+ const db=fixture();try{
+  await reject(first);await redo(first,second);await rejectLocally(second,'Still needs a better picture.');
+  assert.deepEqual((await queue()).map(q=>q.id),[first]);
+  await uploaded(first,'77777');assert.deepEqual(await queue(),[]);
+  await redo(second,third);await approve(third);
+  assert.deepEqual((await queue()).map(q=>[q.id,q.workflow,q.catalystObservationId]),[[third,'follow_up','77777']]);
+ }finally{db.close();}
 });

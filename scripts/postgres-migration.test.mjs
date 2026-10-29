@@ -22,6 +22,7 @@ test('all SQLite records and binary data preserve exact values in PostgreSQL',as
  for(const [column,file] of [['address','0004_qc_address.sql'],['catalyst_failures','0005_catalyst_failure_workflow.sql'],['catalyst_observation_type','0006_catalyst_observation_type.sql']])if(source.prepare('PRAGMA table_info(qc_submissions)').all().some(c=>c.name===column))await pg.exec(readFileSync(`postgres/migrations/${file}`,'utf8'));
  if(source.prepare("SELECT 1 FROM sqlite_master WHERE name='super_admin_sessions'").get())await pg.exec(readFileSync('postgres/migrations/0007_super_admin.sql','utf8'));
  if(source.prepare('PRAGMA table_info(tenants)').all().some(c=>c.name==='catalyst_include_screenshot'))await pg.exec(readFileSync('postgres/migrations/0008_catalyst_screenshot.sql','utf8'));
+ if(source.prepare('PRAGMA table_info(qc_submissions)').all().some(c=>c.name==='rejection_upload_mode'))await pg.exec(readFileSync('postgres/migrations/0009_local_rejection.sql','utf8'));
  await pg.exec('BEGIN');const result=await importSqlite(source,pg);const existing=tables.filter(table=>source.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));assert.equal(Object.keys(result).length,existing.length);await pg.exec('ROLLBACK');}
  finally{source.close();await pg.close();rmSync(directory,{recursive:true,force:true});}
 });

@@ -7,7 +7,7 @@ import { readQcDraft, writeQcDraft } from "@/lib/qc-draft";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 type View='rejected'|'captured'|'uploaded';
-type Submission={id:string;jobNumber:string;address:string|null;screenshotId:string;photoIds:string[];submittedAt:number;reviewedAt:number|null;correctionDeadlineAt:number|null;reviewNote:string|null;status:string;trustUploadStatus:string;attemptNumber:number;correctionPending:number};
+type Submission={id:string;jobNumber:string;address:string|null;screenshotId:string;photoIds:string[];submittedAt:number;reviewedAt:number|null;correctionDeadlineAt:number|null;reviewNote:string|null;status:string;rejectionUploadMode?:string;trustUploadStatus:string;attemptNumber:number;correctionPending:number};
 const titles={rejected:'My rejected QCs',captured:'My captured QCs',uploaded:'Uploaded to Catalyst'};
 function rejectionTimeLabel(deadlineAt:number,now:number){const hours=Math.ceil((deadlineAt-now)/(60*60*1000));return hours>0?`${hours}h left`:'Overdue';}
 function cardDeadlineLabel(deadline:string){return deadline==='Overdue'?deadline:deadline.replace('h left',' hours left to fix');}
