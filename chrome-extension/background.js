@@ -358,7 +358,7 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
     let jobId = checkpoint?.jobId;
     if (!jobId) {
       await navigate(tabId, JOBS_URL);
-      const search = await pageCommand(tabId, "FIND_JOB", { jobNumber: qc.jobNumber }, 45000);
+      const search = await pageCommand(tabId, "FIND_JOB", { jobNumber: qc.jobNumber, techId: qc.techId }, 45000);
       const matches = exactJobMatches(search.rows, qc.jobNumber, qc.techId);
       if (matches.length !== 1) {
         const reason = matches.length === 0 ? "No exact job number and Tech ID match in Catalyst." : "Multiple exact job number and Tech ID matches in Catalyst.";

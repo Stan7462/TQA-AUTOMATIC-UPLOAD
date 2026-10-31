@@ -22,6 +22,8 @@ Version 0.7.1 refreshes the queue after successful uploads and picks up newly un
 ### Interrupted observation recovery (v0.7.5)
 The extension saves the matched Catalyst job ID and confirmed photo identifiers locally before proceeding. Retrying a saved QC reopens that same job directly, even if it disappeared from Jobs Pool. **Resume saved progress** keeps confirmed photos; recovery skips them only when Catalyst's saved thumbnail identifiers exactly match the checkpoint. Missing, extra, or changed photos pause the run. Uncertain completion also requires review, rather than creating another observation.
 
+Jobs Pool matching reads the exact job number and Tech ID from visible grid cells and supports alternate Catalyst column names and grids without the `Rows: X of Y` counter.
+
 **Retry after cleanup** resets the saved photo progress but retains the job ID. Use it only after removing the partial photos and verifying the observation is still incomplete. If photos remain, the next run pauses instead of duplicating them.
 
 The legacy per-QC manual recovery buttons were removed in v0.7.19. Use the run-level review controls for interrupted uploads with saved progress. Failed QCs always use **After the Fact** and **Customer Contact: No**, including recovered observations. The reason dropdown uses a keyboard fallback if Catalyst ignores the mouse event and verifies the selected value before proceeding.

@@ -30,25 +30,36 @@
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function rowData(row) {
+  function rowData(row, expectedJobNumber = "", expectedTechId = "") {
     const cells = [...row.querySelectorAll(".ag-cell, [role='gridcell']")];
-    const byColumn = (names, fallback) => {
-      const found = cells.find((cell) => names.some((name) => clean(cell.getAttribute("col-id")).toLowerCase().includes(name)));
-      return clean((found || cells[fallback])?.textContent);
+    const values = cells.map((cell) => clean(cell.textContent));
+    const byColumn = (names) => {
+      const found = cells.find((cell) => {
+        const identifier = clean(cell.getAttribute("col-id") || cell.getAttribute("data-column") || cell.getAttribute("data-field")).toLowerCase().replace(/[^a-z0-9]/g, "");
+        return names.some((name) => identifier.includes(name));
+      });
+      return clean(found?.textContent);
     };
+    const link = row.querySelector("a[href*='jobid='], a[href*='jobId=']")?.href || "";
+    const linkedJobId = /[?&]jobid=(\d+)/i.exec(link)?.[1] || "";
+    const jobNumber = byColumn(["jobnumber", "jobno", "workordernumber", "workorderno"]) ||
+      values.find((value) => value === String(expectedJobNumber)) || values[1] || "";
+    const techId = byColumn(["techid", "technumber", "techno", "technicianid", "techniciannumber"]) ||
+      values.find((value) => value === String(expectedTechId)) || values[4] || "";
     return {
-      jobId: byColumn(["jobid", "job_id"], 0).replace(/\D/g, ""),
-      jobNumber: byColumn(["jobno", "jobnumber", "job_no"], 1),
-      techId: byColumn(["techid", "tech_id"], 4)
+      jobId: (byColumn(["jobid", "internaljobid", "catalystjobid"]) || linkedJobId || values[0] || "").replace(/\D/g, ""),
+      jobNumber,
+      techId
     };
   }
 
-  function gridRows() {
-    return [...document.querySelectorAll(".ag-center-cols-container .ag-row, .ag-body-viewport .ag-row")]
-      .filter(visible).map(rowData).filter((row) => row.jobId);
+  function gridRows(expectedJobNumber = "", expectedTechId = "") {
+    const rows = new Set(document.querySelectorAll(".ag-center-cols-container .ag-row, .ag-body-viewport .ag-row, [role='grid'] [role='row']"));
+    return [...rows].filter(visible).map((row) => rowData(row, expectedJobNumber, expectedTechId))
+      .filter((row) => row.jobId || row.jobNumber === String(expectedJobNumber));
   }
 
-  async function findJob(jobNumber) {
+  async function findJob(jobNumber, techId = "") {
     if (!location.pathname.endsWith("/jobs")) throw new Error("Open the Catalyst Jobs Pool first.");
     const radios = await waitFor(() => {
       const options = [...document.querySelectorAll("input[type='radio']")];
@@ -66,11 +77,18 @@
     const searchStarted = Date.now();
     const rows = await waitFor(() => {
       const text = document.body.innerText;
-      const count = /Rows:\s*(\d+)\s+of\s+(\d+)/i.exec(text);
-      if (!count) return null;
-      const list = gridRows();
-      if (Number(count[2]) === 0 && Date.now() - searchStarted > 700) return { list, total: 0 };
-      if (list.some((row) => row.jobNumber === String(jobNumber))) return { list, total: Number(count[2]) };
+      const count = /Rows:\s*(\d+)(?:\s+of\s+(\d+))?/i.exec(text);
+      const list = gridRows(String(jobNumber), String(techId));
+      const exact = list.filter((row) => row.jobNumber === String(jobNumber));
+      if (exact.length) {
+        if (exact.some((row) => !row.jobId)) throw new Error(`Catalyst displayed job ${jobNumber}, but its internal Job ID column could not be read.`);
+        return { list, total: count ? Number(count[2] || count[1]) : list.length };
+      }
+      const noRows = [...document.querySelectorAll(".ag-overlay-no-rows-center, .ag-overlay-no-rows-wrapper")].some(visible) || /There are no rows to display/i.test(text);
+      if ((noRows || (count && Number(count[2] || count[1]) === 0)) && Date.now() - searchStarted > 700) return { list, total: 0 };
+      if (count && Number(count[2] || count[1]) > 0 && list.length >= Number(count[2] || count[1]) && Date.now() - searchStarted > 700) {
+        return { list, total: Number(count[2] || count[1]) };
+      }
       return null;
     }, "Catalyst job search results", 30000);
     pageLog("info", "job search", `Grid reported ${rows.total} rows; ${rows.list.length} rows were readable.`);
@@ -406,7 +424,7 @@
     (async () => {
       switch (message.command) {
         case "PING": return { url: location.href };
-        case "FIND_JOB": return findJob(message.jobNumber);
+        case "FIND_JOB": return findJob(message.jobNumber, message.techId);
         case "INSPECT_OBSERVATION": return inspectObservation(message.jobNumber, message.techId);
         case "PREPARE": return prepare(message.jobNumber, message.techId, message.observationType);
         case "UPLOAD_PHOTO": return uploadPhoto(message.base64, message.fileName);
