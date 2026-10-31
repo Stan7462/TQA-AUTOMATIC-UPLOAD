@@ -36,7 +36,7 @@ test('panel shows update instructions and disables new uploads while the current
  function panel(status,run={}){
   const element=()=>({classList:{toggle(){}},setAttribute(){},replaceChildren(){},append(){}});
   const nodes=Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(match=>[match[1],element()]));
-  const state={hasAuth:true,queue:[],run,updateInfo:{status,installedVersion:'0.7.20',latestVersion:'0.7.21'}};
+  const state={hasAuth:true,queue:[{id:'qc',jobNumber:'123456',techId:'TECH',photos:[],workflow:'observation',outcome:'pass',uploadStatus:'ready'}],run,updateInfo:{status,installedVersion:'0.7.20',latestVersion:'0.7.21'}};
   runInNewContext(source+';state='+JSON.stringify(state)+';render();',{chrome:{runtime:{getManifest:()=>({version:'0.7.20'})}},document:{getElementById:id=>nodes[id],body:element(),createElement:element}});
   return nodes;
  }

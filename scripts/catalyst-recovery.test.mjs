@@ -108,7 +108,7 @@ test('Catalyst save followed by reporting failure resumes without completing or 
  assert.equal(uploads,3);assert.equal(completions,1);assert.equal(lookups,1);assert.equal(reports,2);assert.equal(checkpoint,undefined);
 });
 
-test('Observation Saved reports a failed QC even when optional observation ID lookup fails',async()=>{
+test('Observation Saved pauses a failed QC when its required observation ID lookup fails',async()=>{
  let checkpoint,run={},reported=false;const keys=[];const events=[];
  const qc={id:'failed',jobNumber:'849473',techId:'R02K',workflow:'observation',reviewStatus:'rejected',uploadStatus:'ready',outcome:'fail',photos:photos.map((p,i)=>({...p,order:i,url:p.id})),failureReasons:[],supervisorComment:'fix'};
  const process=runInNewContext(`${processSource};processOne`,{
@@ -116,7 +116,7 @@ test('Observation Saved reports a failed QC even when optional observation ID lo
   recovery:async(_id,patch)=>{if(patch===null)checkpoint=undefined;else if(patch)checkpoint={...checkpoint,...patch};return checkpoint;},
   orderedPhotos,exactJobMatches,recoveryPhotoIndex,safeError:e=>e.message,JOBS_URL:'jobs',OBSERVATIONS_URL:'observations',observationUrl:id=>`job/${id}`,
   navigate:async()=>{},photoBase64:async()=>'',waitForSuccess:async()=> 'Observation Saved',logEvent:async(...args)=>events.push(args),
-  report:async(_id,status,reference)=>{assert.equal(status,'uploaded');assert.equal(reference,undefined);reported=true;return {uploadStatus:'uploaded'};},
+  report:async()=>{reported=true;return {uploadStatus:'uploaded'};},
   pageCommand:async(_tab,command)=>{
    if(command==='FIND_JOB')return {rows:[{jobId:'166425706',jobNumber:'849473',techId:'R02K'}]};
    if(command==='INSPECT_OBSERVATION')return {photoKeys:[...keys]};
@@ -126,9 +126,9 @@ test('Observation Saved reports a failed QC even when optional observation ID lo
    return {};
   }
  });
- const result=await process(qc,1,0,1,1,'After the Fact');
- assert.equal(result.status,'uploaded');assert.equal(reported,true);assert.equal(checkpoint,undefined);
- assert(events.some(([,step,message])=>step==='observation ID'&&message.includes('Observation Saved was confirmed')));
+ await assert.rejects(process(qc,1,0,1,1,'After the Fact'),/could not find technician/);
+ assert.equal(reported,false);assert.equal(checkpoint.completionConfirmed,true);assert.equal(run.status,'needs_review');
+ assert.equal(events.length,0);
 });
 
 test('saved follow-up reports success without reuploading, and retries only reporting after an API failure',async()=>{

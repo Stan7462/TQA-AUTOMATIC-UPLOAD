@@ -92,6 +92,7 @@ export function trustQc(request: Request, row: TrustQcRow, includeScreenshot = t
     supervisorComment: row.reviewNote,
     failureReasons: row.catalystFailures ? JSON.parse(row.catalystFailures) : [],
     catalystObservationId: row.catalystObservationId,
+    observationLinkRequired: row.status === "approved" && row.trustUploadKind === "follow_up" && !row.catalystObservationId,
     observationType: row.catalystObservationType,
     uploadStatus: row.trustUploadStatus,
     submittedAt: new Date(row.submittedAt).toISOString(),
@@ -110,3 +111,20 @@ export const trustQcSelect = "id, COALESCE(root_submission_id, id) AS rootSubmis
 // live row, even if earlier attempts were rejected without a Catalyst upload.
 export const trustQcSource = `(SELECT id, tenant_id, root_submission_id, attempt_number, rejection_upload_mode, tech_id, job_number, screenshot_id, photo_ids, status, review_note, catalyst_failures, trust_upload_kind, catalyst_observation_id, catalyst_observation_type, submitted_at, reviewed_at, trust_upload_status, trust_uploaded_at, trust_external_reference, trust_upload_error, trust_upload_attempts, trust_last_attempt_at, trust_uploaded_by_key_id FROM qc_submissions UNION ALL SELECT submission_id AS id, tenant_id, root_submission_id, attempt_number, rejection_upload_mode, tech_id, job_number, screenshot_id, photo_ids, status, review_note, catalyst_failures, trust_upload_kind, catalyst_observation_id, catalyst_observation_type, submitted_at, reviewed_at, trust_upload_status, trust_uploaded_at, trust_external_reference, trust_upload_error, trust_upload_attempts, trust_last_attempt_at, trust_uploaded_by_key_id FROM qc_submission_attempts WHERE trust_upload_kind = 'observation' AND rejection_upload_mode = 'catalyst' AND status = 'rejected' AND catalyst_failures IS NOT NULL) AS catalyst_qcs`;
 export const trustQcEligible = "((status = 'approved' AND (trust_upload_kind = 'observation' OR catalyst_observation_id IS NOT NULL)) OR (status = 'rejected' AND trust_upload_kind = 'observation' AND rejection_upload_mode = 'catalyst' AND catalyst_failures IS NOT NULL))";
+// Keep approved corrections visible when an older extension confirmed the
+// original Fail from Catalyst's save toast but could not recover its completed
+// observation ID. They cannot upload until that ID is verified and linked.
+export const trustQcQueueVisible = `(${trustQcEligible} OR (
+  status = 'approved' AND trust_upload_kind = 'follow_up' AND catalyst_observation_id IS NULL
+  AND trust_upload_status IN ('ready', 'failed')
+  AND EXISTS (
+    SELECT 1 FROM qc_submission_attempts AS original_fail
+    WHERE original_fail.tenant_id = catalyst_qcs.tenant_id
+      AND original_fail.root_submission_id = catalyst_qcs.root_submission_id
+      AND original_fail.status = 'rejected'
+      AND original_fail.rejection_upload_mode = 'catalyst'
+      AND original_fail.trust_upload_kind = 'observation'
+      AND original_fail.trust_upload_status = 'uploaded'
+      AND original_fail.catalyst_failures IS NOT NULL
+  )
+))`;

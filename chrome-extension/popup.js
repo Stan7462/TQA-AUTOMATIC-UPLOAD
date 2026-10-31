@@ -10,6 +10,7 @@ async function send(command, data = {}) {
 
 function render() {
   const queue = state.queue || [];
+  const uploadableQueue = queue.filter((qc) => !qc.observationLinkRequired);
   const run = state.run || {};
   const runStatus = run.status || "ready";
   const authenticated = Boolean(state.hasAuth);
@@ -51,7 +52,7 @@ function render() {
   $("progress").max = Math.max(1, progressTotal);
   $("progress").value = progressIndex;
   $("progress").setAttribute("aria-valuetext", `${progressPercent}% · QC ${progressIndex} of ${progressTotal}`);
-  $("start").disabled = !authenticated || !current || run.status === "running" || run.status === "needs_review";
+  $("start").disabled = !authenticated || !current || !uploadableQueue.length || run.status === "running" || run.status === "needs_review";
   $("resume-review").disabled=!current;
   $("confirm-reviewed").disabled=!current;
   $("stop").disabled = run.status !== "running";
@@ -76,9 +77,21 @@ function render() {
     const details = document.createElement("small");
     const workflow = qc.workflow === "follow_up" ? "Correction follow-up" : qc.outcome === "fail" ? "Failed observation" : "Passing observation";
     details.textContent = `Tech ${qc.techId} · ${qc.photos.length} photos · ${workflow}`;
-    const badge = document.createElement("span"); badge.className = `badge ${qc.uploadStatus}`; badge.textContent = qc.uploadStatus === "failed" ? "Retry needed" : qc.uploadStatus === "uploaded" ? "Uploaded" : "Ready";
+    const badge = document.createElement("span"); badge.className = `badge ${qc.observationLinkRequired ? "link-required" : qc.uploadStatus}`; badge.textContent = qc.observationLinkRequired ? "Needs observation ID" : qc.uploadStatus === "failed" ? "Retry needed" : qc.uploadStatus === "uploaded" ? "Uploaded" : "Ready";
     meta.append(name, details);
     card.append(meta, badge); $("queue").append(card);
+    if (qc.observationLinkRequired) {
+      card.classList.add("link-required");
+      const recovery = document.createElement("div"); recovery.className = "observation-link";
+      const help = document.createElement("small"); help.textContent = "Open the completed failed observation in Catalyst and copy the numeric id= value from its URL.";
+      const controls = document.createElement("div");
+      const input = document.createElement("input"); input.inputMode = "numeric"; input.pattern = "[0-9]*"; input.placeholder = "Observation ID"; input.setAttribute("aria-label", `Catalyst observation ID for job ${qc.jobNumber}`);
+      const button = document.createElement("button"); button.textContent = "Verify & link";
+      button.addEventListener("click", () => action(async () => {
+        await send("LINK_FOLLOW_UP_OBSERVATION", { qcId: qc.id, observationId: input.value.trim() });
+      }));
+      controls.append(input, button); recovery.append(help, controls); card.append(recovery);
+    }
   }
   const logs = state.logs || [];
   $("log-count").textContent = String(logs.length);

@@ -1,6 +1,6 @@
 import { env } from "@/lib/local-env";
 import {requireCurrentExtension} from '@/lib/extension-version';
-import { requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, trustQcSource, trustQcEligible, catalystIncludesScreenshot, type TrustQcRow } from "@/lib/trust-api";
+import { requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, trustQcSource, trustQcQueueVisible, catalystIncludesScreenshot, type TrustQcRow } from "@/lib/trust-api";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   try {
     const includeScreenshot = await catalystIncludesScreenshot(key.tenantId);
     const range = fiscalMonthBounds(fiscalMonthKey());
-    const conditions = ["tenant_id = ?", trustQcEligible, "submitted_at >= ?", "submitted_at < ?"];
+    const conditions = ["tenant_id = ?", trustQcQueueVisible, "submitted_at >= ?", "submitted_at < ?"];
     const values: Array<string | number> = [key.tenantId, range.start, range.end];
     if (uploadStatus === "uploadable") conditions.push("trust_upload_status IN ('ready', 'failed')");
     if (uploadStatus === "uploaded") conditions.push("trust_upload_status = 'uploaded'");
@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     const rows = await env.DB.prepare(`SELECT ${trustQcSelect} FROM ${trustQcSource} WHERE ${where} ORDER BY COALESCE(reviewed_at, submitted_at), id LIMIT ?`).bind(...values, limit + 1).all<TrustQcRow>();
     const page = rows.results.slice(0, limit);
     const last = page.at(-1);
-    const eligible = trustQcEligible;
+    const eligible = trustQcQueueVisible;
     const countWhere = uploadStatus === "uploadable" ? `${eligible} AND trust_upload_status IN ('ready', 'failed')` : uploadStatus === "uploaded" ? `${eligible} AND trust_upload_status = 'uploaded'` : eligible;
     const count = await env.DB.prepare(`SELECT COUNT(*) AS total FROM ${trustQcSource} WHERE tenant_id = ? AND ${countWhere} AND submitted_at >= ? AND submitted_at < ?`).bind(key.tenantId, range.start, range.end).first<{ total: number }>();
     return Response.json({ qcs: page.map((row) => trustQc(request, row, includeScreenshot)), nextCursor: rows.results.length > limit && last ? `${String(last.reviewedAt ?? last.submittedAt).padStart(13, "0")}:${last.id}` : null, total: count?.total ?? 0 }, { headers: trustNoStore });

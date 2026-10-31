@@ -108,6 +108,14 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#5ba9dc,#d8e9f
 .badge{padding:4px 8px;background:#24453c;color:var(--green);font-size:10px}
 .badge.failed{background:#4c3d28;color:var(--amber)}
 .badge.uploaded{background:#24453c;color:var(--green)}
+.badge.link-required{background:#4c3d28;color:var(--amber)}
+.qc.link-required{flex-wrap:wrap;border-color:#6a5638}
+.observation-link{width:100%;padding-top:10px;border-top:1px solid #4b4f4b}
+.observation-link small{margin:0 0 7px}
+.observation-link>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+.observation-link input{min-width:0;height:40px;border:1px solid var(--line);border-radius:10px;background:#101c25;color:var(--text);padding:0 11px;font:13px Arial,Helvetica,sans-serif;outline:none}
+.observation-link input:focus{border-color:#8fb0ca;box-shadow:0 0 0 2px #8fb0ca25}
+.observation-link button{min-height:40px}
 .empty{margin:7px 0;padding:18px 14px;border:1px dashed #405362;border-radius:14px;color:var(--muted);text-align:center}
 .log-card{padding:0;overflow:hidden;margin:0}
 .log-card summary{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:48px;padding:10px 14px;cursor:pointer;list-style:none}

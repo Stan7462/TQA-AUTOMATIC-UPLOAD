@@ -175,6 +175,12 @@ async function report(id, status, value, observationType) {
   })).json()).qc;
 }
 
+async function linkObservation(id, observationId) {
+  return (await (await api(`/api/integrations/trust/qcs/${encodeURIComponent(id)}/observation`, {
+    method: "PATCH", body: JSON.stringify({ observationId })
+  })).json()).qc;
+}
+
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitBeforeNextQc(jobNumber) {
   let seconds = await qcDelaySeconds();
@@ -437,17 +443,13 @@ async function reportSavedObservation(qc, tabId, checkpoint) {
   await setRun({stage:"reporting",message:`Catalyst saved job ${qc.jobNumber}; reporting the confirmed save to TQA`});
   let reference = qc.outcome === "fail" ? checkpoint.externalReference : checkpoint.externalReference || checkpoint.jobId;
   if (qc.outcome === "fail" && !checkpoint.externalReference) {
-    // The Observation Saved toast is Catalyst's authoritative completion signal.
-    // Recover the observation ID when Catalyst's name search can find it, but do
-    // not leave an already-saved Fail in the upload queue when that lookup fails.
-    try {
-      if (!checkpoint.technicianName) throw new Error("Catalyst technician name is missing for completed observation lookup.");
-      await navigate(tabId, OBSERVATIONS_URL);
-      const found = await pageCommand(tabId,"FIND_COMPLETED_OBSERVATION",{jobNumber:qc.jobNumber,techId:qc.techId,technicianName:checkpoint.technicianName},60000);
-      reference = /^\d+$/.test(found?.observationId || "") ? found.observationId : await waitForObservationId(tabId);
-    } catch (error) {
-      await logEvent("info", "observation ID", `Job ${qc.jobNumber}: Observation Saved was confirmed. Catalyst observation ID lookup was skipped: ${safeError(error)}`);
-    }
+    // A saved Fail is not enough to unlock its future correction. Keep the run
+    // in review until its completed observation ID is verified and persisted.
+    if (!checkpoint.technicianName) throw new Error("Catalyst saved the failed QC, but its technician name is missing. Verify the completed observation before continuing.");
+    await navigate(tabId, OBSERVATIONS_URL);
+    const found = await pageCommand(tabId,"FIND_COMPLETED_OBSERVATION",{jobNumber:qc.jobNumber,techId:qc.techId,technicianName:checkpoint.technicianName},60000);
+    reference = /^\d+$/.test(found?.observationId || "") ? found.observationId : await waitForObservationId(tabId);
+    if (!/^\d+$/.test(reference || "")) throw new Error("Catalyst saved the failed QC, but its completed observation ID could not be verified. Use Confirm already uploaded to retry the lookup.");
   }
   if (reference) await recovery(qc.id,{externalReference:reference});
   const uploaded = await report(qc.id,"uploaded",reference,qc.outcome === "fail" ? "After the Fact" : checkpoint.observationType);
@@ -461,7 +463,9 @@ async function runQueue(preferredQcId = null) {
   let tabId;
   try {
     await assertCurrentVersion();
-    const queue = await loadQueue();
+    const visibleQueue = await loadQueue();
+    const blocked = visibleQueue.filter(qc => qc.observationLinkRequired);
+    const queue = visibleQueue.filter(qc => !qc.observationLinkRequired);
     // Record forced After-the-Fact failures before choosing types for passing
     // QCs, so this batch can also correct the resulting monthly imbalance.
     queue.sort((a,b)=>Number(b.outcome === "fail")-Number(a.outcome === "fail"));
@@ -471,7 +475,7 @@ async function runQueue(preferredQcId = null) {
     await setRun({ status: "running", total: queue.length, index: 0, rideAlongPercentage: percentage,
       stage: "starting", message: `${queue.length} Catalyst QCs to process; using a ${percentage}% Ride Along target per technician for the fiscal month. Each QC uses the latest confirmed monthly totals. Failed QCs are After the Fact.` });
     if (!queue.length) {
-      await setRun({ status: "done", stage: "done", message: "No QCs are ready to upload.",
+      await setRun({ status: "done", stage: "done", message: blocked.length ? `${blocked.length} correction${blocked.length === 1 ? " needs" : "s need"} a completed Catalyst observation ID before uploading.` : "No QCs are ready to upload.",
         currentQcId: null, jobId: null, jobNumber: null, techId: null, index: 0, total: 0,
         photoIndex: 0, photoTotal: 0, attempt: null, maxAttempts: null, observationType: null });
       return;
@@ -490,7 +494,7 @@ async function runQueue(preferredQcId = null) {
       await assertCurrentVersion();
       if (result.status === "uploaded" && !stopRequested) {
         // A completed first Fail can unlock its approved Fix during this same run.
-        const unlocked = (await loadQueue()).filter(qc => qc.workflow === "follow_up" && !queue.some(known => known.id === qc.id));
+        const unlocked = (await loadQueue()).filter(qc => qc.workflow === "follow_up" && !qc.observationLinkRequired && !queue.some(known => known.id === qc.id));
         for (const qc of unlocked) {
           const index = queue.length;
           queue.push(qc);
@@ -577,6 +581,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { disconnected: true };
       }
       case "REFRESH": return { queue: await loadQueue() };
+      case "LINK_FOLLOW_UP_OBSERVATION": {
+        if (activeRun) throw new Error("Stop the upload before linking a completed observation.");
+        if (!/^\d+$/.test(message.observationId || "")) throw new Error("Enter the numeric id= value from the completed Catalyst observation URL.");
+        const qc = await detail(message.qcId);
+        if (qc.workflow !== "follow_up" || !qc.observationLinkRequired) throw new Error("This correction does not need an observation link.");
+        const url = completedObservationUrl(message.observationId);
+        const tab = await chrome.tabs.create({url,active:true});
+        await navigate(tab.id,url);
+        const verified = await pageCommand(tab.id,"VERIFY_COMPLETED_OBSERVATION",{jobNumber:qc.jobNumber,techId:qc.techId,outcome:"fail"},45000);
+        if (verified.observationId !== message.observationId) throw new Error("Catalyst opened a different observation. Nothing was linked.");
+        const linked = await linkObservation(qc.id, verified.observationId);
+        if (linked.catalystObservationId !== verified.observationId || linked.observationLinkRequired) throw new Error("TQA did not confirm the observation link.");
+        await loadQueue();
+        await setRun({status:"stopped",stage:"ready",message:`Job ${qc.jobNumber}: failed observation verified. The approved correction is ready to upload.`});
+        return {linked:true};
+      }
       case "SET_DELAY": {
         if (!DELAY_OPTIONS_SECONDS.includes(message.seconds)) throw new Error("Choose a wait time shown in the extension.");
         await storageReady;

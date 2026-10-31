@@ -304,7 +304,7 @@
     const score = [...document.querySelectorAll(".bg-danger, .bg-success")].find(el => visible(el) && /^(Fail|Pass)$/.test(clean(el.textContent)));
     if (clean(score?.textContent).toLowerCase() !== outcome) throw new Error(`Catalyst outcome does not match this QC (${outcome}).`);
     const photos = [...document.querySelectorAll("[id^='thumbnail-image-container-']")].filter(visible);
-    if (photos.length !== photoCount) throw new Error("Completed Catalyst photo count does not match this QC. Review before confirming.");
+    if (Number.isInteger(photoCount) && photos.length !== photoCount) throw new Error("Completed Catalyst photo count does not match this QC. Review before confirming.");
     return {observationId};
   }
 

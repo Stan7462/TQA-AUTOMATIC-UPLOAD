@@ -1,6 +1,6 @@
 import { env } from "@/lib/local-env";
 import {requireCurrentExtension} from '@/lib/extension-version';
-import { qcIdPattern, requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, trustQcSource, trustQcEligible, catalystIncludesScreenshot, type TrustQcRow } from "@/lib/trust-api";
+import { qcIdPattern, requireTrustKey, trustError, trustNoStore, trustQc, trustQcSelect, trustQcSource, trustQcQueueVisible, catalystIncludesScreenshot, type TrustQcRow } from "@/lib/trust-api";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const includeScreenshot = await catalystIncludesScreenshot(key.tenantId);
     const range = fiscalMonthBounds(fiscalMonthKey());
-    const row = await env.DB.prepare(`SELECT ${trustQcSelect} FROM ${trustQcSource} WHERE tenant_id = ? AND id = ? AND ${trustQcEligible} AND submitted_at >= ? AND submitted_at < ?`).bind(key.tenantId, id, range.start, range.end).first<TrustQcRow>();
+    const row = await env.DB.prepare(`SELECT ${trustQcSelect} FROM ${trustQcSource} WHERE tenant_id = ? AND id = ? AND ${trustQcQueueVisible} AND submitted_at >= ? AND submitted_at < ?`).bind(key.tenantId, id, range.start, range.end).first<TrustQcRow>();
     if (!row) return trustError(404, "NOT_FOUND", "Approved QC not found.");
     return Response.json({ qc: trustQc(request, row, includeScreenshot) }, { headers: trustNoStore });
   } catch (error) {

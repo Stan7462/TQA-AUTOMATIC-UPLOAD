@@ -16,7 +16,7 @@ The extension checks at startup, when its panel opens, every five minutes, and b
 
 1. The supervisor enters only their Admin ID and password. The extension connects to the built-in shared TQA origin, and the server verifies the complete credential pair, identifies exactly one company, and refuses an ambiguous match. The extension receives a 12-hour company-scoped session and immediately discards the password.
 2. On opening, call `GET /api/integrations/trust/qcs` and display the `qcs` list. Passing approved QCs, structured first-attempt failures, and approved correction follow-ups from the current fiscal month appear when their `uploadStatus` is `ready` or `failed`.
-Approved corrections become uploadable only after the original Fail has a confirmed Catalyst observation ID. The first Fail remains readable and uploadable from attempt history after a redo. Technicians can redo immediately and supervisors can approve before any upload. Intermediate rejected attempts are never uploadable. Refresh after each successful upload to collect newly unlocked approved follow-ups in the same run. Each submission chain has one normal Pass, or one first Fail followed by one final approved Fix. The app keeps that chain in Rejected until the Fix upload succeeds.
+Approved corrections become uploadable only after the original Fail has a confirmed Catalyst observation ID. A legacy correction whose Fail was marked uploaded without that ID remains visible with `observationLinkRequired: true`; verify the completed failed observation in Catalyst, then link it through the observation endpoint before uploading the correction. The first Fail remains readable and uploadable from attempt history after a redo. Technicians can redo immediately and supervisors can approve before any upload. Intermediate rejected attempts are never uploadable. Refresh after each successful upload to collect newly unlocked approved follow-ups in the same run. Each submission chain has one normal Pass, or one first Fail followed by one final approved Fix. The app keeps that chain in Rejected until the Fix upload succeeds.
 
 3. On **Start**, process QCs one at a time. Before each QC, call `GET /api/integrations/trust/qcs/{id}` to recheck its status. Fetch every photo with the same bearer key, then upload the returned photos to the correct Trust job. The company’s screenshot upload setting determines whether the account screenshot is included. Show progress in the extension (e.g., 2 of 6 photos and 3 of 10 QCs). The server does not track percentage.
 4. Confirm that Trust saved **all** required photos for that QC. Only then call `PATCH /api/integrations/trust/qcs/{id}/upload` with `{"status":"uploaded"}`. If Trust returns a job or upload ID, include it as `externalReference`.
@@ -60,6 +60,7 @@ JSON responses use `Cache-Control: private, no-store`. Times are ISO 8601 UTC. I
 - `workflow`: `observation` creates and completes an observation; `follow_up` opens `catalystObservationId` and saves corrected pictures.
 - `outcome`: `pass` or `fail`. Failed observations also contain `supervisorComment` and `failureReasons` (`code` + exact Catalyst reason).
 - `uploadStatus`: `ready` (approved and never reported), `failed` (last Trust attempt failed; retryable), or `uploaded` (Trust upload confirmed; omitted from the default list).
+- `observationLinkRequired`: true only for an approved correction whose previously uploaded Fail is missing its completed Catalyst observation ID. Show a recovery control and do not start this correction until the ID is verified and linked.
 - A QC remains **Approved** in TQA after it becomes **Uploaded** to Trust. These are separate states.
 - On first approval, the Trust upload state defaults to `ready`. Existing approved QCs also start as `ready` when this API is installed.
 - `photos` contains exactly the pictures to upload. When the company enables account screenshots, `photos[0]` is the account screenshot; otherwise the list contains only live QC photos. Live photos remain in capture order, and `order` starts at zero. All are JPEGs. Do not assume a screenshot is present or that every QC has the same count.
@@ -113,7 +114,18 @@ GET /api/integrations/trust/qcs/{id}
 Authorization: Bearer <key>
 ```
 
-Response `200`: `{ "qc": <QC object in list response> }`. This works for eligible approved QCs and structured first Fail observations, including archived first attempts, with `ready`, `failed`, or `uploaded` status. Intermediate rejected attempts and corrections waiting for their original observation ID return `404`.
+Response `200`: `{ "qc": <QC object in list response> }`. This works for eligible approved QCs, structured first Fail observations including archived first attempts, and legacy approved corrections returned with `observationLinkRequired: true`. Intermediate rejected attempts return `404`.
+
+### Link a legacy correction to its completed failed observation
+
+```http
+PATCH /api/integrations/trust/qcs/{qcId}/observation
+Content-Type: application/json
+
+{ "observationId": "123456789" }
+```
+
+Use this only when `observationLinkRequired` is true. Before calling it, open `/TechOps/observation?id={observationId}` and verify the saved read-only observation has the same job number, Tech ID, and Fail outcome. The API links the ID across the submission chain and returns the correction with `observationLinkRequired: false`. It never marks the correction uploaded.
 
 ### Download one protected photo
 

@@ -44,6 +44,7 @@ const routes={
  list:await handler('app/api/integrations/trust/qcs/route.ts','list'),
  detail:await handler('app/api/integrations/trust/qcs/[id]/route.ts','detail'),
  upload:await handler('app/api/integrations/trust/qcs/[id]/upload/route.ts','upload'),
+ link:await handler('app/api/integrations/trust/qcs/[id]/observation/route.ts','link-observation'),
  photo:await handler('app/api/integrations/trust/photos/[id]/route.ts','photo'),
  profile:await handler('app/api/profile/route.ts','profile'),
 };
@@ -187,6 +188,23 @@ test('Observation Saved can confirm a first Fail before its optional Catalyst ob
   const linked=await uploaded(first,'98765');
   assert.equal(linked.alreadyUploaded,true);
   assert.equal(linked.qc.catalystObservationId,'98765');
+ }finally{db.close();}
+});
+test('an approved correction with a legacy missing observation ID stays visible and can be verified and linked',async()=>{
+ const db=fixture();try{
+  await reject(first);await redo(first,second);await approve(second);
+  await uploadedFromToast(first);
+  const blocked=(await queue()).find(q=>q.id===second);
+  assert(blocked);assert.equal(blocked.workflow,'follow_up');assert.equal(blocked.observationLinkRequired,true);assert.equal(blocked.catalystObservationId,null);
+  const detail=(await ok(await routes.detail.GET(versionedRequest('http://localhost/qcs/'+second),context(second)))).qc;
+  assert.equal(detail.observationLinkRequired,true);
+  const linked=await ok(await routes.link.PATCH(request({observationId:'98765'},'PATCH'),context(second)));
+  assert.equal(linked.qc.catalystObservationId,'98765');assert.equal(linked.qc.observationLinkRequired,false);
+  assert.equal(db.prepare('SELECT catalyst_observation_id AS id FROM qc_submissions WHERE id=?').get(second).id,'98765');
+  const archived=db.prepare('SELECT catalyst_observation_id AS id,trust_external_reference AS reference FROM qc_submission_attempts WHERE submission_id=?').get(first);
+  assert.equal(archived.id,'98765');assert.equal(archived.reference,'98765');
+  const ready=(await queue()).find(q=>q.id===second);assert(ready);assert.equal(ready.observationLinkRequired,false);
+  assert.equal((await routes.link.PATCH(request({observationId:'11111'},'PATCH'),context(second))).status,409);
  }finally{db.close();}
 });
 test('a QC approved without rejection uploads only once',async()=>{
