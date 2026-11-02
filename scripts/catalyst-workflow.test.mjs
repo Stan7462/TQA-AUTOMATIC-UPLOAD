@@ -13,7 +13,7 @@ const root=resolve(import.meta.dirname,'..');
 const temp=mkdtempSync(join(tmpdir(),'tqa-workflow-tests-'));
 const mocks={
  '@/lib/local-env':'export const env=new Proxy({}, {get:(_,key)=>globalThis.workflowTest.env[key]});',
- '@/lib/tech-auth':`export const sameOrigin=()=>true; export const normalizeTechId=x=>x; export const getTechSessionContext=async()=>({tenantId:globalThis.workflowTest.tenant,techId:'TECH',expiresAt:Date.now()+1e12}); export const getCookie=()=> 'a'.repeat(64); export const hashToken=async()=> 'test'; export const TECH_COOKIE='test'; export const TECH_SESSION_LIFETIME_SECONDS=1; export const techCookie=()=>'';`,
+ '@/lib/tech-auth':`export const sameOrigin=()=>!globalThis.workflowTest.foreignOrigin; export const normalizeTechId=x=>x; export const getTechSessionContext=async()=>globalThis.workflowTest.signedOut?null:({tenantId:globalThis.workflowTest.tenant,techId:globalThis.workflowTest.techId??'TECH',isAdmin:!!globalThis.workflowTest.admin,expiresAt:Date.now()+1e12}); export const getCookie=()=> 'a'.repeat(64); export const hashToken=async()=> 'test'; export const TECH_COOKIE='test'; export const TECH_SESSION_LIFETIME_SECONDS=1; export const techCookie=()=>'';`,
  '@/app/chatgpt-auth':'export const getChatGPTUser=async()=>({tenantId:globalThis.workflowTest.tenant});',
  '@/app/access':'export const isOwner=()=>true;',
  '@/lib/fiscal-month':'export const fiscalMonthKey=()=>"2026-10"; export const fiscalMonthBounds=()=>({start:Date.now()-86400000,end:Date.now()+20*86400000});',
@@ -47,6 +47,7 @@ const routes={
  link:await handler('app/api/integrations/trust/qcs/[id]/observation/route.ts','link-observation'),
  photo:await handler('app/api/integrations/trust/photos/[id]/route.ts','photo'),
  profile:await handler('app/api/profile/route.ts','profile'),
+ acknowledge:await handler('app/api/profile/feedback/[id]/acknowledge/route.ts','acknowledge'),
 };
 const first='00000000-0000-4000-8000-000000000001';
 const second='00000000-0000-4000-8000-000000000002';
@@ -55,7 +56,7 @@ const failure={code:'TQA4',reason:'Unused ports terminated / NAP ports closed'};
 const picture='8000000000000-00000000-0000-4000-8000-000000000001.jpg';
 function fixture(){
  const db=new DatabaseSync(':memory:');
- const columns=`tenant_id TEXT NOT NULL,root_submission_id TEXT,attempt_number INTEGER DEFAULT 1,tech_id TEXT,job_number TEXT,address TEXT,screenshot_id TEXT,photo_ids TEXT,status TEXT,submitted_at INTEGER,reviewed_at INTEGER,review_note TEXT,trust_upload_status TEXT DEFAULT 'ready',trust_uploaded_at INTEGER,trust_external_reference TEXT,trust_upload_error TEXT,trust_upload_attempts INTEGER DEFAULT 0,trust_last_attempt_at INTEGER,trust_uploaded_by_key_id TEXT,location_status TEXT,location_latitude REAL,location_longitude REAL,location_accuracy REAL,location_captured_at INTEGER,catalyst_failures TEXT,trust_upload_kind TEXT DEFAULT 'observation',catalyst_observation_id TEXT,catalyst_observation_type TEXT,rejection_upload_mode TEXT NOT NULL DEFAULT 'catalyst'`;
+ const columns=`tenant_id TEXT NOT NULL,root_submission_id TEXT,attempt_number INTEGER DEFAULT 1,tech_id TEXT,job_number TEXT,address TEXT,screenshot_id TEXT,photo_ids TEXT,status TEXT,submitted_at INTEGER,reviewed_at INTEGER,review_note TEXT,trust_upload_status TEXT DEFAULT 'ready',trust_uploaded_at INTEGER,trust_external_reference TEXT,trust_upload_error TEXT,trust_upload_attempts INTEGER DEFAULT 0,trust_last_attempt_at INTEGER,trust_uploaded_by_key_id TEXT,location_status TEXT,location_latitude REAL,location_longitude REAL,location_accuracy REAL,location_captured_at INTEGER,catalyst_failures TEXT,trust_upload_kind TEXT DEFAULT 'observation',catalyst_observation_id TEXT,catalyst_observation_type TEXT,rejection_upload_mode TEXT NOT NULL DEFAULT 'catalyst',feedback_acknowledged_at INTEGER`;
  db.exec(`CREATE TABLE qc_submissions(id TEXT PRIMARY KEY,${columns},correction_pending INTEGER DEFAULT 0,correction_deadline_at INTEGER);
  CREATE TABLE qc_submission_attempts(submission_id TEXT UNIQUE,${columns},UNIQUE(tenant_id,root_submission_id,attempt_number));
  CREATE TABLE tenants(id TEXT PRIMARY KEY,name TEXT,active INTEGER,company_kind TEXT,subscription_status TEXT,catalyst_include_screenshot INTEGER DEFAULT 1);
@@ -311,7 +312,7 @@ test('PostgreSQL migrations and monthly counters handle confirmed uploads withou
  const {postgresSql}=await import('../lib/database.mjs');
  const pg=new PGlite();
  try{
-  for(const name of ['0001_baseline','0002_notification_summaries','0003_single_push_phone','0004_qc_address','0005_catalyst_failure_workflow','0006_catalyst_observation_type','0007_super_admin','0008_catalyst_screenshot','0009_local_rejection'])await pg.exec(readFileSync(join(root,`postgres/migrations/${name}.sql`),'utf8'));
+  for(const name of ['0001_baseline','0002_notification_summaries','0003_single_push_phone','0004_qc_address','0005_catalyst_failure_workflow','0006_catalyst_observation_type','0007_super_admin','0008_catalyst_screenshot','0009_local_rejection','0010_feedback_acknowledgment'])await pg.exec(readFileSync(join(root,`postgres/migrations/${name}.sql`),'utf8'));
   const db={prepare(sql){return{bind(...values){return{first:async()=> (await pg.query(postgresSql(sql),values)).rows[0],all:async()=>({results:(await pg.query(postgresSql(sql),values)).rows}),run:async()=>({meta:{changes:(await pg.query(postgresSql(sql),values)).affectedRows}}),sql,values};}};},async batch(statements){await pg.exec('BEGIN');try{const r=[];for(const statement of statements)r.push(await statement.run());await pg.exec('COMMIT');return r;}catch(e){await pg.exec('ROLLBACK');throw e;}}};
   globalThis.workflowTest={tenant:'a',env:{DB:db}};
   await pg.query("INSERT INTO tenants(id,name,created_at) VALUES('a','Demo',1)");
@@ -332,6 +333,13 @@ test('PostgreSQL migrations and monthly counters handle confirmed uploads withou
   assert.deepEqual(local.rows[0],{rejection_upload_mode:'local',review_note:null,catalyst_failures:null});
   assert.deepEqual(await queue(),[]);
   await ok(await routes.stats.GET(versionedRequest(`http://localhost/stats?start=${Date.now()-86400000}&end=${Date.now()+86400000}`)));
+  const feedbackId='00000000-0000-4000-8000-000000000004';
+  await pg.query("INSERT INTO qc_submissions(id,tenant_id,root_submission_id,tech_id,job_number,screenshot_id,photo_ids,status,submitted_at) VALUES($1,'a',$1,'TECH','776499',$2,'[]','pending',$3)",[feedbackId,picture,Date.now()]);
+  const feedback=await feedbackNote(feedbackId,'A PostgreSQL feedback note');
+  assert.equal(await unreadFeedback(),1);
+  const acknowledged=await ok(await acknowledge(feedbackId,feedback.reviewedAt,'A PostgreSQL feedback note'));
+  assert.equal(typeof acknowledged.feedbackAcknowledgedAt,'number');assert.equal(await unreadFeedback(),0);
+
  }finally{await pg.close();}
 });
 
@@ -424,5 +432,58 @@ test('snapshot type counts use confirmed upload dates, exclude correction duplic
   assert.deepEqual(stats.map(q=>[q.techId,q.rideAlong,q.afterTheFact,q.notRecorded]),[['TECH',1,1,1],['ZERO',0,0,0]]);
   globalThis.workflowTest.tenant='b';stats=(await ok(await routes.stats.GET(versionedRequest(url)))).technicians;
   assert.deepEqual(stats.map(q=>[q.techId,q.rideAlong,q.afterTheFact,q.notRecorded]),[['TECH',1,0,0]]);
+ }finally{db.close();}
+});
+
+
+async function feedbackNote(id,note='Please include a house photo on future QCs.'){
+ return ok(await routes.review.POST(request({status:'approved',reviewNote:note}),context(id)));
+}
+async function acknowledge(id,reviewedAt,reviewNote){return routes.acknowledge.POST(request({reviewedAt,reviewNote}),context(id));}
+async function unreadFeedback(){return (await ok(await routes.profile.GET(versionedRequest('http://localhost/profile?count=1')))).unreadFeedback;}
+test('approval feedback stays unread until explicit technician acknowledgment; approval and Catalyst upload remain unchanged',async()=>{
+ const db=fixture();try{
+  const note='Please include a house photo on future QCs.';
+  const review=await feedbackNote(first,note);assert.equal(await unreadFeedback(),1);
+  const list=await ok(await routes.profile.GET(versionedRequest('http://localhost/profile?view=notes')));
+  assert.equal(list.submissions[0].reviewNote,note);assert.equal(list.submissions[0].feedbackAcknowledgedAt,null);
+  // Merely opening the note does not acknowledge it.
+  assert.equal(await unreadFeedback(),1);assert.deepEqual((await queue()).map(q=>q.id),[first]);
+  const saved=await ok(await acknowledge(first,review.reviewedAt,note));assert.equal(await unreadFeedback(),0);assert(saved.feedbackAcknowledgedAt>0);
+  const repeated=await ok(await acknowledge(first,review.reviewedAt,note));assert.equal(repeated.feedbackAcknowledgedAt,saved.feedbackAcknowledgedAt);
+  await uploaded(first);
+  const actual=db.prepare('SELECT status,trust_upload_status,feedback_acknowledged_at FROM qc_submissions WHERE id=?').get(first);
+  assert.equal(actual.status,'approved');assert.equal(actual.trust_upload_status,'uploaded');assert.equal(actual.feedback_acknowledged_at,saved.feedbackAcknowledgedAt);
+  const details=await ok(await routes.dashboard.GET(versionedRequest(`http://localhost/qcs?status=all&qc=${first}`)));
+  assert.equal(details.submissions[0].feedbackAcknowledgedAt,saved.feedbackAcknowledgedAt);
+ }finally{db.close();}
+});
+test('unread approved notes remain available across fiscal periods and after upload; blank or rejected notes do not count',async()=>{
+ const db=fixture();try{
+  const note='Please use clearer pictures next time.';const review=await feedbackNote(first,note);await uploaded(first);
+  db.prepare('UPDATE qc_submissions SET submitted_at=? WHERE id=?').run(Date.now()-90*86400000,first);
+  assert.equal(await unreadFeedback(),1);
+  const notes=await ok(await routes.profile.GET(versionedRequest('http://localhost/profile?view=notes')));assert.equal(notes.submissions.length,1);
+  await ok(await acknowledge(first,review.reviewedAt,note));assert.equal(await unreadFeedback(),0);
+  const recent=await ok(await routes.profile.GET(versionedRequest('http://localhost/profile?view=captured')));assert.equal(recent.submissions.length,0);
+  db.prepare("UPDATE qc_submissions SET status='rejected',feedback_acknowledged_at=NULL WHERE id=?").run(first);assert.equal(await unreadFeedback(),0);
+  db.prepare("UPDATE qc_submissions SET status='approved',review_note='   ' WHERE id=?").run(first);assert.equal(await unreadFeedback(),0);
+ }finally{db.close();}
+});
+test('only the assigned signed-in technician can acknowledge the exact note revision',async()=>{
+ const db=fixture();try{
+  const note='Remember the house picture.';const review=await feedbackNote(first,note);
+  globalThis.workflowTest.signedOut=true;assert.equal((await acknowledge(first,review.reviewedAt,note)).status,401);globalThis.workflowTest.signedOut=false;
+  globalThis.workflowTest.admin=true;assert.equal((await acknowledge(first,review.reviewedAt,note)).status,403);globalThis.workflowTest.admin=false;
+  globalThis.workflowTest.foreignOrigin=true;assert.equal((await acknowledge(first,review.reviewedAt,note)).status,403);globalThis.workflowTest.foreignOrigin=false;
+  globalThis.workflowTest.techId='ANOTHER';assert.equal((await acknowledge(first,review.reviewedAt,note)).status,409);globalThis.workflowTest.techId='TECH';
+  globalThis.workflowTest.tenant='b';assert.equal((await acknowledge(first,review.reviewedAt,note)).status,409);assert.equal(await unreadFeedback(),0);globalThis.workflowTest.tenant='a';
+  assert.equal((await acknowledge(first,review.reviewedAt-1,note)).status,409);
+  db.prepare('UPDATE qc_submissions SET review_note=?,reviewed_at=? WHERE id=?').run('New supervisor feedback',review.reviewedAt+1,first);
+  assert.equal((await acknowledge(first,review.reviewedAt,note)).status,409);assert.equal(await unreadFeedback(),1);
+  await ok(await acknowledge(first,review.reviewedAt+1,'New supervisor feedback'));
+  // Saving another review resets acknowledgment for the new feedback.
+  db.prepare("UPDATE qc_submissions SET status='pending' WHERE id=?").run(first);
+  await feedbackNote(first,'A newer note');assert.equal(await unreadFeedback(),1);
  }finally{db.close();}
 });

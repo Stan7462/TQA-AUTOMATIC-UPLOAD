@@ -1,8 +1,9 @@
 "use client";
 
+import TechFeedbackNotice from "@/app/tech-feedback-notice";
 import CompanyAccessBanner from "@/app/company-access-banner";
 import { useEffect, useRef, useState } from "react";
-import { Camera, Check, ChevronRight, FileText, Flashlight, FlashlightOff, ImagePlus, LogOut, MapPin, RotateCcw, Send, Trash2, X } from "lucide-react";
+import { MessageSquareText, Camera, Check, ChevronRight, FileText, Flashlight, FlashlightOff, ImagePlus, LogOut, MapPin, RotateCcw, Send, Trash2, X } from "lucide-react";
 import { screenshotAddress } from "@/lib/address-ocr";
 import { sixDigitJobNumber } from "@/lib/job-number-ocr";
 import { fiscalDeadline, fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
@@ -18,7 +19,7 @@ const MAX_INITIAL_PHOTOS = 7;
 const MAX_CORRECTION_PHOTOS = 10;
 const DEFAULT_MONTHLY_QC_GOAL = 5;
 const MAX_CAMERA_ZOOM = 5;
-type QcCounts = { captured: number; uploaded: number; rejected: number; urgentRejectedAt: number | null };
+type QcCounts = { unreadFeedback:number; captured: number; uploaded: number; rejected: number; urgentRejectedAt: number | null };
 
 function remainingDeadlineHours(deadlineAt: number, now: number) {
   return Math.max(0, Math.ceil((deadlineAt - now) / (60 * 60 * 1000)));
@@ -433,9 +434,9 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         const response = await fetch(`/api/profile?count=1&start=${currentMonth.start}&end=${currentMonth.end}`, { cache: "no-store", signal: current.signal });
         if (!response.ok) throw new Error("Could not load QC counts.");
         const result = await response.json() as { techId: string } & QcCounts;
-        if (!current.signal.aborted && result.techId === techId) setQcCounts({ captured: result.captured, uploaded: result.uploaded, rejected: result.rejected, urgentRejectedAt: result.urgentRejectedAt });
+        if (!current.signal.aborted && result.techId === techId) setQcCounts({ unreadFeedback:result.unreadFeedback??0, captured: result.captured, uploaded: result.uploaded, rejected: result.rejected, urgentRejectedAt: result.urgentRejectedAt });
       } catch {
-        if (!current.signal.aborted) setQcCounts(null);
+        // Keep the last known unread-note count during a temporary connection failure.
       }
     }
     void refreshQcCounts();
@@ -798,7 +799,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
 
   return <main className={`capture-shell qc-dark-shell qc-reference${cameraOn ? " qc-camera-active" : ""}`}><CompanyAccessBanner/>
     <div className="camera-app qc-form">
-      <header className="camera-header qc-reference-header"><div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>New QC submission</h1></div><div className="qc-header-actions"><a className="button light qc-logout qc-notification-settings" href="/notifications">Notifications</a><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => { setResetError(""); setResetConfirmation(true); }}><RotateCcw size={17}/>Start new QC</button><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => void logOut()}><LogOut size={17}/>{logoutBusy ? "Logging out…" : "Log out"}</button></div><p>Tech {techId} · Photos → screenshot → job number.</p></header>
+      <header className="camera-header qc-reference-header"><div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>New QC submission</h1></div><div className="qc-header-actions"><a className="button light qc-logout qc-feedback-link" href="/profile?view=notes"><MessageSquareText size={16}/>Notes{(qcCounts?.unreadFeedback??0)>0&&<span className="qc-feedback-counter">{qcCounts!.unreadFeedback}</span>}</a><a className="button light qc-logout qc-notification-settings" href="/notifications">Notifications</a><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => { setResetError(""); setResetConfirmation(true); }}><RotateCcw size={17}/>Start new QC</button><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => void logOut()}><LogOut size={17}/>{logoutBusy ? "Logging out…" : "Log out"}</button></div><p>Tech {techId} · Photos → screenshot → job number.</p></header>
       <dialog ref={resetDialog} className="qc-reset-dialog" aria-labelledby="qc-reset-title" aria-describedby="qc-reset-description" onCancel={(event) => { event.preventDefault(); if (!clearingDraft.current) setResetConfirmation(false); }}>
         <div className="qc-reset-icon" aria-hidden="true"><RotateCcw size={24}/></div>
         <h2 id="qc-reset-title">Start a new QC?</h2>
@@ -811,6 +812,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         </div>
       </dialog>
       {resetMessage && <p className="qc-reset-status" role="status">{resetMessage}</p>}
+      <TechFeedbackNotice count={qcCounts?.unreadFeedback??0}/>
       <section className="qc-tech-summary" aria-label="My QC totals">
         <a className="qc-summary-card qc-summary-rejected" href="/profile?view=rejected" aria-label={`Rejected QCs ${qcCounts?.rejected ?? "loading"}${rejectedDeadlineHours === null ? "" : `, nearest deadline ${rejectedDeadlineHours} hours`}`}><span>Rejected QCs</span><strong>{qcCounts?.rejected ?? "—"}</strong>{rejectedDeadlineHours !== null && <em className="qc-summary-deadline-badge" aria-hidden="true">{rejectedDeadlineHours}</em>}</a>
         <a className="qc-summary-card" href="/profile?view=captured"><span>Captured QCs</span><strong>{qcCounts?.captured ?? "—"}</strong></a>
