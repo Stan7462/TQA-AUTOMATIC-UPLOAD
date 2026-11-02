@@ -18,6 +18,7 @@ function fixture() {
   db.exec(readFileSync(new URL("../drizzle/0017_push_notifications.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../drizzle/0018_company_notification_policy.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../drizzle/0019_notification_summaries.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../drizzle/0028_team_watch_defaults.sql", import.meta.url), "utf8"));
   return db;
 }
 function account(db, tenant, tech) { db.prepare("INSERT INTO push_accounts(tenant_id,tech_id,external_id,enabled,enabled_at) VALUES(?,?,?,1,?)").run(tenant, tech, `${tenant}-${tech}`, now - HOUR); }
@@ -110,4 +111,21 @@ test("queued summary cancels when fixes complete and retries never send outside 
 });
 test("Chicago fiscal schedule handles winter and daylight saving",()=>{
  const p=notificationPeriod(Date.parse('2026-11-15T14:00:00Z'));assert.equal(p.morning,true);assert.equal(p.daysLeft,6);assert.equal(notificationPeriod(Date.parse('2026-11-15T13:59:00Z')).morning,false);assert.equal(new Date(p.start).toISOString(),'2026-10-22T05:00:00.000Z');assert.equal(new Date(p.end).toISOString(),'2026-11-22T06:00:00.000Z');
+});
+
+test('company submission defaults reach all supervisors and future technicians, with personal overrides and tenant isolation',async()=>{
+ const db=fixture();account(db,'a','SUP');account(db,'b','SUP');
+ db.exec("INSERT INTO push_company_preferences(tenant_id,watch_upload_enabled,watch_fixed_enabled) VALUES('a',1,1); INSERT INTO technicians(tenant_id,tech_id,is_admin) VALUES('a','SUP2',1),('a','NEW',0)");account(db,'a','SUP2');
+ qc(db,'new','a','NEW');qc(db,'fixed','a','1111');db.exec("UPDATE qc_submissions SET correction_pending=1,attempt_number=2 WHERE id='fixed'");qc(db,'foreign','b','1111');
+ db.prepare("INSERT INTO push_watches(tenant_id,supervisor_id,tech_id,enabled_at,upload_enabled,fixed_enabled) VALUES('a','SUP2','NEW',?,0,0)").run(now-HOUR);
+ const sends=[];await processNotifications(db,{now,config,send:async(e,a)=>sends.push([a.external_id,e.submission_id])});
+ assert.deepEqual(sends.sort(),[['a-SUP','fixed'],['a-SUP','new'],['a-SUP2','fixed']].sort());db.close();
+});
+
+test('team alert changes do not send historic submissions, and disabling defaults cancels queued alerts',async()=>{
+ const db=fixture();account(db,'a','SUP');
+ db.prepare("INSERT INTO push_company_preferences(tenant_id,watch_upload_enabled,watch_upload_since,watch_fixed_enabled,watch_fixed_since) VALUES('a',1,?,1,?)").run(now+1,now-HOUR);
+ qc(db,'old','a','1111');qc(db,'fixed','a','2222');db.exec("UPDATE qc_submissions SET correction_pending=1,attempt_number=2 WHERE id='fixed'");
+ await collectNotifications(db,now+2);assert.equal(db.prepare("SELECT COUNT(*) AS n FROM push_outbox WHERE kind='upload'").get().n,0);assert.equal(db.prepare("SELECT COUNT(*) AS n FROM push_outbox WHERE kind='fixed'").get().n,1);
+ db.exec("UPDATE push_company_preferences SET watch_fixed_enabled=0");const sends=[];await processNotifications(db,{now:now+3,config,send:async e=>sends.push(e)});assert.equal(sends.length,0);db.close();
 });

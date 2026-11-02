@@ -24,12 +24,13 @@ test('all SQLite records and binary data preserve exact values in PostgreSQL',as
  if(source.prepare('PRAGMA table_info(tenants)').all().some(c=>c.name==='catalyst_include_screenshot'))await pg.exec(readFileSync('postgres/migrations/0008_catalyst_screenshot.sql','utf8'));
  if(source.prepare('PRAGMA table_info(qc_submissions)').all().some(c=>c.name==='rejection_upload_mode'))await pg.exec(readFileSync('postgres/migrations/0009_local_rejection.sql','utf8'));
  if(source.prepare('PRAGMA table_info(qc_submissions)').all().some(c=>c.name==='feedback_acknowledged_at'))await pg.exec(readFileSync('postgres/migrations/0010_feedback_acknowledgment.sql','utf8'));
+ if(source.prepare('PRAGMA table_info(push_company_preferences)').all().some(c=>c.name==='watch_upload_enabled'))await pg.exec(readFileSync('postgres/migrations/0011_team_watch_defaults.sql','utf8'));
  await pg.exec('BEGIN');const result=await importSqlite(source,pg);const existing=tables.filter(table=>source.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));assert.equal(Object.keys(result).length,existing.length);await pg.exec('ROLLBACK');}
  finally{source.close();await pg.close();rmSync(directory,{recursive:true,force:true});}
 });
 test('PostgreSQL preserves company isolation, login guards, PIN uniqueness and notification logic',async()=>{
  const pg=new PGlite();try{
- await pg.exec(schema);await pg.exec(readFileSync('postgres/migrations/0002_notification_summaries.sql','utf8'));await pg.exec(readFileSync('postgres/migrations/0003_single_push_phone.sql','utf8'));
+ await pg.exec(schema);await pg.exec(readFileSync('postgres/migrations/0011_team_watch_defaults.sql','utf8'));await pg.exec(readFileSync('postgres/migrations/0002_notification_summaries.sql','utf8'));await pg.exec(readFileSync('postgres/migrations/0003_single_push_phone.sql','utf8'));
  await pg.exec("INSERT INTO tenants(id,name,created_at) VALUES('a','A',1),('b','B',1),('c','C',1)");
  const add=(tenant,id,admin,fingerprint)=>pg.query("INSERT INTO technicians(tenant_id,tech_id,pin_salt,pin_hash,is_admin,credential_fingerprint,created_at) VALUES($1,$2,'salt','hash',$3,$4,1)",[tenant,id,admin,fingerprint]);
  await add('a','1111',0,'pin-a');await add('b','1111',0,'pin-b');

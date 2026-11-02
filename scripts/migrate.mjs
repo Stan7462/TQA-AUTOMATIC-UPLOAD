@@ -106,6 +106,7 @@ reconcileRuntimeMigration("0024_super_admin.sql", "20261028000000_super_admin", 
 reconcileRuntimeMigration("0025_catalyst_screenshot.sql", "20261028010000_catalyst_screenshot", "tenants", ["catalyst_include_screenshot"]);
 reconcileRuntimeMigration("0026_local_rejection.sql", "20261028020000_local_rejection", "qc_submissions", ["rejection_upload_mode"]);
 reconcileRuntimeMigration("0027_feedback_acknowledgment.sql", "20261101000000_feedback_acknowledgment", "qc_submissions", ["feedback_acknowledged_at"]);
+reconcileRuntimeMigration("0028_team_watch_defaults.sql", "20261102000000_team_watch_defaults", "push_company_preferences", ["watch_upload_enabled", "watch_fixed_enabled", "watch_upload_since", "watch_fixed_since"]);
 runPrisma("migrate", "deploy");
 
 }

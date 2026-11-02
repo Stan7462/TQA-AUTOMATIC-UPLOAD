@@ -55,7 +55,7 @@ export async function collectNotifications(db, now = Date.now()) {
   for(const account of accounts){
     await companyAlerts(db,account);
     if(account.is_admin){
-      const uploads=await db.prepare("SELECT q.*,w.upload_enabled,w.fixed_enabled FROM push_watches w JOIN technicians t ON t.tenant_id=w.tenant_id AND t.tech_id=w.tech_id JOIN qc_submissions q ON q.tenant_id=w.tenant_id AND q.tech_id=w.tech_id WHERE w.tenant_id=? AND w.supervisor_id=? AND t.active=1 AND q.submitted_at>=MAX(w.enabled_at,?,?) AND q.submitted_at<?").all(account.tenant_id,account.tech_id,account.enabled_at,Math.max(period.start,now-24*HOUR),period.end);
+      const uploads=await db.prepare("SELECT q.*,COALESCE(w.upload_enabled,c.watch_upload_enabled,0) AS upload_enabled,COALESCE(w.fixed_enabled,c.watch_fixed_enabled,0) AS fixed_enabled FROM qc_submissions q JOIN technicians t ON t.tenant_id=q.tenant_id AND t.tech_id=q.tech_id LEFT JOIN push_company_preferences c ON c.tenant_id=q.tenant_id LEFT JOIN push_watches w ON w.tenant_id=q.tenant_id AND w.tech_id=q.tech_id AND w.supervisor_id=? WHERE q.tenant_id=? AND t.is_admin=0 AND t.active=1 AND q.submitted_at>=COALESCE(w.enabled_at,0) AND q.submitted_at>=CASE WHEN q.correction_pending=1 THEN COALESCE(c.watch_fixed_since,0) ELSE COALESCE(c.watch_upload_since,0) END AND q.submitted_at>=? AND q.submitted_at>=? AND q.submitted_at<?").all(account.tech_id,account.tenant_id,account.enabled_at,Math.max(period.start,now-24*HOUR),period.end);
       for(const q of uploads){
         const fixed=Boolean(q.correction_pending);
         if(fixed?!q.fixed_enabled:!q.upload_enabled||q.status!=='pending')continue;
@@ -91,8 +91,8 @@ export async function notificationStillRelevant(db,event,now){
     const q=await db.prepare("SELECT * FROM qc_submissions WHERE tenant_id=? AND id=?").get(event.tenant_id,event.submission_id);
     if(!q||q.submitted_at<period.start||q.submitted_at>=period.end)return null;
     if(['upload','fixed'].includes(event.kind)){
-      const watch=await db.prepare("SELECT upload_enabled,fixed_enabled FROM push_watches WHERE tenant_id=? AND supervisor_id=? AND tech_id=?").get(q.tenant_id,account.tech_id,q.tech_id);
-      if(!account.is_admin||!watch||(event.kind==='fixed'?!watch.fixed_enabled||!q.correction_pending:!watch.upload_enabled||q.correction_pending||q.status!=='pending'))return null;
+      const watch=await db.prepare("SELECT COALESCE(w.upload_enabled,c.watch_upload_enabled,0) AS upload_enabled,COALESCE(w.fixed_enabled,c.watch_fixed_enabled,0) AS fixed_enabled,COALESCE(w.enabled_at,0) AS enabled_at,COALESCE(c.watch_upload_since,0) AS upload_since,COALESCE(c.watch_fixed_since,0) AS fixed_since FROM tenants n LEFT JOIN push_company_preferences c ON c.tenant_id=n.id LEFT JOIN push_watches w ON w.tenant_id=n.id AND w.supervisor_id=? AND w.tech_id=? WHERE n.id=?").get(account.tech_id,q.tech_id,q.tenant_id);
+      if(!account.is_admin||!watch||q.submitted_at<Math.max(account.enabled_at,watch.enabled_at,event.kind==='fixed'?watch.fixed_since:watch.upload_since)||(event.kind==='fixed'?!watch.fixed_enabled||!q.correction_pending:!watch.upload_enabled||q.correction_pending||q.status!=='pending'))return null;
       if(!await db.prepare("SELECT 1 FROM technicians WHERE tenant_id=? AND tech_id=? AND active=1").get(q.tenant_id,q.tech_id))return null;
     }else{
       if(q.status!=='rejected'||q.correction_pending||q.correction_deadline_at!==event.revision)return null;

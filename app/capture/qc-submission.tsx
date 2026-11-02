@@ -279,6 +279,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const clearingDraft = useRef(false);
   const locationRequest = useRef<Promise<QcLocation> | null>(null);
   const resetDialog = useRef<HTMLDialogElement>(null);
+  const logoutDialog = useRef<HTMLDialogElement>(null);
   const resetCancel = useRef<HTMLButtonElement>(null);
   const [resetConfirmation, setResetConfirmation] = useState(false);
   const [resetMessage, setResetMessage] = useState("");
@@ -799,7 +800,16 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
 
   return <main className={`capture-shell qc-dark-shell qc-reference${cameraOn ? " qc-camera-active" : ""}`}><CompanyAccessBanner/>
     <div className="camera-app qc-form">
-      <header className="camera-header qc-reference-header"><div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>New QC submission</h1></div><div className="qc-header-actions"><a className="button light qc-logout qc-feedback-link" href="/profile?view=notes"><MessageSquareText size={16}/>Notes{(qcCounts?.unreadFeedback??0)>0&&<span className="qc-feedback-counter">{qcCounts!.unreadFeedback}</span>}</a><a className="button light qc-logout qc-notification-settings" href="/notifications">Notifications</a><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => { setResetError(""); setResetConfirmation(true); }}><RotateCcw size={17}/>Start new QC</button><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => void logOut()}><LogOut size={17}/>{logoutBusy ? "Logging out…" : "Log out"}</button></div><p>Tech {techId} · Photos → screenshot → job number.</p></header>
+      <header className="camera-header qc-reference-header"><div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>New QC submission</h1></div><button type="button" className="qc-sign-out" aria-label="Sign out" title="Sign out" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => logoutDialog.current?.showModal()}><LogOut size={22} aria-hidden="true"/></button><div className="qc-header-actions"><a className="button light qc-logout qc-feedback-link" href="/profile?view=notes"><MessageSquareText size={16}/>Notes{(qcCounts?.unreadFeedback??0)>0&&<span className="qc-feedback-counter">{qcCounts!.unreadFeedback}</span>}</a><a className="button light qc-logout qc-notification-settings" href="/notifications">Notifications</a><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => { setResetError(""); setResetConfirmation(true); }}><RotateCcw size={17}/>Start new QC</button></div><p>Tech {techId} · Photos → screenshot → job number.</p></header>
+      <dialog ref={logoutDialog} className="qc-reset-dialog" aria-labelledby="qc-sign-out-title" aria-describedby="qc-sign-out-description">
+        <div className="qc-reset-icon" aria-hidden="true"><LogOut size={24}/></div>
+        <h2 id="qc-sign-out-title">Sign out?</h2>
+        <p id="qc-sign-out-description">You’ll need to sign in again to access your QCs.</p>
+        <div className="qc-reset-actions">
+          <button type="button" className="button light" autoFocus onClick={() => logoutDialog.current?.close()}>Cancel</button>
+          <button type="button" className="button dark" onClick={() => { logoutDialog.current?.close(); void logOut(); }}>Sign out</button>
+        </div>
+      </dialog>
       <dialog ref={resetDialog} className="qc-reset-dialog" aria-labelledby="qc-reset-title" aria-describedby="qc-reset-description" onCancel={(event) => { event.preventDefault(); if (!clearingDraft.current) setResetConfirmation(false); }}>
         <div className="qc-reset-icon" aria-hidden="true"><RotateCcw size={24}/></div>
         <h2 id="qc-reset-title">Start a new QC?</h2>

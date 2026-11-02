@@ -35,6 +35,7 @@ async function handler(file,name){
 }
 const observationTypes=await handler('lib/qc-observation-type.ts','observation-types');
 const routes={
+ watches:await handler('app/api/notifications/watch/route.ts','watches'),
  dashboard:await handler('app/api/qc-submissions/route.ts','dashboard'),
  activity:await handler('app/api/catalyst-activity/route.ts','activity'),
  stats:await handler('app/api/qc-stats/route.ts','stats'),
@@ -63,6 +64,8 @@ function fixture(){
  INSERT INTO tenants VALUES('a','Demo',1,'customer','active',1),('b','Other',1,'customer','active',1);
  CREATE TABLE technician_removals(tenant_id TEXT,tech_id TEXT,state TEXT);
  CREATE TABLE push_accounts(tenant_id TEXT,tech_id TEXT,enabled INTEGER);
+ CREATE TABLE push_company_preferences(tenant_id TEXT PRIMARY KEY,rejected INTEGER DEFAULT 1,deadline INTEGER DEFAULT 1,overdue INTEGER DEFAULT 1,monthly INTEGER DEFAULT 1,watch_upload_enabled INTEGER DEFAULT 0,watch_fixed_enabled INTEGER DEFAULT 0,watch_upload_since INTEGER DEFAULT 0,watch_fixed_since INTEGER DEFAULT 0);
+ CREATE TABLE push_watches(tenant_id TEXT,supervisor_id TEXT,tech_id TEXT,enabled_at INTEGER,upload_enabled INTEGER DEFAULT 1,fixed_enabled INTEGER DEFAULT 0,PRIMARY KEY(tenant_id,supervisor_id,tech_id));
  CREATE TABLE qc_upload_photos(tenant_id TEXT,submission_id TEXT,tech_id TEXT,slot INTEGER,image BLOB,created_at INTEGER,PRIMARY KEY(tenant_id,submission_id,tech_id,slot));
  INSERT INTO push_accounts VALUES('a','TECH',1);`);
  db.prepare(`INSERT INTO qc_submissions(id,tenant_id,root_submission_id,tech_id,job_number,screenshot_id,photo_ids,status,submitted_at) VALUES(?,'a',?,'TECH','776499',?,?,'pending',?)`).run(first,first,picture,JSON.stringify([picture,picture]),Date.now());
@@ -312,7 +315,7 @@ test('PostgreSQL migrations and monthly counters handle confirmed uploads withou
  const {postgresSql}=await import('../lib/database.mjs');
  const pg=new PGlite();
  try{
-  for(const name of ['0001_baseline','0002_notification_summaries','0003_single_push_phone','0004_qc_address','0005_catalyst_failure_workflow','0006_catalyst_observation_type','0007_super_admin','0008_catalyst_screenshot','0009_local_rejection','0010_feedback_acknowledgment'])await pg.exec(readFileSync(join(root,`postgres/migrations/${name}.sql`),'utf8'));
+  for(const name of ['0001_baseline','0002_notification_summaries','0003_single_push_phone','0004_qc_address','0005_catalyst_failure_workflow','0006_catalyst_observation_type','0007_super_admin','0008_catalyst_screenshot','0009_local_rejection','0010_feedback_acknowledgment','0011_team_watch_defaults'])await pg.exec(readFileSync(join(root,`postgres/migrations/${name}.sql`),'utf8'));
   const db={prepare(sql){return{bind(...values){return{first:async()=> (await pg.query(postgresSql(sql),values)).rows[0],all:async()=>({results:(await pg.query(postgresSql(sql),values)).rows}),run:async()=>({meta:{changes:(await pg.query(postgresSql(sql),values)).affectedRows}}),sql,values};}};},async batch(statements){await pg.exec('BEGIN');try{const r=[];for(const statement of statements)r.push(await statement.run());await pg.exec('COMMIT');return r;}catch(e){await pg.exec('ROLLBACK');throw e;}}};
   globalThis.workflowTest={tenant:'a',env:{DB:db}};
   await pg.query("INSERT INTO tenants(id,name,created_at) VALUES('a','Demo',1)");
@@ -339,6 +342,8 @@ test('PostgreSQL migrations and monthly counters handle confirmed uploads withou
   assert.equal(await unreadFeedback(),1);
   const acknowledged=await ok(await acknowledge(feedbackId,feedback.reviewedAt,'A PostgreSQL feedback note'));
   assert.equal(typeof acknowledged.feedbackAcknowledgedAt,'number');assert.equal(await unreadFeedback(),0);
+  await pg.query("INSERT INTO technicians(tenant_id,tech_id,pin_salt,pin_hash,is_admin,created_at) VALUES('a','TECH','salt','hash',0,1)");
+  globalThis.workflowTest.admin=true;await ok(await routes.watches.PUT(request({scope:'team',event:'upload',enabled:true},'PUT')));const teamPrefs=await ok(await routes.watches.GET(request(null)));assert.equal(teamPrefs.team.uploadEnabled,true);assert.ok(teamPrefs.techIds.includes('TECH'));
 
  }finally{await pg.close();}
 });
@@ -355,6 +360,18 @@ test('upload type filters distinguish confirmed types, older unknowns, and QCs a
   assert.equal(observationTypes.uploadedQcType(qc),null);
   assert.equal(observationTypes.matchesQcUploadType(qc,'not_recorded'),false);
   assert.equal(observationTypes.matchesQcUploadType(qc,'all'),true);
+ }
+});
+
+test('awaiting acknowledgment filter includes unread approved feedback before and after upload',()=>{
+ const selection='awaiting_acknowledgment';
+ assert.equal(observationTypes.normalizeUploadType(selection),selection);
+ for(const trustUploadStatus of ['ready','failed','uploaded']){
+  const qc={status:'approved',trustUploadStatus,reviewNote:'Remember the house photo.',feedbackAcknowledgedAt:null};
+  assert.equal(observationTypes.matchesQcUploadType(qc,selection),true);
+  assert.equal(observationTypes.matchesQcUploadType({...qc,feedbackAcknowledgedAt:Date.now()},selection),false);
+  for(const reviewNote of [null,undefined,'','  '])assert.equal(observationTypes.matchesQcUploadType({...qc,reviewNote},selection),false);
+  for(const status of ['pending','rejected'])assert.equal(observationTypes.matchesQcUploadType({...qc,status},selection),false);
  }
 });
 
@@ -486,4 +503,29 @@ test('only the assigned signed-in technician can acknowledge the exact note revi
   db.prepare("UPDATE qc_submissions SET status='pending' WHERE id=?").run(first);
   await feedbackNote(first,'A newer note');assert.equal(await unreadFeedback(),1);
  }finally{db.close();}
+});
+
+test('team submission alert settings overwrite all supervisors, preserve the other alert and company policy, and cover future accounts',async()=>{
+ const db=fixture();
+ db.exec("INSERT INTO technicians VALUES('a','SUP1',1,1,NULL),('a','SUP2',1,1,NULL),('a','OTHER',1,0,NULL),('b','TECH',1,0,NULL); INSERT INTO push_company_preferences(tenant_id,rejected) VALUES('a',0); INSERT INTO push_watches VALUES('a','SUP1','TECH',1,0,1),('a','SUP2','TECH',1,0,0),('b','SUP1','TECH',1,0,0)");
+ const team=(event,enabled)=>routes.watches.PUT(request({scope:'team',event,enabled},'PUT'));
+ assert.equal((await team('upload',true)).status,403);
+ globalThis.workflowTest.admin=true;globalThis.workflowTest.techId='SUP1';
+ globalThis.workflowTest.foreignOrigin=true;assert.equal((await team('upload',true)).status,403);globalThis.workflowTest.foreignOrigin=false;
+ assert.equal((await team('bad',true)).status,400);assert.equal((await team('upload','yes')).status,400);
+ await ok(await team('upload',true));
+ assert.equal(db.prepare("SELECT COUNT(*) AS n FROM push_watches WHERE tenant_id='a' AND upload_enabled=0").get().n,0);
+ assert.equal(db.prepare("SELECT fixed_enabled FROM push_watches WHERE tenant_id='a' AND supervisor_id='SUP1'").get().fixed_enabled,1);
+ assert.equal(db.prepare("SELECT upload_enabled FROM push_watches WHERE tenant_id='b'").get().upload_enabled,0);
+ assert.equal(db.prepare("SELECT rejected FROM push_company_preferences WHERE tenant_id='a'").get().rejected,0);
+ let prefs=await ok(await routes.watches.GET(request(null,'POST')));assert.equal(prefs.team.uploadMixed,false);assert.deepEqual(new Set(prefs.techIds),new Set(['TECH','OTHER']));
+ db.exec("INSERT INTO technicians VALUES('a','NEWTECH',1,0,NULL),('a','NEWSUP',1,1,NULL)");
+ globalThis.workflowTest.techId='NEWSUP';prefs=await ok(await routes.watches.GET(request(null,'POST')));assert.ok(prefs.techIds.includes('NEWTECH'));
+ await ok(await routes.watches.PUT(request({techId:'NEWTECH',enabled:false,fixedEnabled:false},'PUT')));
+ prefs=await ok(await routes.watches.GET(request(null,'POST')));assert.equal(prefs.techIds.includes('NEWTECH'),false);assert.equal(prefs.team.uploadMixed,true);
+ await ok(await team('fixed',true));prefs=await ok(await routes.watches.GET(request(null,'POST')));assert.equal(prefs.techIds.includes('NEWTECH'),false);assert.ok(prefs.fixedIds.includes('NEWTECH'));assert.equal(prefs.team.fixedMixed,false);
+ await ok(await team('upload',true));prefs=await ok(await routes.watches.GET(request(null,'POST')));assert.ok(prefs.techIds.includes('NEWTECH'));assert.equal(prefs.team.uploadMixed,false);
+ await ok(await team('fixed',false));prefs=await ok(await routes.watches.GET(request(null,'POST')));assert.ok(prefs.techIds.includes('NEWTECH'));assert.equal(prefs.fixedIds.length,0);
+ globalThis.workflowTest.tenant='b';prefs=await ok(await routes.watches.GET(request(null,'POST')));assert.equal(prefs.team.uploadEnabled,false);assert.equal(prefs.team.fixedEnabled,false);
+ db.close();
 });

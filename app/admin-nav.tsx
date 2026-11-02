@@ -21,7 +21,6 @@ export default function AdminNav({ active }: { active: "records" | "approvals" |
     <a href="/" className={active === "records" ? "active" : ""} aria-current={active === "records" ? "page" : undefined}><Database size={17}/> All data</a>
     <a href="/captures?queue=pending" className={active === "approvals" ? "active" : ""} aria-current={active === "approvals" ? "page" : undefined}><ClipboardCheck size={17}/> QC approvals{pendingCount > 0 && <span className="admin-notification-badge" aria-label={`${pendingCount} QCs need review`}>{pendingCount > 99 ? "99+" : pendingCount}</span>}</a>
     <a href="/history" className={active === "history" ? "active" : ""} aria-current={active === "history" ? "page" : undefined}><Archive size={17}/> QC History</a>
-    <a href="/api/owner/logout">Sign out</a>
     <a href="/settings" className={active === "settings" ? "active" : ""} aria-current={active === "settings" ? "page" : undefined}><Settings2 size={17}/> Settings</a>
   </nav>;
 }

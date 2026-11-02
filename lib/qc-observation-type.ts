@@ -1,14 +1,20 @@
 export type QcUploadType='all'|'ride_along'|'after_the_fact'|'not_recorded';
 export const uploadTypeOptions=[['all','All upload types'],['ride_along','Ride Along'],['after_the_fact','After the Fact'],['not_recorded','Not recorded']] as const;
-export function normalizeUploadType(value:unknown):QcUploadType{
-  return uploadTypeOptions.some(([key])=>key===value)?value as QcUploadType:'all';
+export type QcUploadFilter=QcUploadType|'awaiting_acknowledgment';
+export const uploadTypeFilterOptions=[...uploadTypeOptions,['awaiting_acknowledgment','Awaiting acknowledgment']] as const;
+export function normalizeUploadType(value:unknown):QcUploadFilter{
+  return uploadTypeFilterOptions.some(([key])=>key===value)?value as QcUploadFilter:'all';
 }
-type UploadedQc={trustUploadStatus:string;catalystObservationType?:string|null};
+type UploadedQc={trustUploadStatus:string;catalystObservationType?:string|null;status?:string;reviewNote?:string|null;feedbackAcknowledgedAt?:number|null};
 export function uploadedQcType(qc:UploadedQc):Exclude<QcUploadType,'all'>|null{
   if(qc.trustUploadStatus!=='uploaded')return null;
   return qc.catalystObservationType==='Ride Along'?'ride_along':qc.catalystObservationType==='After the Fact'?'after_the_fact':'not_recorded';
 }
-export function matchesQcUploadType(qc:UploadedQc,value:unknown){const selected=normalizeUploadType(value);return selected==='all'||uploadedQcType(qc)===selected;}
+export function matchesQcUploadType(qc:UploadedQc,value:unknown){
+  const selected=normalizeUploadType(value);
+  if(selected==='awaiting_acknowledgment')return qc.status==='approved'&&!!qc.reviewNote?.trim()&&!qc.feedbackAcknowledgedAt;
+  return selected==='all'||uploadedQcType(qc)===selected;
+}
 
 // A correction updates the original Catalyst observation; it has no new type
 // of its own. Show the original confirmed type without guessing older values.

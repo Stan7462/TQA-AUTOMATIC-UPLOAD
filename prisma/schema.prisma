@@ -157,6 +157,10 @@ model PushCompanyPreferences {
   deadline Int @default(1)
   overdue Int @default(1)
   monthly Int @default(1)
+  watchUploadEnabled Int @default(0) @map("watch_upload_enabled")
+  watchFixedEnabled Int @default(0) @map("watch_fixed_enabled")
+  watchUploadSince BigInt @default(0) @map("watch_upload_since")
+  watchFixedSince BigInt @default(0) @map("watch_fixed_since")
   @@map("push_company_preferences")
 }
 
