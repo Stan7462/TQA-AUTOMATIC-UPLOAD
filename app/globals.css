@@ -929,3 +929,26 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .qc-reference .qc-sign-out:disabled{opacity:.5;cursor:wait}
 @media(max-width:600px){.qc-reference .qc-reference-header .qc-header-actions{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .capture-shell.qc-reference{flex-direction:column;justify-content:flex-start}
+
+.qc-reference .qc-menu-header{position:relative;z-index:20}
+.qc-menu-identity{display:block;color:var(--qc-muted);font-size:13px;margin-top:5px}
+.qc-reference .qc-reference-header .qc-header-actions.qc-menu-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:8px;align-items:stretch;margin-top:8px}
+.qc-technician-menu{position:relative;min-width:0}
+.qc-reference .qc-menu-actions .button{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:46px;padding:10px 12px;font-size:14px;border-radius:12px;white-space:nowrap;background:linear-gradient(145deg,#263541,#1b2934);border:1px solid #405362;color:var(--qc-text);box-shadow:inset 0 1px #ffffff16,0 8px 18px #0004}
+.qc-reference .qc-menu-actions .button:hover:not(:disabled){background:#2b4050;color:#edf4fb}
+.qc-reference .qc-menu-actions .qc-menu-trigger{position:relative;overflow:visible}
+.qc-menu-notes-dot{display:inline-block;flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:#f1d59a}
+.qc-menu-rejection-alert{position:absolute;pointer-events:none;width:34px;height:34px;object-fit:contain;top:-18px;right:5px}
+.qc-technician-menu-panel{position:absolute;top:calc(100% + 10px);left:0;z-index:40;width:360px;max-width:calc(100vw - 56px);padding:10px;background:#152a36;color:#edf4fb;border:1px solid #435c6c;border-radius:16px;box-shadow:0 16px 40px #0006}
+.qc-technician-menu-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 8px 10px}
+.qc-technician-menu-heading strong{display:block;font-size:17px;color:#edf4fb}
+.qc-technician-menu-heading small{display:block;margin-top:3px;color:#aebfcb;font-size:12px}
+.qc-technician-menu-heading button{display:grid;place-items:center;width:40px;height:40px;padding:0;border:0;border-radius:10px;background:transparent;color:#d8e7f2;cursor:pointer}
+.qc-technician-menu-panel a{display:flex;align-items:center;gap:10px;min-height:48px;padding:10px 8px;color:#e5eef7;text-decoration:none;border-radius:10px;font-size:14px}
+.qc-technician-menu-panel a:hover,.qc-technician-menu-heading button:hover{background:#263e4d}
+.qc-technician-menu-panel a>span:first-of-type{flex:1;min-width:0}
+.qc-technician-menu-panel a>svg{flex-shrink:0}
+.qc-menu-count{min-width:27px;padding:4px 7px;border-radius:7px;background:#2b4251;color:#e7f1f8;text-align:center;font-size:12px;font-weight:650;font-variant-numeric:tabular-nums}
+.qc-menu-rejected-dot{display:grid;place-items:center;flex:0 0 18px;width:18px;height:18px;border-radius:50%;background:#ed526b;color:#fff;font-size:13px;font-weight:750;line-height:1}
+.qc-technician-menu-panel a[aria-disabled="true"]{opacity:.5;pointer-events:none}
+@media(max-width:600px){.qc-reference .qc-menu-actions .button{font-size:13px;padding:8px;gap:6px}.qc-reference .qc-menu-actions svg{width:18px;height:18px}.qc-technician-menu-panel{max-width:calc(100vw - 40px)}.qc-reference .qc-menu-header{padding-bottom:12px}}

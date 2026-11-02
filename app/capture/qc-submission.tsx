@@ -1,9 +1,8 @@
 "use client";
 
-import TechFeedbackNotice from "@/app/tech-feedback-notice";
 import CompanyAccessBanner from "@/app/company-access-banner";
 import { useEffect, useRef, useState } from "react";
-import { MessageSquareText, Camera, Check, ChevronRight, FileText, Flashlight, FlashlightOff, ImagePlus, LogOut, MapPin, RotateCcw, Send, Trash2, X } from "lucide-react";
+import { Camera, Check, ChevronRight, FileText, Flashlight, FlashlightOff, ImagePlus, LogOut, MapPin, RotateCcw, Send, Trash2, X } from "lucide-react";
 import { screenshotAddress } from "@/lib/address-ocr";
 import { sixDigitJobNumber } from "@/lib/job-number-ocr";
 import { fiscalDeadline, fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
@@ -11,6 +10,7 @@ import { deleteQcDraft, readQcDraft, writeQcDraft, type QcDraft } from "@/lib/qc
 import type { QcLocation } from "@/lib/qc-location";
 
 import MonthlyGoalProgress from "./monthly-goal-progress";
+import TechnicianMenu, { type TechnicianQcCounts } from "./technician-menu";
 
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
 const MAX_SCREENSHOT_OUTPUT_BYTES = 250 * 1024;
@@ -19,11 +19,7 @@ const MAX_INITIAL_PHOTOS = 7;
 const MAX_CORRECTION_PHOTOS = 10;
 const DEFAULT_MONTHLY_QC_GOAL = 5;
 const MAX_CAMERA_ZOOM = 5;
-type QcCounts = { unreadFeedback:number; captured: number; uploaded: number; rejected: number; urgentRejectedAt: number | null };
-
-function remainingDeadlineHours(deadlineAt: number, now: number) {
-  return Math.max(0, Math.ceil((deadlineAt - now) / (60 * 60 * 1000)));
-}
+type QcCounts = TechnicianQcCounts;
 
 function drawCaptureTimestamp(context: CanvasRenderingContext2D, width: number, height: number, takenAt: Date) {
   const date = `${takenAt.getMonth() + 1}/${takenAt.getDate()}/${String(takenAt.getFullYear()).slice(-2)}`;
@@ -277,6 +273,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const draftRevision = useRef(0);
   const screenshotProcessing = useRef(false);
   const clearingDraft = useRef(false);
+  const navigationLock = useRef(false);
   const locationRequest = useRef<Promise<QcLocation> | null>(null);
   const resetDialog = useRef<HTMLDialogElement>(null);
   const logoutDialog = useRef<HTMLDialogElement>(null);
@@ -409,6 +406,25 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
     draftTimer.current = null;
     void queueDraftSave(draftRef.current!);
   }
+
+  async function navigateToQcPage(href: string) {
+    if (navigationLock.current || busy || taking || screenshotProcessing.current || logoutBusy || clearingDraft.current) return;
+    navigationLock.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      if (draftTimer.current !== null) { window.clearTimeout(draftTimer.current); draftTimer.current = null; }
+      if (!submitted && !await queueDraftSave(draftRef.current!)) {
+        setError("Your unfinished QC could not be saved. Keep this page open and try again before leaving.");
+        return;
+      }
+      await draftWrites.current;
+      window.location.assign(href);
+    } finally {
+      navigationLock.current = false;
+      setBusy(false);
+    }
+  }
   useEffect(() => { setToday(new Date()); const timer = window.setInterval(() => setToday(new Date()), 60_000); return () => window.clearInterval(timer); }, []);
   useEffect(() => { if (!captured) return; const timer = window.setTimeout(() => setCaptured(null), 820); return () => window.clearTimeout(timer); }, [captured]);
   useEffect(() => {
@@ -435,7 +451,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         const response = await fetch(`/api/profile?count=1&start=${currentMonth.start}&end=${currentMonth.end}`, { cache: "no-store", signal: current.signal });
         if (!response.ok) throw new Error("Could not load QC counts.");
         const result = await response.json() as { techId: string } & QcCounts;
-        if (!current.signal.aborted && result.techId === techId) setQcCounts({ unreadFeedback:result.unreadFeedback??0, captured: result.captured, uploaded: result.uploaded, rejected: result.rejected, urgentRejectedAt: result.urgentRejectedAt });
+        if (!current.signal.aborted && result.techId === techId) setQcCounts({ unreadFeedback:result.unreadFeedback??0, allQcs: result.allQcs, captured: result.captured, uploaded: result.uploaded, rejected: result.rejected, needsCorrection: result.needsCorrection ?? 0, urgentRejectedAt: result.urgentRejectedAt });
       } catch {
         // Keep the last known unread-note count during a temporary connection failure.
       }
@@ -454,7 +470,6 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
   const hasCurrentProgress = progress?.techId === techId && progress.month === month;
   const approvedQcs = hasCurrentProgress ? progress.approved : null;
   const monthlyGoal = hasCurrentProgress ? progress.monthlyGoal : DEFAULT_MONTHLY_QC_GOAL;
-  const rejectedDeadlineHours = qcCounts?.urgentRejectedAt && today ? remainingDeadlineHours(qcCounts.urgentRejectedAt, today.getTime()) : null;
   const validJobNumber = /^\d{1,6}$/.test(jobNumber);
   const redoNeedsChange = !!draftRef.current?.redoSourceId && !draftRef.current.redoChanged;
   const correctionMode = Boolean(draftRef.current?.redoSourceId);
@@ -779,7 +794,7 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
       setUploadProgress(95);
       await sendQcStep({ ...details, action: "finalize", photoCount: preparedPhotos.length, location: submissionLocation });
       setUploadProgress(100); setUploadLabel("Upload complete");
-      setQcCounts((counts) => counts ? redoSourceId ? counts : { ...counts, captured: counts.captured + 1 } : counts);
+      setQcCounts((counts) => counts ? redoSourceId ? { ...counts, captured: counts.captured + 1, needsCorrection: Math.max(0, counts.needsCorrection - 1) } : { ...counts, captured: counts.captured + 1, allQcs: counts.allQcs + 1 } : counts);
       ++draftRevision.current;
       const removeDraft = draftWrites.current.then(() => deleteQcDraft(techId));
       draftWrites.current = removeDraft.catch(() => undefined);
@@ -800,7 +815,14 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
 
   return <main className={`capture-shell qc-dark-shell qc-reference${cameraOn ? " qc-camera-active" : ""}`}><CompanyAccessBanner/>
     <div className="camera-app qc-form">
-      <header className="camera-header qc-reference-header"><div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>New QC submission</h1></div><button type="button" className="qc-sign-out" aria-label="Sign out" title="Sign out" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => logoutDialog.current?.showModal()}><LogOut size={22} aria-hidden="true"/></button><div className="qc-header-actions"><a className="button light qc-logout qc-feedback-link" href="/profile?view=notes"><MessageSquareText size={16}/>Notes{(qcCounts?.unreadFeedback??0)>0&&<span className="qc-feedback-counter">{qcCounts!.unreadFeedback}</span>}</a><a className="button light qc-logout qc-notification-settings" href="/notifications">Notifications</a><button type="button" className="button light qc-logout" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => { setResetError(""); setResetConfirmation(true); }}><RotateCcw size={17}/>Start new QC</button></div><p>Tech {techId} · Photos → screenshot → job number.</p></header>
+      <header className="camera-header qc-reference-header qc-menu-header">
+        <div><span className="kicker">TQA AUTOMATIC UPLOAD</span><h1>New QC submission</h1><small className="qc-menu-identity">Tech {techId}</small></div>
+        <button type="button" className="qc-sign-out" aria-label="Sign out" title="Sign out" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => logoutDialog.current?.showModal()}><LogOut size={22} aria-hidden="true"/></button>
+        <div className="qc-header-actions qc-menu-actions">
+          <TechnicianMenu techId={techId} counts={qcCounts} disabled={busy || taking || processingScreenshot || logoutBusy} onNavigate={navigateToQcPage}/>
+          <button type="button" className="button light qc-start-new" disabled={busy || taking || processingScreenshot || logoutBusy} onClick={() => { setResetError(""); setResetConfirmation(true); }}><RotateCcw size={18}/>Start new QC</button>
+        </div>
+      </header>
       <dialog ref={logoutDialog} className="qc-reset-dialog" aria-labelledby="qc-sign-out-title" aria-describedby="qc-sign-out-description">
         <div className="qc-reset-icon" aria-hidden="true"><LogOut size={24}/></div>
         <h2 id="qc-sign-out-title">Sign out?</h2>
@@ -822,12 +844,6 @@ export default function QcSubmission({ signedInTechId }: { signedInTechId: strin
         </div>
       </dialog>
       {resetMessage && <p className="qc-reset-status" role="status">{resetMessage}</p>}
-      <TechFeedbackNotice count={qcCounts?.unreadFeedback??0}/>
-      <section className="qc-tech-summary" aria-label="My QC totals">
-        <a className="qc-summary-card qc-summary-rejected" href="/profile?view=rejected" aria-label={`Rejected QCs ${qcCounts?.rejected ?? "loading"}${rejectedDeadlineHours === null ? "" : `, nearest deadline ${rejectedDeadlineHours} hours`}`}><span>Rejected QCs</span><strong>{qcCounts?.rejected ?? "—"}</strong>{rejectedDeadlineHours !== null && <em className="qc-summary-deadline-badge" aria-hidden="true">{rejectedDeadlineHours}</em>}</a>
-        <a className="qc-summary-card" href="/profile?view=captured"><span>Captured QCs</span><strong>{qcCounts?.captured ?? "—"}</strong></a>
-        <a className="qc-summary-card" href="/profile?view=uploaded"><span>Uploaded to Catalyst</span><strong>{qcCounts?.uploaded ?? "—"}</strong></a>
-      </section>
       {logoutError && <p className="form-error" role="alert">{logoutError}</p>}
       <MonthlyGoalProgress approved={approvedQcs} goal={monthlyGoal} due={deadline ? deadline.date.toLocaleDateString(undefined, { month: "long", day: "numeric" }) : "on the 21st"} error={!validTechId ? "Sign in again to see QCs remaining" : progressError ? "Approved QC progress is unavailable. Try again shortly." : undefined}/>
       {submitted ? <div className="qc-success" role="status"><Check size={34}/><h2>Sent for review</h2><p>Your QC was submitted for approval.</p><button className="button dark" onClick={() => setSubmitted(false)}>Start another QC</button></div> : <>

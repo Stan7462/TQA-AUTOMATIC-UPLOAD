@@ -122,7 +122,7 @@ export async function readQcDraft(techId: string): Promise<QcDraft | null> {
   const currentMonth = fiscalMonthKey();
   const draftMonth = typeof draft.fiscalMonth === "string" ? draft.fiscalMonth : typeof draft.updatedAt === "number" ? fiscalMonthKey(new Date(draft.updatedAt)) : "";
   if (draftMonth !== currentMonth) { await deleteQcDraft(techId); return null; }
-  if (!validDraftMetadata(draft, techId) || !Array.isArray(draft.photos) || draft.photos.length > 7) return null;
+  if (!validDraftMetadata(draft, techId) || !Array.isArray(draft.photos) || draft.photos.length > (draft.redoSourceId ? 10 : 7)) return null;
 
   const screenshot = draft.screenshot == null ? null : await restoreImage(draft.screenshot);
   const restoredPhotos = await Promise.all(draft.photos.map(restoreImage));

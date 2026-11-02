@@ -14,5 +14,5 @@ export default async function NotificationsPage() {
   if (session.mustSetup) redirect("/admin-setup");
   if (session.isAdmin) redirect("/settings#notifications-settings");
   const content = <NotificationSettings supervisor={session.isAdmin}/>;
-  return <main className="management-page profile-dark"><div className="management-head"><a className="back-link" href="/capture">← New QC submission</a><h1>Notifications</h1><p>Stay informed about rejected QCs and deadlines.</p></div><div className="profile-results">{content}</div></main>;
+  return <main className="management-page profile-dark"><div className="management-head"><a className="back-link" href="/capture">← Back to main menu</a><h1>Notifications</h1><p>Stay informed about rejected QCs and deadlines.</p></div><div className="profile-results">{content}</div></main>;
 }
