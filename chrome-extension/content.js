@@ -72,6 +72,8 @@
     pageLog("info", "job search", `Entered job number ${jobNumber}; field now reads ${input.value}.`);
     const search = buttons().find((item) => /\bSearch\b/i.test(clean(item.textContent)));
     if (!search) throw new Error("Catalyst Search button was not found.");
+    const rowSignature = (rows) => rows.map((row) => `${row.jobId}|${row.jobNumber}|${row.techId}`).sort().join(";");
+    const rowsBeforeSearch = rowSignature(gridRows(String(jobNumber), String(techId)));
     search.click();
     pageLog("info", "job search", "Clicked Search; waiting for grid results.");
     const searchStarted = Date.now();
@@ -86,7 +88,8 @@
       }
       const noRows = [...document.querySelectorAll(".ag-overlay-no-rows-center, .ag-overlay-no-rows-wrapper")].some(visible) || /There are no rows to display/i.test(text);
       if ((noRows || (count && Number(count[2] || count[1]) === 0)) && Date.now() - searchStarted > 700) return { list, total: 0 };
-      if (count && Number(count[2] || count[1]) > 0 && list.length >= Number(count[2] || count[1]) && Date.now() - searchStarted > 700) {
+      const resultsChanged = rowSignature(list) !== rowsBeforeSearch;
+      if (resultsChanged && count && Number(count[2] || count[1]) > 0 && list.length >= Number(count[2] || count[1]) && Date.now() - searchStarted > 700) {
         return { list, total: Number(count[2] || count[1]) };
       }
       return null;

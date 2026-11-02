@@ -56,3 +56,22 @@ test('job search accepts an exact visible row when Catalyst omits its Rows count
  assert.deepEqual(JSON.parse(JSON.stringify(result)),{rows:[{jobId:'166900004',jobNumber:'887947',techId:'7247'}],total:1});
  assert.equal(input.value,'887947');assert.equal(radios[1].checked,true);
 });
+
+test('job search waits past complete stale rows from the previous QC',async()=>{
+ const radios=[{checked:false},{checked:true},{checked:false}],input={value:''},search={textContent:'Search',click(){}};
+ const stale=[{jobId:'166900004',jobNumber:'890025',techId:'7462'},{jobId:'166900005',jobNumber:'890025',techId:'OTHER'}];
+ const current=[{jobId:'167065082',jobNumber:'899311',techId:'R01F'},{jobId:'167065083',jobNumber:'899311',techId:'OTHER'}];
+ let gridReads=0;
+ const context={
+  Date:{now:(()=>{let now=0;return()=>now+=1000;})()},
+  location:{pathname:'/TechOps/jobs'},
+  document:{body:{innerText:'Rows: 2 of 2'},querySelector:selector=>selector==='#job-no'?input:null,querySelectorAll:selector=>selector==="input[type='radio']"?radios:selector==='input'?[input]:[]},
+  clean:value=>String(value??'').replace(/\s+/g,' ').trim(),buttons:()=>[search],visible:()=>true,pageLog(){},
+  nativeValue:(field,value)=>{field.value=value;},
+  gridRows:()=>++gridReads<3?stale:current,
+  waitFor:async(predicate,description)=>{for(let i=0;i<4;i++){const value=predicate();if(value)return value;}throw new Error(`Timed out waiting for ${description}.`);},
+ };
+ const findJob=runInNewContext(`${findSource};findJob`,context);
+ const result=JSON.parse(JSON.stringify(await findJob('899311','R01F')));
+ assert.equal(gridReads,3);assert.equal(result.rows[0].jobNumber,'899311');assert.equal(result.rows[0].techId,'R01F');
+});
