@@ -53,6 +53,27 @@ test('interrupted failed QC reopens saved job and skips all previously confirmed
  assert.equal(searches,1);assert.equal(uploads,3);assert.equal(paths.filter(p=>p==='job/166425706').length,2);assert.equal(checkpoint,undefined);
 });
 
+test('unused mismatched saved Job ID is cleared and searched again inside the same attempt',async()=>{
+ let checkpoint={jobId:'wrong',jobNumber:'892158',techId:'T0BD',observationType:'After the Fact',photoIds:[],photoKeys:[],completionStarted:false};
+ let run={},inspections=0,searches=0;const paths=[];
+ const qc={id:'qc',jobNumber:'892158',techId:'T0BD',workflow:'observation',reviewStatus:'approved',uploadStatus:'ready',outcome:'pass',photos:[]};
+ const process=runInNewContext(`${processSource};processOne`,{
+  MAX_QC_ATTEMPTS:3,stopRequested:false,detail:async()=>qc,setRun:async patch=>{run={...run,...patch};},stored:async()=>({run}),
+  recovery:async(_id,patch)=>{if(patch===null)checkpoint=undefined;else if(patch)checkpoint={...checkpoint,...patch};return checkpoint;},
+  orderedPhotos,exactJobMatches,recoveryPhotoIndex,safeError:e=>e.message,logEvent:async()=>{},
+  navigate:async(_tab,url)=>paths.push(url),JOBS_URL:'jobs',observationUrl:id=>`job/${id}`,waitForSuccess:async()=> 'Observation Saved',
+  report:async()=>({uploadStatus:'uploaded'}),
+  pageCommand:async(_tab,command)=>{
+   if(command==='FIND_JOB'){searches++;return {rows:[{jobId:'correct',jobNumber:'892158',techId:'T0BD'}]};}
+   if(command==='INSPECT_OBSERVATION'){if(inspections++===0)throw new Error('Timed out waiting for matching recovery job and technician.');return {photoKeys:[]};}
+   if(command==='PREPARE')return {technicianName:'Demo Tech'};
+   return {};
+  }
+ });
+ const result=await process(qc,1,0,1,1,'After the Fact');
+ assert.equal(result.status,'uploaded');assert.equal(searches,1);assert.deepEqual(paths,['job/wrong','jobs','job/correct']);assert.equal(checkpoint,undefined);
+});
+
 test('Ride Along applies to passing observations only',()=>{
  const entries=observationTypeAssignments([{outcome:'fail'},{reviewStatus:'rejected'},{outcome:'pass'},{workflow:'follow_up'}],100);
  assert.deepEqual(entries.map(e=>e.observationType),['After the Fact','After the Fact','Ride Along','After the Fact']);

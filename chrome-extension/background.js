@@ -356,19 +356,21 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
     observationType = qc.outcome === "fail" || qc.reviewStatus === "rejected" ? "After the Fact" : checkpoint?.observationType || await monthlyObservationType(qc);
     await setRun({observationType});
     let jobId = checkpoint?.jobId;
-    if (!jobId) {
+    const locateJob = async () => {
       await navigate(tabId, JOBS_URL);
       const search = await pageCommand(tabId, "FIND_JOB", { jobNumber: qc.jobNumber, techId: qc.techId }, 45000);
       const matches = exactJobMatches(search.rows, qc.jobNumber, qc.techId);
       if (matches.length !== 1) {
-        const reason = matches.length === 0 ? "No exact job number and Tech ID match in Catalyst." : "Multiple exact job number and Tech ID matches in Catalyst.";
-        await report(qc.id, "failed", reason);
-        await setRun({ stage: "failed", message: `Job ${qc.jobNumber}: ${reason}` });
-        return { status: "failed", jobNumber: qc.jobNumber, reason };
+        const candidates = search.rows.map((row) => `${row.jobNumber || "?"}/${row.techId || "?"}`).join(", ") || "none";
+        const reason = matches.length === 0
+          ? `No exact job number and Tech ID match in Catalyst. Expected ${qc.jobNumber}/${qc.techId}; found ${candidates}.`
+          : `Multiple exact job number and Tech ID matches in Catalyst for ${qc.jobNumber}/${qc.techId}.`;
+        throw new Error(reason);
       }
       jobId = matches[0].jobId;
       checkpoint = await recovery(qc.id, {jobId, jobNumber:qc.jobNumber, techId:qc.techId, observationType, photoIds:[], photoKeys:[], completionStarted:false});
-    }
+    };
+    if (!jobId) await locateJob();
     if (checkpoint.jobNumber !== qc.jobNumber || checkpoint.techId !== qc.techId) throw new Error("Saved Catalyst job does not match this QC.");
     if (checkpoint.completionConfirmed) {
       await setRun({jobId,stage:"reporting",message:`Catalyst already saved job ${qc.jobNumber}; resuming success reporting only`});
@@ -376,7 +378,21 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
     }
     await setRun({ stage: "opening observation", jobId, message: `Opening saved Catalyst job ID ${jobId}` });
     await navigate(tabId, observationUrl(jobId));
-    const state = await pageCommand(tabId, "INSPECT_OBSERVATION", {jobNumber:qc.jobNumber, techId:qc.techId});
+    let state;
+    try {
+      state = await pageCommand(tabId, "INSPECT_OBSERVATION", {jobNumber:qc.jobNumber, techId:qc.techId});
+    } catch (error) {
+      const unusedCheckpoint = !(checkpoint.photoIds?.length || checkpoint.photoKeys?.length || checkpoint.completionStarted || checkpoint.completionConfirmed);
+      if (!unusedCheckpoint || !/matching recovery job and technician/i.test(safeError(error))) throw error;
+      await logEvent("info", "recovery reset", `Job ${qc.jobNumber}: saved Catalyst job ID ${jobId} opened a different job or technician before any photos were uploaded. Clearing it and searching again.`);
+      await recovery(qc.id, null);
+      checkpoint = null;
+      jobId = null;
+      await locateJob();
+      await setRun({ stage: "opening observation", jobId, message: `Opening corrected Catalyst job ID ${jobId}` });
+      await navigate(tabId, observationUrl(jobId));
+      state = await pageCommand(tabId, "INSPECT_OBSERVATION", {jobNumber:qc.jobNumber, techId:qc.techId});
+    }
     let startPhoto;
     try { startPhoto = recoveryPhotoIndex(checkpoint, state, photos); }
     catch (error) {

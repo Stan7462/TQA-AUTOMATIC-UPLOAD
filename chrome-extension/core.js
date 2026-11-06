@@ -5,8 +5,9 @@ export const completedObservationUrl = (observationId) => `https://catalystqms.c
 export const OBSERVATIONS_URL = "https://catalystqms.comcast.net/TechOps/observations";
 
 export function exactJobMatches(rows, jobNumber, techId) {
-  return rows.filter((row) => String(row.jobNumber).trim() === String(jobNumber).trim()
-    && String(row.techId).trim() === String(techId).trim());
+  const normalized = (value) => String(value ?? "").trim().toUpperCase();
+  return rows.filter((row) => normalized(row.jobNumber) === normalized(jobNumber)
+    && normalized(row.techId) === normalized(techId));
 }
 
 export function orderedPhotos(qc) {

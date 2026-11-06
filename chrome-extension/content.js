@@ -77,20 +77,33 @@
     search.click();
     pageLog("info", "job search", "Clicked Search; waiting for grid results.");
     const searchStarted = Date.now();
+    let repeatedSearchAt = 0;
     const rows = await waitFor(() => {
       const text = document.body.innerText;
       const count = /Rows:\s*(\d+)(?:\s+of\s+(\d+))?/i.exec(text);
       const list = gridRows(String(jobNumber), String(techId));
-      const exact = list.filter((row) => row.jobNumber === String(jobNumber));
+      const same = (left, right) => clean(left).toUpperCase() === clean(right).toUpperCase();
+      const exact = list.filter((row) => same(row.jobNumber, jobNumber) && (!techId || same(row.techId, techId)));
       if (exact.length) {
         if (exact.some((row) => !row.jobId)) throw new Error(`Catalyst displayed job ${jobNumber}, but its internal Job ID column could not be read.`);
         return { list, total: count ? Number(count[2] || count[1]) : list.length };
       }
       const noRows = [...document.querySelectorAll(".ag-overlay-no-rows-center, .ag-overlay-no-rows-wrapper")].some(visible) || /There are no rows to display/i.test(text);
-      if ((noRows || (count && Number(count[2] || count[1]) === 0)) && Date.now() - searchStarted > 700) return { list, total: 0 };
+      const now = Date.now();
+      const completeRows = count && Number(count[2] || count[1]) > 0 && list.length >= Number(count[2] || count[1]);
       const resultsChanged = rowSignature(list) !== rowsBeforeSearch;
-      if (resultsChanged && count && Number(count[2] || count[1]) > 0 && list.length >= Number(count[2] || count[1]) && Date.now() - searchStarted > 700) {
-        return { list, total: Number(count[2] || count[1]) };
+      const hasSettledResult = noRows || (count && Number(count[2] || count[1]) === 0) || completeRows || (!count && resultsChanged && list.length);
+      // Catalyst can briefly expose the previous query's complete grid or can
+      // receive the button click before its controlled input state settles.
+      // Repeat Search inside this queue attempt instead of consuming a retry.
+      if (!repeatedSearchAt && hasSettledResult && now - searchStarted > 1800) {
+        repeatedSearchAt = now;
+        search.click();
+        pageLog("info", "job search", `The first result set did not contain job ${jobNumber} with Tech ID ${techId}; repeating Search once.`);
+        return null;
+      }
+      if (repeatedSearchAt && hasSettledResult && now - repeatedSearchAt > 8000) {
+        return { list, total: count ? Number(count[2] || count[1]) : list.length };
       }
       return null;
     }, "Catalyst job search results", 30000);

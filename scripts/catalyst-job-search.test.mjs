@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
+import {exactJobMatches} from '../chrome-extension/core.js';
 
 const content=readFileSync(new URL('../chrome-extension/content.js',import.meta.url),'utf8');
 const source=content.slice(content.indexOf('function rowData('),content.indexOf('function gridRows('));
@@ -74,4 +75,26 @@ test('job search waits past complete stale rows from the previous QC',async()=>{
  const findJob=runInNewContext(`${findSource};findJob`,context);
  const result=JSON.parse(JSON.stringify(await findJob('899311','R01F')));
  assert.equal(gridReads,3);assert.equal(result.rows[0].jobNumber,'899311');assert.equal(result.rows[0].techId,'R01F');
+});
+
+test('job search repeats Search internally when the first complete grid belongs to the prior query',async()=>{
+ const radios=[{checked:false},{checked:true},{checked:false}],input={value:''};
+ let searchClicks=0;
+ const search={textContent:'Search',click(){searchClicks++;}};
+ const stale=[{jobId:'old',jobNumber:'901908',techId:'T0LV'}];
+ const current=[{jobId:'167175880',jobNumber:'910693',techId:'T0BD'}];
+ const context={
+  Date:{now:(()=>{let now=0;return()=>now+=1000;})()},location:{pathname:'/TechOps/jobs'},
+  document:{body:{innerText:'Rows: 1 of 1'},querySelector:selector=>selector==='#job-no'?input:null,querySelectorAll:selector=>selector==="input[type='radio']"?radios:selector==='input'?[input]:[]},
+  clean:value=>String(value??'').replace(/\s+/g,' ').trim(),buttons:()=>[search],visible:()=>true,pageLog(){},nativeValue:(field,value)=>{field.value=value;},
+  gridRows:()=>searchClicks<2?stale:current,
+  waitFor:async(predicate,description)=>{for(let i=0;i<8;i++){const value=predicate();if(value)return value;}throw new Error(`Timed out waiting for ${description}.`);},
+ };
+ const findJob=runInNewContext(`${findSource};findJob`,context);
+ const result=JSON.parse(JSON.stringify(await findJob('910693','T0BD')));
+ assert.equal(searchClicks,2);assert.equal(result.rows[0].jobId,'167175880');
+});
+
+test('exact matching treats Catalyst technician ID casing as equivalent',()=>{
+ assert.equal(exactJobMatches([{jobNumber:'910693',techId:'t0bd'}],'910693','T0BD').length,1);
 });

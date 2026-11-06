@@ -81,3 +81,5 @@ Starting with v0.7.22, a failed QC is not reported complete from the Catalyst sa
 Starting with v0.7.23, Jobs Pool matching supports Catalyst grids that omit the `Rows: X of Y` counter, use alternate Job ID / Job Number / Technician column identifiers, or move those columns. Exact job and technician values are read directly from visible grid cells, with the internal Catalyst Job ID recovered from the row link when available.
 
 Starting with v0.7.24, the Jobs Pool reader records the grid before pressing Search and will not treat a nonmatching result set as final until the visible rows change. This prevents the previous QC's cached rows from consuming a retry while Catalyst refreshes the next search.
+
+Starting with v0.7.25, a Jobs Pool result is accepted only when both the requested job number and Tech ID are visible. Catalyst Search is repeated once inside the same queue attempt when its first settled grid is stale or mismatched. An unused saved Job ID is also discarded and searched again when the opened observation proves it belongs to another job or technician; checkpoints with photos or completion activity remain protected for manual review.
