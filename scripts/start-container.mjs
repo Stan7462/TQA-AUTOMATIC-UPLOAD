@@ -6,6 +6,8 @@ await import("./migrate.mjs");
 if (!process.env.DATABASE_URL) await import("./bootstrap-admin.mjs");
 const { startNotificationWorker } = await import("./push-notifications.mjs");
 startNotificationWorker();
+const { startQcDeletionCleanup } = await import("./qc-deletion-cleanup.mjs");
+startQcDeletionCleanup();
 const { pruneExpiredQcs } = await import("./qc-retention.mjs");
 try { await pruneExpiredQcs({ dataDirectory: process.env.TQA_DATA_DIR }); }
 catch (error) { console.error("QC retention cleanup failed", error); }

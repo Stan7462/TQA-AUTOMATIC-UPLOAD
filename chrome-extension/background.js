@@ -353,6 +353,15 @@ async function processOne(qcSummary, tabId, index, total, attempt, observationTy
     await setRun({ currentQcId: qc.id, jobNumber: qc.jobNumber, techId: qc.techId, photoTotal: photos.length,
       stage: "finding job", message: `Finding job ${qc.jobNumber} (attempt ${attempt} of ${MAX_QC_ATTEMPTS})` });
     let checkpoint = await recovery(qc.id);
+    if (checkpoint && (checkpoint.jobNumber !== qc.jobNumber || checkpoint.techId !== qc.techId)) {
+      if (checkpoint.completionStarted || checkpoint.completionConfirmed || checkpoint.photoIds?.length || checkpoint.photoKeys?.length) {
+        await setRun({status:"needs_review"});
+        throw new Error("Job number changed after Catalyst upload progress was saved. Review the previous observation before continuing; existing photos will not be uploaded again.");
+      }
+      await recovery(qc.id, null);
+      checkpoint = null;
+      await logEvent("info", "job number corrected", `Job ${qc.jobNumber}: cleared unused recovery data; searching with the corrected job number.`);
+    }
     observationType = qc.outcome === "fail" || qc.reviewStatus === "rejected" ? "After the Fact" : checkpoint?.observationType || await monthlyObservationType(qc);
     await setRun({observationType});
     let jobId = checkpoint?.jobId;

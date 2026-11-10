@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createDatabase } from '../lib/database.mjs';
 
-export const tables = ['tenants','technicians','tech_sessions','technician_removals','qc_submissions','qc_submission_attempts','qc_upload_photos','trust_api_keys','tenant_domains','push_accounts','push_company_preferences','push_watches','push_outbox','local_migrations','super_admin_sessions','super_admin_login_limits','super_admin_audit'];
+export const tables = ['tenants','technicians','tech_sessions','technician_removals','qc_submissions','qc_submission_attempts','qc_upload_photos','trust_api_keys','tenant_domains','push_accounts','push_company_preferences','push_watches','push_outbox','local_migrations','super_admin_sessions','super_admin_login_limits','super_admin_audit','qc_deletions','qc_deleted_ids','qc_deleted_photos','qc_job_number_changes'];
 function normalized(value) { return value instanceof Uint8Array ? {binary:Buffer.from(value).toString('base64')} : value; }
 export function digest(rows,columns) {
   const records=rows.map(row=>JSON.stringify(columns.map(c=>normalized(row[c])))).sort();
@@ -12,7 +12,7 @@ export function digest(rows,columns) {
 }
 export async function importSqlite(source,client) {
   const available=source.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'_prisma_migrations'").all().map(r=>r.name);
-  const optional=['super_admin_sessions','super_admin_login_limits','super_admin_audit'];
+  const optional=['super_admin_sessions','super_admin_login_limits','super_admin_audit','qc_deletions','qc_deleted_ids','qc_deleted_photos','qc_job_number_changes'];
   if(available.some(name=>!tables.includes(name)) || tables.some(name=>!available.includes(name)&&!optional.includes(name))) throw new Error('Source schema does not match the reviewed migration; refusing partial import.');
   const report={};
   for(const table of tables.filter(name=>available.includes(name))) {
@@ -80,6 +80,16 @@ async function upgradeTeamWatchDefaults(client) {
   if (!(await client.query("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='push_company_preferences' AND column_name='watch_upload_enabled'")).rows.length) await client.query(readFileSync(new URL('../postgres/migrations/0011_team_watch_defaults.sql',import.meta.url),'utf8'));
   await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)', ['0011',Date.now(),'{}']);
 }
+async function upgradeQcDeletion(client) {
+  if ((await client.query("SELECT 1 FROM tqa_postgres_migrations WHERE version='0012'")).rows.length) return;
+  if (!(await client.query("SELECT 1 FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='qc_deletions'")).rows.length) await client.query(readFileSync(new URL('../postgres/migrations/0012_qc_deletion.sql',import.meta.url),'utf8'));
+  await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)', ['0012',Date.now(),'{}']);
+}
+async function upgradeJobNumberChanges(client) {
+  if ((await client.query("SELECT 1 FROM tqa_postgres_migrations WHERE version='0013'")).rows.length) return;
+  if (!(await client.query("SELECT 1 FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='qc_job_number_changes'")).rows.length) await client.query(readFileSync(new URL('../postgres/migrations/0013_qc_job_number_changes.sql',import.meta.url),'utf8'));
+  await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)', ['0013',Date.now(),'{}']);
+}
 export async function migratePostgres() {
   const directory=resolve(process.env.TQA_DATA_DIR || '.tqa-data');
   if(!existsSync(join(directory,'secrets.json'))) throw new Error('Existing application encryption secrets are required before database migration.');
@@ -102,6 +112,8 @@ export async function migratePostgres() {
       await upgradeLocalRejection(client);
       await upgradeFeedbackAcknowledgment(client);
       await upgradeTeamWatchDefaults(client);
+      await upgradeQcDeletion(client);
+      await upgradeJobNumberChanges(client);
       await client.query('COMMIT');
       console.log('PostgreSQL schema is current. SQLite is no longer used by the app.');
       return;
@@ -128,6 +140,8 @@ export async function migratePostgres() {
     if(source.prepare("PRAGMA table_info(qc_submissions)").all().some(c=>c.name==='rejection_upload_mode')) await client.query(readFileSync(new URL('../postgres/migrations/0009_local_rejection.sql',import.meta.url),'utf8'));
     if(source.prepare("PRAGMA table_info(qc_submissions)").all().some(c=>c.name==='feedback_acknowledged_at')) await client.query(readFileSync(new URL('../postgres/migrations/0010_feedback_acknowledgment.sql',import.meta.url),'utf8'));
     if(source.prepare("PRAGMA table_info(push_company_preferences)").all().some(c=>c.name==='watch_upload_enabled')) await client.query(readFileSync(new URL('../postgres/migrations/0011_team_watch_defaults.sql',import.meta.url),'utf8'));
+    if(source.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='qc_deletions'").get()) await client.query(readFileSync(new URL('../postgres/migrations/0012_qc_deletion.sql',import.meta.url),'utf8'));
+    if(source.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='qc_job_number_changes'").get()) await client.query(readFileSync(new URL('../postgres/migrations/0013_qc_job_number_changes.sql',import.meta.url),'utf8'));
     const report=await importSqlite(source,client);
     await client.query('CREATE TABLE tqa_postgres_migrations(version TEXT PRIMARY KEY, applied_at BIGINT NOT NULL, verification TEXT NOT NULL)');
     await client.query('INSERT INTO tqa_postgres_migrations VALUES($1,$2,$3)',['0001',Date.now(),JSON.stringify(report)]);
@@ -141,6 +155,8 @@ export async function migratePostgres() {
     await upgradeLocalRejection(client);
     await upgradeFeedbackAcknowledgment(client);
     await upgradeTeamWatchDefaults(client);
+    await upgradeQcDeletion(client);
+      await upgradeJobNumberChanges(client);
     await client.query('COMMIT');
     writeFileSync(join(backupDirectory,'verification.json'),JSON.stringify(report,null,2),{mode:0o600});
     console.log('PostgreSQL migration verified (row counts and SHA-256 of every column):',JSON.stringify(Object.fromEntries(Object.entries(report).map(([t,v])=>[t,v.count]))));

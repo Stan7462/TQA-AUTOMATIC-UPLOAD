@@ -48,6 +48,8 @@ if (sqlite) {
     "0026_local_rejection.sql",
     "0027_feedback_acknowledgment.sql",
     "0028_team_watch_defaults.sql",
+    "0029_qc_deletion.sql",
+    "0030_qc_job_number_changes.sql",
   ]) {
     if (sqlite.prepare("SELECT 1 FROM local_migrations WHERE name = ?").get(name)) continue;
     const sql = readFileSync(join(process.cwd(), "drizzle", name), "utf8").replaceAll("--> statement-breakpoint", "");

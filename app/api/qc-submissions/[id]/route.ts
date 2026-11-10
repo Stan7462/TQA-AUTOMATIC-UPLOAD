@@ -4,8 +4,32 @@ import { isOwner } from "@/app/access";
 import { sameOrigin } from "@/lib/tech-auth";
 import { fiscalMonthBounds, fiscalMonthKey } from "@/lib/fiscal-month";
 import { normalizeCatalystFailures } from "@/lib/catalyst-qc";
+import { permanentlyDeleteQc } from "@/lib/qc-deletion";
+
+import { changeQcJobNumber } from "@/lib/qc-job-number";
 
 export const dynamic = "force-dynamic";
+
+export async function PATCH(request:Request,context:{params:Promise<{id:string}>}) {
+  if(!sameOrigin(request))return Response.json({error:"Invalid request origin."},{status:403});
+  const user=await getChatGPTUser();
+  if(!isOwner(user))return Response.json({error:"Forbidden"},{status:403});
+  if(!env.DB)return Response.json({error:"QC editing is unavailable."},{status:503});
+  try{return await changeQcJobNumber(request,(await context.params).id,user!);}
+  catch(error){console.error("QC job number change failed",error);return Response.json({error:"Could not change the job number. Refresh and try again."},{status:503});}
+}
+
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  if (!sameOrigin(request)) return Response.json({error:"Invalid request origin."},{status:403});
+  const user = await getChatGPTUser();
+  if (!isOwner(user)) return Response.json({error:"Forbidden"},{status:403});
+  if (!env.DB || !env.BUCKET) return Response.json({error:"QC deletion is unavailable."},{status:503});
+  try { return await permanentlyDeleteQc(request,(await context.params).id,user!); }
+  catch (error) {
+    console.error("QC deletion failed",error);
+    return Response.json({error:"Could not delete this QC. Refresh its details and try again."},{status:503});
+  }
+}
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   if (!sameOrigin(request)) return Response.json({ error: "Invalid request origin" }, { status: 403 });

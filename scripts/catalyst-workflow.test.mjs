@@ -14,8 +14,8 @@ const temp=mkdtempSync(join(tmpdir(),'tqa-workflow-tests-'));
 const mocks={
  '@/lib/local-env':'export const env=new Proxy({}, {get:(_,key)=>globalThis.workflowTest.env[key]});',
  '@/lib/tech-auth':`export const sameOrigin=()=>!globalThis.workflowTest.foreignOrigin; export const normalizeTechId=x=>x; export const getTechSessionContext=async()=>globalThis.workflowTest.signedOut?null:({tenantId:globalThis.workflowTest.tenant,techId:globalThis.workflowTest.techId??'TECH',isAdmin:!!globalThis.workflowTest.admin,expiresAt:Date.now()+1e12}); export const getCookie=()=> 'a'.repeat(64); export const hashToken=async()=> 'test'; export const TECH_COOKIE='test'; export const TECH_SESSION_LIFETIME_SECONDS=1; export const techCookie=()=>'';`,
- '@/app/chatgpt-auth':'export const getChatGPTUser=async()=>({tenantId:globalThis.workflowTest.tenant});',
- '@/app/access':'export const isOwner=()=>true;',
+ '@/app/chatgpt-auth':'export const getChatGPTUser=async()=>globalThis.workflowTest.viewer==="technician"||globalThis.workflowTest.signedOut?null:({tenantId:globalThis.workflowTest.tenant,techId:"SUP",email:"super@example.test",isSuperAdmin:globalThis.workflowTest.viewer==="super_admin"});',
+ '@/app/access':'export const isOwner=user=>!!user;',
  '@/lib/fiscal-month':'export const fiscalMonthKey=()=>"2026-10"; export const fiscalMonthBounds=()=>({start:Date.now()-86400000,end:Date.now()+20*86400000});',
 };
 // Test production handlers with isolated database, storage, and authentication adapters.
@@ -70,6 +70,9 @@ function fixture(){
  INSERT INTO push_accounts VALUES('a','TECH',1);`);
  db.prepare(`INSERT INTO qc_submissions(id,tenant_id,root_submission_id,tech_id,job_number,screenshot_id,photo_ids,status,submitted_at) VALUES(?,'a',?,'TECH','776499',?,?,'pending',?)`).run(first,first,picture,JSON.stringify([picture,picture]),Date.now());
  db.exec("ALTER TABLE tenants ADD COLUMN monthly_qc_goal INTEGER DEFAULT 5; CREATE TABLE technicians(tenant_id TEXT,tech_id TEXT,active INTEGER,is_admin INTEGER,monthly_qc_goal INTEGER); INSERT INTO technicians VALUES('a','TECH',1,0,NULL);");
+ db.exec(readFileSync(join(root,'drizzle/0029_qc_deletion.sql'),'utf8'));
+ db.exec(readFileSync(join(root,'drizzle/0030_qc_job_number_changes.sql'),'utf8'));
+ db.exec('CREATE TABLE push_outbox(id TEXT PRIMARY KEY,tenant_id TEXT,submission_id TEXT,message TEXT)');
  const database=createDatabase({url:null,sqlite:db});
  const bucket=new Map([[`captures/${picture}`,Buffer.from('original-photo')]]);
  globalThis.workflowTest={tenant:'a',env:{DB:{prepare(sql){const statement=database.prepare(sql);return {bind(...args){const bound=statement.bind(...args);return{first:()=>bound.first(),run:()=>bound.run(),all:async()=>({results:await bound.all()}),sql:bound.sql,values:bound.values};}};},batch:database.batch},BUCKET:{put:async(k,v)=>bucket.set(k,v),delete:async k=>bucket.delete(k),get:async k=>bucket.has(k)?{body:bucket.get(k)}:null}}};
@@ -92,6 +95,154 @@ async function queue(){return (await ok(await routes.list.GET(versionedRequest('
 async function uploaded(id,reference='12345'){return ok(await routes.upload.PATCH(request({status:'uploaded',externalReference:reference},'PATCH'),context(id)));}
 async function uploadedFromToast(id){return ok(await routes.upload.PATCH(request({status:'uploaded'},'PATCH'),context(id)));}
 async function rejectedFolder(){return (await ok(await routes.profile.GET(versionedRequest('http://localhost/profile?view=rejected')))).submissions;}
+
+const numberRequest=(next='123456',previous='776499')=>request({jobNumber:next,expectedJobNumber:previous},'PATCH');
+test('job number correction preserves approval, feedback and pictures and refreshes the extension queue',async()=>{
+ const db=fixture();try{
+  await feedbackNote(first,'Remember the house picture');
+  db.exec("UPDATE qc_submissions SET trust_upload_status='failed',trust_upload_error='not found',catalyst_observation_id='999'");
+  await ok(await routes.review.PATCH(numberRequest('001234'),context(first)));
+  const qc=db.prepare('SELECT * FROM qc_submissions WHERE id=?').get(first);
+  assert.equal(qc.job_number,'001234');assert.equal(qc.status,'approved');assert.equal(qc.review_note,'Remember the house picture');assert.equal(qc.screenshot_id,picture);assert.equal(qc.trust_upload_status,'ready');assert.equal(qc.catalyst_observation_id,null);assert.equal(qc.trust_upload_error,null);
+  assert.equal((await queue())[0].jobNumber,'001234');
+  const audit=db.prepare('SELECT * FROM qc_job_number_changes').get();assert.equal(audit.old_job_number,'776499');assert.equal(audit.new_job_number,'001234');assert.equal(audit.changed_by,'supervisor:SUP');
+ }finally{db.close();}
+});
+test('job number correction updates unuploaded correction history but locks every attempt after any confirmed upload',async()=>{
+ const db=fixture();try{
+  await reject(first);await redo(first,second);await approve(second);
+  await ok(await routes.review.PATCH(numberRequest(),context(second)));
+  assert.equal(db.prepare('SELECT job_number FROM qc_submission_attempts').get().job_number,'123456');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_job_number_changes').get().n,2);
+  db.exec("UPDATE qc_submission_attempts SET trust_upload_status='uploaded'");
+  assert.equal((await routes.review.PATCH(numberRequest('654321','123456'),context(second))).status,409);
+  db.exec("UPDATE qc_submission_attempts SET trust_upload_status='ready';UPDATE qc_submissions SET trust_upload_status='uploaded'");
+  assert.equal((await routes.review.PATCH(numberRequest('654321','123456'),context(second))).status,409);
+ }finally{db.close();}
+});
+test('job number editing validates input, stale values, supervisor access and company boundaries',async()=>{
+ const db=fixture();try{
+  for(const bad of ['','1234567','12a','-123'])assert.equal((await routes.review.PATCH(numberRequest(bad),context(first))).status,400);
+  assert.equal((await routes.review.PATCH(numberRequest('123','wrong'),context(first))).status,409);
+  globalThis.workflowTest.viewer='technician';assert.equal((await routes.review.PATCH(numberRequest(),context(first))).status,403);
+  globalThis.workflowTest.viewer='super_admin';globalThis.workflowTest.tenant='b';assert.equal((await routes.review.PATCH(numberRequest(),context(first))).status,404);
+  globalThis.workflowTest.tenant='a';globalThis.workflowTest.foreignOrigin=true;assert.equal((await routes.review.PATCH(numberRequest(),context(first))).status,403);
+  globalThis.workflowTest.foreignOrigin=false;await ok(await routes.review.PATCH(numberRequest(),context(first)));
+  assert.equal(db.prepare('SELECT changed_by FROM qc_job_number_changes').get().changed_by,'super_admin:super@example.test');
+ }finally{db.close();}
+});
+test('confirmed upload racing with a job number change blocks editing atomically',async()=>{
+ const db=fixture();try{
+  const batch=globalThis.workflowTest.env.DB.batch;
+  globalThis.workflowTest.env.DB.batch=async statements=>{db.exec("UPDATE qc_submissions SET trust_upload_status='uploaded'");return batch(statements);};
+  assert.equal((await routes.review.PATCH(numberRequest(),context(first))).status,409);
+  assert.equal(db.prepare('SELECT job_number FROM qc_submissions').get().job_number,'776499');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_job_number_changes').get().n,0);
+ }finally{db.close();}
+});
+
+const deleteRequest=(overrides={})=>request({permanent:true,jobNumber:'776499',techId:'TECH',...overrides},'DELETE');
+test('permanent QC deletion removes content, staged images and notifications, with an audit and no replay',async()=>{
+ const db=fixture();try{
+  db.prepare("INSERT INTO qc_upload_photos VALUES('a',?,'TECH',0,?,?)").run(first,Buffer.from('draft'),Date.now());
+  db.prepare("INSERT INTO push_outbox VALUES('notification','a',?,'private feedback')").run(first);
+  const result=await ok(await routes.review.DELETE(deleteRequest(),context(first)));assert.equal(result.deleted,true);assert.equal(result.photoCleanupPending,false);
+  for(const table of ['qc_submissions','qc_submission_attempts','qc_upload_photos','push_outbox','qc_deleted_photos'])assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n,0,table);
+  const audit=db.prepare('SELECT * FROM qc_deletions').get();assert.equal(audit.deleted_by,'supervisor:SUP');assert.equal(audit.job_number,'776499');assert.equal(audit.tech_id,'TECH');
+  assert.equal(await globalThis.workflowTest.env.BUCKET.get(`captures/${picture}`),null);
+  assert.equal((await ok(await routes.profile.GET(versionedRequest('http://localhost/profile?view=all')))).submissions.length,0);
+  assert.equal((await ok(await routes.review.DELETE(deleteRequest(),context(first)))).alreadyDeleted,true);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_deletions').get().n,1);
+  const replay=await routes.redo.POST(request({action:'photo',techId:'TECH',jobNumber:'776499',submissionId:first,slot:0,image:Buffer.alloc(500).toString('base64')}));assert.equal(replay.status,410);
+ }finally{db.close();}
+});
+test('deleting an unuploaded correction removes all attempts and their extension queue entries',async()=>{
+ const db=fixture();try{
+  await reject(first);await redo(first,second);await reject(second);await redo(second,third);await approve(third);
+  assert.equal((await queue()).length,1);
+  await ok(await routes.review.DELETE(deleteRequest(),context(third)));
+  assert.deepEqual(await queue(),[]);assert.deepEqual(await rejectedFolder(),[]);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_submission_attempts').get().n,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_deleted_ids').get().n,3);
+  assert.equal((await routes.detail.GET(versionedRequest('http://localhost/detail'),context(first))).status,404);
+  assert.equal((await routes.photo.GET(versionedRequest('http://localhost/photo'),context(picture))).status,404);
+  const staleRedo=await routes.redo.POST(request({action:'finalize',techId:'TECH',jobNumber:'776499',submissionId:crypto.randomUUID(),redoSourceId:second,redoChanged:true,photoCount:2}));assert.equal(staleRedo.status,410);
+ }finally{db.close();}
+});
+test('confirmed successful and failed Catalyst uploads cannot be deleted or change historical totals',async()=>{
+ for(const failed of [false,true]){
+  const db=fixture();try{
+   if(failed)await reject(first);else await approve(first);
+   await uploaded(first);
+   const before=await monthlyTotals();
+   assert.equal((await routes.review.DELETE(deleteRequest(),context(first))).status,409);
+   assert.deepEqual(await monthlyTotals(),before);
+   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_deletions').get().n,0);
+   assert(await globalThis.workflowTest.env.BUCKET.get(`captures/${picture}`));
+   if(failed){
+    await redo(first,second);await approve(second);
+    assert.equal((await routes.review.DELETE(deleteRequest(),context(second))).status,409,'earlier confirmed Fail protects the whole QC');
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_submission_attempts').get().n,1);
+    assert.deepEqual(await monthlyTotals(),before);
+   }
+  }finally{db.close();}
+ }
+});
+test('QC deletion is company scoped, requires supervisor access and explicit matching confirmation',async()=>{
+ const db=fixture();try{
+  globalThis.workflowTest.viewer='technician';assert.equal((await routes.review.DELETE(deleteRequest(),context(first))).status,403);
+  globalThis.workflowTest.viewer='super_admin';globalThis.workflowTest.tenant='b';assert.equal((await routes.review.DELETE(deleteRequest(),context(first))).status,404);
+  globalThis.workflowTest.tenant='a';globalThis.workflowTest.foreignOrigin=true;assert.equal((await routes.review.DELETE(deleteRequest(),context(first))).status,403);globalThis.workflowTest.foreignOrigin=false;
+  assert.equal((await routes.review.DELETE(deleteRequest({permanent:false}),context(first))).status,400);
+  assert.equal((await routes.review.DELETE(deleteRequest({jobNumber:'different'}),context(first))).status,409);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_submissions').get().n,1);
+  await ok(await routes.review.DELETE(deleteRequest(),context(first)));
+  assert.equal(db.prepare('SELECT deleted_by FROM qc_deletions').get().deleted_by,'super_admin:super@example.test');
+ }finally{db.close();}
+});
+test('QC deletion retains shared pictures used by another company',async()=>{
+ const db=fixture();try{
+  db.prepare("INSERT INTO qc_submissions(id,tenant_id,root_submission_id,tech_id,job_number,screenshot_id,photo_ids,status,submitted_at) VALUES(?,'b',?,'OTHER','123456',?,'[]','pending',?)").run(second,second,picture,Date.now());
+  await ok(await routes.review.DELETE(deleteRequest(),context(first)));
+  assert(await globalThis.workflowTest.env.BUCKET.get(`captures/${picture}`));
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM qc_submissions WHERE tenant_id='b'").get().n,1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_deleted_photos').get().n,0);
+ }finally{db.close();}
+});
+test('a storage outage queues photo cleanup durably and retry never restores the deleted QC',async()=>{
+ const db=fixture();try{
+  const bucket=globalThis.workflowTest.env.BUCKET,remove=bucket.delete;bucket.delete=async()=>{throw Error('test storage outage');};
+  const response=await routes.review.DELETE(deleteRequest(),context(first));assert.equal(response.status,202);assert.equal((await response.json()).photoCleanupPending,true);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_submissions').get().n,0);assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_deleted_photos').get().n,1);
+  bucket.delete=remove;
+  assert.equal((await ok(await routes.review.DELETE(deleteRequest(),context(first)))).photoCleanupPending,false);
+  assert.equal(await bucket.get(`captures/${picture}`),null);
+ }finally{db.close();}
+});
+test('transaction failure leaves the QC, photos and audit unchanged',async()=>{
+ const db=fixture();try{
+  db.exec("CREATE TRIGGER prevent_test_delete BEFORE DELETE ON qc_submissions BEGIN SELECT RAISE(ABORT,'test transaction failure'); END");
+  assert.equal((await routes.review.DELETE(deleteRequest(),context(first))).status,503);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_submissions').get().n,1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_deletions').get().n,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_deleted_photos').get().n,0);
+  assert(await globalThis.workflowTest.env.BUCKET.get(`captures/${picture}`));
+ }finally{db.close();}
+});
+test('an upload confirmed after the delete precheck is blocked inside the deletion transaction',async()=>{
+ const db=fixture();try{
+  await approve(first);
+  const original=globalThis.workflowTest.env.DB.batch;
+  globalThis.workflowTest.env.DB.batch=async statements=>{
+   db.prepare("UPDATE qc_submissions SET trust_upload_status='uploaded',trust_uploaded_at=? WHERE id=?").run(Date.now(),first);
+   return original(statements);
+  };
+  assert.equal((await routes.review.DELETE(deleteRequest(),context(first))).status,409);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM qc_deletions').get().n,0);
+  assert.equal(db.prepare('SELECT trust_upload_status FROM qc_submissions').get().trust_upload_status,'uploaded');
+  assert(await globalThis.workflowTest.env.BUCKET.get(`captures/${picture}`));
+ }finally{db.close();}
+});
 
 test('technician menu separates awaiting-review QCs from All QCs and clears alerts after resubmission',async()=>{
  const db=fixture();try{
@@ -344,7 +495,7 @@ test('PostgreSQL migrations and monthly counters handle confirmed uploads withou
  const {postgresSql}=await import('../lib/database.mjs');
  const pg=new PGlite();
  try{
-  for(const name of ['0001_baseline','0002_notification_summaries','0003_single_push_phone','0004_qc_address','0005_catalyst_failure_workflow','0006_catalyst_observation_type','0007_super_admin','0008_catalyst_screenshot','0009_local_rejection','0010_feedback_acknowledgment','0011_team_watch_defaults'])await pg.exec(readFileSync(join(root,`postgres/migrations/${name}.sql`),'utf8'));
+  for(const name of ['0001_baseline','0002_notification_summaries','0003_single_push_phone','0004_qc_address','0005_catalyst_failure_workflow','0006_catalyst_observation_type','0007_super_admin','0008_catalyst_screenshot','0009_local_rejection','0010_feedback_acknowledgment','0011_team_watch_defaults','0012_qc_deletion','0013_qc_job_number_changes'])await pg.exec(readFileSync(join(root,`postgres/migrations/${name}.sql`),'utf8'));
   const db={prepare(sql){return{bind(...values){return{first:async()=> (await pg.query(postgresSql(sql),values)).rows[0],all:async()=>({results:(await pg.query(postgresSql(sql),values)).rows}),run:async()=>({meta:{changes:(await pg.query(postgresSql(sql),values)).affectedRows}}),sql,values};}};},async batch(statements){await pg.exec('BEGIN');try{const r=[];for(const statement of statements)r.push(await statement.run());await pg.exec('COMMIT');return r;}catch(e){await pg.exec('ROLLBACK');throw e;}}};
   globalThis.workflowTest={tenant:'a',env:{DB:db}};
   await pg.query("INSERT INTO tenants(id,name,created_at) VALUES('a','Demo',1)");
@@ -373,6 +524,19 @@ test('PostgreSQL migrations and monthly counters handle confirmed uploads withou
   assert.equal(typeof acknowledged.feedbackAcknowledgedAt,'number');assert.equal(await unreadFeedback(),0);
   await pg.query("INSERT INTO technicians(tenant_id,tech_id,pin_salt,pin_hash,is_admin,created_at) VALUES('a','TECH','salt','hash',0,1)");
   globalThis.workflowTest.admin=true;await ok(await routes.watches.PUT(request({scope:'team',event:'upload',enabled:true},'PUT')));const teamPrefs=await ok(await routes.watches.GET(request(null)));assert.equal(teamPrefs.team.uploadEnabled,true);assert.ok(teamPrefs.techIds.includes('TECH'));
+
+  await ok(await routes.review.PATCH(numberRequest('654321'),context(third)));
+  assert.equal((await pg.query('SELECT job_number FROM qc_submissions WHERE id=$1',[third])).rows[0].job_number,'654321');
+
+  // Execute deletion and shared-photo cleanup against PostgreSQL, not only SQLite.
+  const removed=[];globalThis.workflowTest.env.BUCKET={delete:async key=>removed.push(key)};
+  const blocked=await routes.review.DELETE(request({permanent:true,jobNumber:'776499',techId:'TECH'},'DELETE'),context(first));
+  assert.equal(blocked.status,409);
+  const deleted=await ok(await routes.review.DELETE(request({permanent:true,jobNumber:'654321',techId:'TECH'},'DELETE'),context(third)));
+  assert.equal(deleted.deleted,true);assert.equal(deleted.photoCleanupPending,false);
+  assert.equal((await pg.query('SELECT id FROM qc_submissions WHERE id=$1',[third])).rows.length,0);
+  assert.equal((await pg.query('SELECT submission_id FROM qc_deleted_ids WHERE submission_id=$1',[third])).rows.length,1);
+  assert.deepEqual(removed,[]); // Other QCs still reference the same picture.
 
  }finally{await pg.close();}
 });

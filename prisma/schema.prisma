@@ -262,3 +262,43 @@ model SuperAdminAudit {
  @@index([createdAt], map: "idx_super_admin_audit_created")
  @@map("super_admin_audit")
 }
+
+model QcDeletion {
+ tenantId String @map("tenant_id")
+ rootSubmissionId String @map("root_submission_id")
+ currentSubmissionId String @map("current_submission_id")
+ techId String @map("tech_id")
+ jobNumber String @map("job_number")
+ deletedBy String @map("deleted_by")
+ deletedAt BigInt @map("deleted_at")
+ @@id([tenantId, rootSubmissionId])
+ @@map("qc_deletions")
+}
+model QcDeletedId {
+ tenantId String @map("tenant_id")
+ submissionId String @map("submission_id")
+ rootSubmissionId String @map("root_submission_id")
+ @@id([tenantId, submissionId])
+ @@map("qc_deleted_ids")
+}
+model QcDeletedPhoto {
+ tenantId String @map("tenant_id")
+ rootSubmissionId String @map("root_submission_id")
+ photoId String @map("photo_id")
+ @@id([tenantId, rootSubmissionId, photoId])
+ @@map("qc_deleted_photos")
+}
+
+model QcJobNumberChange {
+ changeId String @map("change_id")
+ tenantId String @map("tenant_id")
+ rootSubmissionId String @map("root_submission_id")
+ submissionId String @map("submission_id")
+ oldJobNumber String @map("old_job_number")
+ newJobNumber String @map("new_job_number")
+ changedBy String @map("changed_by")
+ changedAt BigInt @map("changed_at")
+ @@id([changeId, submissionId])
+ @@index([tenantId, rootSubmissionId, changedAt], map: "idx_qc_job_number_changes_root")
+ @@map("qc_job_number_changes")
+}

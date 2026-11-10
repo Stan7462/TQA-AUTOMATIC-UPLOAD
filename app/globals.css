@@ -930,6 +930,14 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 @media(max-width:600px){.qc-reference .qc-reference-header .qc-header-actions{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .capture-shell.qc-reference{flex-direction:column;justify-content:flex-start}
 
+.qc-delete-section{padding-top:16px;margin-top:16px;border-top:1px solid #405362}
+.admin-dark .qc-delete-trigger.button.light{color:#ffb2bd;border-color:#87505c;background:#35262c;min-height:42px}
+.admin-dark .qc-delete-trigger.button.light:hover:not(:disabled){background:#51313b}
+.qc-delete-locked{display:flex;align-items:flex-start;gap:6px;color:#b6c5cf;font-size:11px;line-height:1.5;margin-top:8px}
+.qc-delete-locked svg{flex-shrink:0;margin-top:2px}
+.qc-delete-dialog .qc-delete-permanent.button.dark{background:#a73249;color:#fff;border-color:#c55268}
+.qc-delete-dialog p{line-height:1.5}
+
 .qc-reference .qc-menu-header{position:relative;z-index:20}
 .qc-menu-identity{display:block;color:var(--qc-muted);font-size:13px;margin-top:5px}
 .qc-reference .qc-reference-header .qc-header-actions.qc-menu-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:8px;align-items:stretch;margin-top:8px}
@@ -952,3 +960,12 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .qc-menu-rejected-dot{display:grid;place-items:center;flex:0 0 18px;width:18px;height:18px;border-radius:50%;background:#ed526b;color:#fff;font-size:13px;font-weight:750;line-height:1}
 .qc-technician-menu-panel a[aria-disabled="true"]{opacity:.5;pointer-events:none}
 @media(max-width:600px){.qc-reference .qc-menu-actions .button{font-size:13px;padding:8px;gap:6px}.qc-reference .qc-menu-actions svg{width:18px;height:18px}.qc-technician-menu-panel{max-width:calc(100vw - 40px)}.qc-reference .qc-menu-header{padding-bottom:12px}}
+
+.qc-job-number-title{display:flex;align-items:center;gap:8px}
+.qc-job-edit-icon{display:grid;place-items:center;flex-shrink:0;width:32px;height:32px;border:1px solid #405968;border-radius:9px;color:#c4d9ed;background:#223642;cursor:pointer}
+.qc-job-edit-icon:hover:not(:disabled){background:#304c5d}.qc-job-edit-icon:disabled{opacity:.5;cursor:default}
+.qc-job-edit-form{display:grid;gap:10px;margin:12px 0;padding:12px;border:1px solid #405968;border-radius:12px;background:#132630}
+.qc-job-edit-form label{display:grid;gap:6px;font-size:13px;color:#d5e4ef}
+.qc-job-edit-form input{box-sizing:border-box;width:100%;min-width:0;height:42px;padding:8px 10px;background:#233642;border:1px solid #668698;border-radius:8px;color:#edf4fb;font-size:18px}
+.qc-job-edit-form small{font-size:12px;line-height:1.5;color:#b6c8d5}
+.qc-job-edit-form>div{display:flex;gap:8px;flex-wrap:wrap}.qc-job-edit-form .button{padding:8px 12px;font-size:13px;min-height:38px}

@@ -198,3 +198,25 @@ test('new batches use each technician monthly history, including failed observat
  // Failed uploads do not advance server history: the next run makes the same choice.
  assert.equal(observationTypeAssignments([qc],50,()=>0.99,history)[0].observationType,'Ride Along');
 });
+
+test('corrected job numbers clear unused checkpoints, but retain partial uploads for review',async()=>{
+ for(const partial of [false,true]){
+  let checkpoint={jobId:'old',jobNumber:'111111',techId:'TECH',photoIds:partial?['a']:[],photoKeys:partial?['thumb1']:[]},run={},searches=0;
+  const paths=[];
+  const qc={id:'qc',jobNumber:'222222',techId:'TECH',workflow:'observation',reviewStatus:'approved',uploadStatus:'failed',outcome:'pass',photos:[]};
+  const process=runInNewContext(`${processSource};processOne`,{
+   MAX_QC_ATTEMPTS:3,stopRequested:false,detail:async()=>qc,setRun:async patch=>{run={...run,...patch};},stored:async()=>({run}),
+   recovery:async(_id,patch)=>{if(patch===null)checkpoint=undefined;else if(patch)checkpoint={...checkpoint,...patch};return checkpoint;},
+   orderedPhotos,exactJobMatches,recoveryPhotoIndex,safeError:e=>e.message,logEvent:async()=>{},monthlyObservationType:async()=> 'Ride Along',
+   navigate:async(_tab,url)=>paths.push(url),JOBS_URL:'jobs',observationUrl:id=>`job/${id}`,waitForSuccess:async()=> 'Observation Saved',report:async()=>({uploadStatus:'uploaded'}),
+   pageCommand:async(_tab,command,payload)=>{
+    if(command==='FIND_JOB'){searches++;assert.equal(payload.jobNumber,'222222');return {rows:[{jobId:'correct',jobNumber:'222222',techId:'TECH'}]};}
+    if(command==='INSPECT_OBSERVATION')return {photoKeys:[]};
+    if(command==='PREPARE')return {technicianName:'Demo Tech'};
+    return {};
+   }
+  });
+  if(partial){await assert.rejects(process(qc,1,0,1,1,'Ride Along'),/Job number changed/);assert.equal(searches,0);assert.equal(checkpoint.jobId,'old');assert.equal(run.status,'needs_review');}
+  else{assert.equal((await process(qc,1,0,1,1,'Ride Along')).status,'uploaded');assert.equal(searches,1);assert.deepEqual(paths,['jobs','job/correct']);assert.equal(checkpoint,undefined);}
+ }
+});

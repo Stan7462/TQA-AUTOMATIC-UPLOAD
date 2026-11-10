@@ -25,6 +25,8 @@ test('all SQLite records and binary data preserve exact values in PostgreSQL',as
  if(source.prepare('PRAGMA table_info(qc_submissions)').all().some(c=>c.name==='rejection_upload_mode'))await pg.exec(readFileSync('postgres/migrations/0009_local_rejection.sql','utf8'));
  if(source.prepare('PRAGMA table_info(qc_submissions)').all().some(c=>c.name==='feedback_acknowledged_at'))await pg.exec(readFileSync('postgres/migrations/0010_feedback_acknowledgment.sql','utf8'));
  if(source.prepare('PRAGMA table_info(push_company_preferences)').all().some(c=>c.name==='watch_upload_enabled'))await pg.exec(readFileSync('postgres/migrations/0011_team_watch_defaults.sql','utf8'));
+ if(source.prepare("SELECT 1 FROM sqlite_master WHERE name='qc_deletions'").get())await pg.exec(readFileSync('postgres/migrations/0012_qc_deletion.sql','utf8'));
+ if(source.prepare("SELECT 1 FROM sqlite_master WHERE name='qc_job_number_changes'").get())await pg.exec(readFileSync('postgres/migrations/0013_qc_job_number_changes.sql','utf8'));
  await pg.exec('BEGIN');const result=await importSqlite(source,pg);const existing=tables.filter(table=>source.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));assert.equal(Object.keys(result).length,existing.length);await pg.exec('ROLLBACK');}
  finally{source.close();await pg.close();rmSync(directory,{recursive:true,force:true});}
 });

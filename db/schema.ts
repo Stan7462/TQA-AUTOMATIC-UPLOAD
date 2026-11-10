@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { primaryKey, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const technicians = sqliteTable("technicians", {
   techId: text("tech_id").primaryKey(),
@@ -63,3 +63,21 @@ export const trustApiKeys = sqliteTable("trust_api_keys", {
   lastUsedAt: integer("last_used_at"),
   revokedAt: integer("revoked_at"),
 });
+
+export const qcDeletions = sqliteTable("qc_deletions", {
+  tenantId: text("tenant_id").notNull(), rootSubmissionId: text("root_submission_id").notNull(),
+  currentSubmissionId: text("current_submission_id").notNull(), techId: text("tech_id").notNull(),
+  jobNumber: text("job_number").notNull(), deletedBy: text("deleted_by").notNull(), deletedAt: integer("deleted_at").notNull(),
+}, table => [primaryKey({columns:[table.tenantId,table.rootSubmissionId]})]);
+export const qcDeletedIds = sqliteTable("qc_deleted_ids", {
+  tenantId: text("tenant_id").notNull(), submissionId: text("submission_id").notNull(), rootSubmissionId: text("root_submission_id").notNull(),
+}, table => [primaryKey({columns:[table.tenantId,table.submissionId]})]);
+export const qcDeletedPhotos = sqliteTable("qc_deleted_photos", {
+  tenantId: text("tenant_id").notNull(), rootSubmissionId: text("root_submission_id").notNull(), photoId: text("photo_id").notNull(),
+}, table => [primaryKey({columns:[table.tenantId,table.rootSubmissionId,table.photoId]})]);
+
+export const qcJobNumberChanges = sqliteTable("qc_job_number_changes", {
+ changeId: text("change_id").notNull(), tenantId: text("tenant_id").notNull(), rootSubmissionId: text("root_submission_id").notNull(),
+ submissionId: text("submission_id").notNull(), oldJobNumber: text("old_job_number").notNull(), newJobNumber: text("new_job_number").notNull(),
+ changedBy: text("changed_by").notNull(), changedAt: integer("changed_at").notNull(),
+}, table => [primaryKey({columns:[table.changeId,table.submissionId]}),index("idx_qc_job_number_changes_root").on(table.tenantId,table.rootSubmissionId,table.changedAt)]);
