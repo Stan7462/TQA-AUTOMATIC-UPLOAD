@@ -40,3 +40,32 @@ test('type split totals, percentages and shared image keep counts and unknown ty
  for(const label of ['RIDE ALONG','AFTER THE FACT','NOT RECORDED','Tech R001','Tech ZERO','25%','50%','—'])assert(text.some(t=>t.value===label),label);
  assert(text.every(t=>t.y>=0&&t.y<canvas.height));assert(boxes.every(b=>b[0]>=0&&b[1]>=0&&b[0]+b[2]<=canvas.width&&b[1]+b[3]<=canvas.height));
 });
+
+test('team goal totals use individual requirements and successful uploads, including over-target and empty teams',async()=>{
+ const {build}=await import('esbuild');const {runInNewContext}=await import('node:vm');
+ const output=await build({entryPoints:['lib/catalyst-snapshot.ts'],bundle:true,write:false,format:'iife',globalName:'snapshot',platform:'browser'});
+ const sandbox={Intl};runInNewContext(output.outputFiles[0].text,sandbox);
+ const {snapshotGoalTotals}=sandbox.snapshot;
+ const team=Array.from({length:10},(_,i)=>({uploaded:i<5?5:0,monthlyGoal:5,failedUploaded:7}));
+ let totals=snapshotGoalTotals(team,5);assert.equal(totals.uploaded,25);assert.equal(totals.required,50);assert.equal(totals.remaining,25);assert.equal(totals.percentage,'50%');assert.equal(totals.progress,.5);
+ totals=snapshotGoalTotals([{uploaded:4,monthlyGoal:10},{uploaded:1,monthlyGoal:null}],5);assert.equal(totals.required,15);assert.equal(totals.percentage,'33.3%');
+ totals=snapshotGoalTotals([{uploaded:8,monthlyGoal:5}],5);assert.equal(totals.percentage,'160%');assert.equal(totals.remaining,0);assert.equal(totals.progress,1);
+ totals=snapshotGoalTotals([],5);assert.equal(totals.required,0);assert.equal(totals.percentage,'—');assert.equal(totals.progress,0);
+});
+
+test('current snapshot image includes team totals without overlapping technician rows',async()=>{
+ const {build}=await import('esbuild');const {runInNewContext}=await import('node:vm');
+ const output=await build({entryPoints:['lib/catalyst-snapshot.ts'],bundle:true,write:false,format:'iife',globalName:'snapshot',platform:'browser'});
+ for(const count of [10,27]){
+  const text=[],boxes=[];let canvas;
+  const context={createLinearGradient:()=>({addColorStop(){}}),fillRect(...args){boxes.push(args);},strokeRect(){},fillText(value,x,y){text.push({value,x,y});}};
+  const sandbox={File,Uint8Array,atob,Intl,Date,document:{createElement(){canvas={width:0,height:0,getContext:()=>context,toDataURL:()=> 'data:image/png;base64,aGVsbG8='};return canvas;}}};
+  runInNewContext(output.outputFiles[0].text,sandbox);
+  const team=Array.from({length:count},(_,i)=>({techId:`T${i}`,uploaded:i<5?5:0,monthlyGoal:5,failedUploaded:0}));
+  const file=sandbox.snapshot.snapshotPng(team,{start:1000000000000,end:1002592000000},5);
+  assert.equal(file.type,'image/png');
+  for(const label of ['Team monthly goal',`25 of ${count*5} required QCs uploaded`,`${count*5-25} remaining`,`Tech T${count-1}`])assert(text.some(t=>t.value===label),label);
+  assert(text.find(t=>t.value==='TECHNICIAN').y>text.find(t=>t.value==='Team monthly goal').y);
+  assert(text.every(t=>t.y>=0&&t.y<canvas.height));assert(boxes.every(b=>b[0]>=0&&b[1]>=0&&b[0]+b[2]<=canvas.width&&b[1]+b[3]<=canvas.height));
+ }
+});

@@ -1,6 +1,7 @@
 "use client";
 import CatalystSnapshotTypes from "@/app/catalyst-snapshot-types";
-import {snapshotTypesPng,type SnapshotStat,type SnapshotView} from "@/lib/catalyst-snapshot";
+import CatalystSnapshotGoal from "@/app/catalyst-snapshot-goal";
+import {snapshotPng,type SnapshotStat,type SnapshotView} from "@/lib/catalyst-snapshot";
 import QcFeedbackStatus from "@/app/qc-feedback-status";
 import QcUploadTypeBadge from "@/app/qc-upload-type-badge";
 import {matchesQcUploadType,normalizeUploadType} from "@/lib/qc-observation-type";
@@ -27,89 +28,6 @@ function adminDeadline(q: Qc, now: number) {
   return hours > 0 ? { label: `${hours} hours left`, state: "active" } : { label: "Overdue", state: "overdue" };
 }
 
-function snapshotPng(stats: SnapshotStat[], range: { start: number; end: number }, monthlyGoal: number, view:SnapshotView="current") {
-  if(view==="types")return snapshotTypesPng(stats,range,monthlyGoal);
-  const dense = stats.length > 10;
-  const columns = dense ? 2 : 1;
-  const rows = Math.max(1, Math.ceil(stats.length / columns));
-  const width = 1080;
-  const rowHeight = dense ? 62 : 78;
-  const height = 330 + rows * rowHeight;
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("This browser cannot create the snapshot.");
-  const gradient = context.createLinearGradient(0, 0, width, height);
-  gradient.addColorStop(0, "#22333f");
-  gradient.addColorStop(1, "#0c1821");
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, width, height);
-  context.fillStyle = "#8edbd2";
-  context.font = "700 22px system-ui, sans-serif";
-  context.fillText("TQA AUTOMATIC UPLOAD", 64, 70);
-  context.fillStyle = "#edf4fb";
-  context.font = "700 58px system-ui, sans-serif";
-  context.fillText("Uploaded to Catalyst", 64, 138);
-  context.fillStyle = "#b7c7d3";
-  context.font = "28px system-ui, sans-serif";
-  const period = `${new Date(range.start).toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${new Date(range.end - 1).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
-  context.fillText(period, 64, 184);
-  const tableX = 64;
-  const tableY = 220;
-  const tableWidth = width - 128;
-  const columnWidth = tableWidth / columns;
-  context.fillStyle = "#293c49";
-  context.fillRect(tableX, tableY, tableWidth, 50);
-  context.fillStyle = "#aabdc9";
-  context.font = "700 18px system-ui, sans-serif";
-  for (let column = 0; column < columns; column++) {
-    const x = tableX + column * columnWidth;
-    context.textAlign = "left";
-    context.fillText("TECHNICIAN", x + 16, tableY + 32);
-    context.textAlign = "right";
-    context.fillText("UPLOADED", x + columnWidth - 105, tableY + 32);
-    context.fillText("FAILED", x + columnWidth - 16, tableY + 32);
-  }
-  context.textAlign = "left";
-  stats.forEach((stat, index) => {
-    const column = dense ? index % 2 : 0;
-    const row = dense ? Math.floor(index / 2) : index;
-    const x = tableX + column * columnWidth;
-    const y = tableY + 50 + row * rowHeight;
-    context.fillStyle = row % 2 ? "#192934" : "#1d2d38";
-    context.fillRect(x, y, columnWidth, rowHeight);
-    context.strokeStyle = "#405969";
-    context.strokeRect(x, y, columnWidth, rowHeight);
-    context.textAlign = "left";
-    context.fillStyle = "#8195a3";
-    context.font = `500 ${dense ? 14 : 17}px system-ui, sans-serif`;
-    context.fillText(String(index + 1), x + 16, y + rowHeight / 2 + 7);
-    context.fillStyle = "#edf4fb";
-    context.font = `700 ${dense ? 23 : 27}px system-ui, sans-serif`;
-    context.fillText(`Tech ${stat.techId}`, x + 44, y + rowHeight / 2 + 9, columnWidth - 263);
-    context.textAlign = "right";
-    context.font = `700 ${dense ? 28 : 34}px system-ui, sans-serif`;
-    context.fillText(String(stat.uploaded), x + columnWidth - 163, y + rowHeight / 2 + 10);
-    context.fillStyle = "#bed0dc";
-    context.font = `600 ${dense ? 18 : 21}px system-ui, sans-serif`;
-    context.fillText(`of ${stat.monthlyGoal ?? monthlyGoal}`, x + columnWidth - 105, y + rowHeight / 2 + 9);
-    context.fillStyle = stat.failedUploaded ? "#ffadb8" : "#bed0dc";
-    context.font = `700 ${dense ? 28 : 34}px system-ui, sans-serif`;
-    context.fillText(String(stat.failedUploaded ?? 0), x + columnWidth - 16, y + rowHeight / 2 + 10);
-    context.textAlign = "left";
-  });
-  context.fillStyle = "#91a7b6";
-  context.font = "20px system-ui, sans-serif";
-  context.textAlign = "left";
-  context.font = "16px system-ui, sans-serif";
-  context.fillText("Confirmed uploads • Failed QCs do not count toward the monthly goal", 64, height - 34);
-  context.textAlign = "right";
-  context.fillText(`Updated ${new Date().toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`, width - 64, height - 34);
-  const encoded = canvas.toDataURL("image/png").split(",")[1];
-  const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
-  return new File([bytes], `catalyst-qc-progress-${fiscalMonthKey()}.png`, { type: "image/png" });
-}
 export default function Home() {
   const [activitySelection, setActivitySelection] = useState<ActivitySelection | null>(null);
   const [activityTechIds, setActivityTechIds] = useState<string[]>([]);
@@ -205,7 +123,7 @@ export default function Home() {
   }
   return <AdminShell active="records">
     <section className="intro"><div><h1>All records</h1><p>Review progress and track uploads to Catalyst.</p></div><div className="intro-actions"><button type="button" className="button light" onClick={() => void openSnapshot()}><UsersRound size={18}/>Catalyst snapshot</button><a className="button light" href="/records/approved">Export approved QCs</a></div></section>
-    {snapshotOpen && <div className="qc-confirm-overlay qc-snapshot-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSnapshotOpen(false); }}><section className={`qc-team-snapshot${snapshotView==='types'?' has-type-split':snapshotStats.length>10?' is-dense':''}`} role="dialog" aria-modal="true" aria-labelledby="qc-snapshot-title"><button type="button" className="qc-snapshot-close" aria-label="Close Catalyst snapshot" onClick={() => setSnapshotOpen(false)}><X size={22}/></button><span className="kicker">TQA AUTOMATIC UPLOAD</span><h2 id="qc-snapshot-title">Uploaded to Catalyst</h2><p className="qc-snapshot-period">{new Date(snapshotRange.start).toLocaleDateString(undefined,{month:"short",day:"numeric"})} – {new Date(snapshotRange.end-1).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})}</p>{snapshotLoading ? <p className="qc-snapshot-empty">Loading totals…</p> : snapshotError ? <p className="form-error" role="alert">{snapshotError}</p> : snapshotStats.length ? (snapshotView==='types'?<CatalystSnapshotTypes stats={snapshotStats} monthlyGoal={snapshotMonthlyGoal}/>:<div className="qc-snapshot-table" role="table" aria-label="Technician Catalyst upload progress">{(snapshotStats.length>10?[0,1]:[0]).map(column=><div className="qc-snapshot-table-head" role="row" key={`head-${column}`}><span role="columnheader">Technician</span><span role="columnheader">Uploaded</span><span role="columnheader">Failed</span></div>)}{snapshotStats.map((stat, index) => <div className="qc-snapshot-row" role="row" key={stat.techId}><strong role="cell"><small className="qc-snapshot-index">{index + 1}</small>Tech {stat.techId}</strong><span role="cell"><b>{stat.uploaded}</b> of {stat.monthlyGoal ?? snapshotMonthlyGoal}</span><span role="cell" className="qc-snapshot-failed"><b>{stat.failedUploaded ?? 0}</b></span></div>)}</div>) : <p className="qc-snapshot-empty">No active technicians.</p>}<p className="qc-snapshot-count-note">{snapshotView==='types'?'Type percentages count each original observation once, including Not recorded. Failed observations use After the Fact. Corrected follow-ups do not count twice. Type totals use Catalyst upload dates.':'Confirmed successful uploads and confirmed failed observations. A later corrected upload increases Uploaded while the original Failed count stays.'}</p><div className="qc-snapshot-footer"><button type="button" className="qc-snapshot-share" disabled={snapshotLoading || !!snapshotError || !snapshotStats.length || snapshotSharing} onClick={() => void shareSnapshot()}><Share2 size={15}/>{snapshotSharing ? "Preparing…" : snapshotView==='types'?"Share type split":"Share snapshot"}</button><div className="qc-snapshot-view-switch" role="group" aria-label="Snapshot view">{[['current','Current snapshot'],['types','Type split']].map(([view,label])=><button key={view} type="button" aria-pressed={snapshotView===view} disabled={snapshotLoading||snapshotSharing} onClick={()=>{setSnapshotView(view as SnapshotView);setSnapshotShareNote('');}}>{label}</button>)}</div><small>Updated {new Date().toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</small></div>{snapshotShareNote && <p className="qc-snapshot-share-note" role="status">{snapshotShareNote}</p>}</section></div>}
+    {snapshotOpen && <div className="qc-confirm-overlay qc-snapshot-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSnapshotOpen(false); }}><section className={`qc-team-snapshot${snapshotView==='types'?' has-type-split':snapshotStats.length>10?' is-dense':''}`} role="dialog" aria-modal="true" aria-labelledby="qc-snapshot-title"><button type="button" className="qc-snapshot-close" aria-label="Close Catalyst snapshot" onClick={() => setSnapshotOpen(false)}><X size={22}/></button><span className="kicker">TQA AUTOMATIC UPLOAD</span><h2 id="qc-snapshot-title">Uploaded to Catalyst</h2><p className="qc-snapshot-period">{new Date(snapshotRange.start).toLocaleDateString(undefined,{month:"short",day:"numeric"})} – {new Date(snapshotRange.end-1).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})}</p>{snapshotLoading ? <p className="qc-snapshot-empty">Loading totals…</p> : snapshotError ? <p className="form-error" role="alert">{snapshotError}</p> : snapshotStats.length ? (snapshotView==='types'?<CatalystSnapshotTypes stats={snapshotStats} monthlyGoal={snapshotMonthlyGoal}/>:<><CatalystSnapshotGoal stats={snapshotStats} monthlyGoal={snapshotMonthlyGoal}/><div className="qc-snapshot-table" role="table" aria-label="Technician Catalyst upload progress">{(snapshotStats.length>10?[0,1]:[0]).map(column=><div className="qc-snapshot-table-head" role="row" key={`head-${column}`}><span role="columnheader">Technician</span><span role="columnheader">Uploaded</span><span role="columnheader">Failed</span></div>)}{snapshotStats.map((stat, index) => <div className="qc-snapshot-row" role="row" key={stat.techId}><strong role="cell"><small className="qc-snapshot-index">{index + 1}</small>Tech {stat.techId}</strong><span role="cell"><b>{stat.uploaded}</b> of {stat.monthlyGoal ?? snapshotMonthlyGoal}</span><span role="cell" className="qc-snapshot-failed"><b>{stat.failedUploaded ?? 0}</b></span></div>)}</div></>) : <p className="qc-snapshot-empty">No active technicians.</p>}<p className="qc-snapshot-count-note">{snapshotView==='types'?'Type percentages count each original observation once, including Not recorded. Failed observations use After the Fact. Corrected follow-ups do not count twice. Type totals use Catalyst upload dates.':'Confirmed successful uploads and confirmed failed observations. A later corrected upload increases Uploaded while the original Failed count stays.'}</p><div className="qc-snapshot-footer"><button type="button" className="qc-snapshot-share" disabled={snapshotLoading || !!snapshotError || !snapshotStats.length || snapshotSharing} onClick={() => void shareSnapshot()}><Share2 size={15}/>{snapshotSharing ? "Preparing…" : snapshotView==='types'?"Share type split":"Share snapshot"}</button><div className="qc-snapshot-view-switch" role="group" aria-label="Snapshot view">{[['current','Current snapshot'],['types','Type split']].map(([view,label])=><button key={view} type="button" aria-pressed={snapshotView===view} disabled={snapshotLoading||snapshotSharing} onClick={()=>{setSnapshotView(view as SnapshotView);setSnapshotShareNote('');}}>{label}</button>)}</div><small>Updated {new Date().toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</small></div>{snapshotShareNote && <p className="qc-snapshot-share-note" role="status">{snapshotShareNote}</p>}</section></div>}
     <section className="metrics status-metrics" aria-label="Filter QC records by status">{metricStatuses.map(([value,label]) => { const active = filters.status === value && !filters.tech && !filters.search && !activitySelection?.day; const corrected=value==='rejected'?items.filter(q=>q.status==='rejected'&&q.correctionPending===1).length:0; return <button key={value} className={`metric status-metric${active?' active':''}`} aria-pressed={active} onClick={()=>{setActivitySelection(null);setFilters({month:"",tech:"",status:value,search:""});if(!["all","uploaded"].includes(value))setView("list");}}><span>{label}</span><strong>{loading ? '—' : items.filter(q=>matches(q,value)).length}</strong>{corrected>0&&<span className="status-metric-notification" aria-label={`${corrected} fixed ${corrected===1?'QC':'QCs'} ready to review`}>{corrected}</span>}</button>; })}</section>
     <section className="admin-page-content"><QcFilterBar value={filters} onChange={value=>{setActivitySelection(null);setFilters(value);if(!["all","uploaded"].includes(value.status)||normalizeUploadType(value.uploadType)!=="all")setView("list");}} techIds={view === "activity" ? activityTechIds : items.map(q=>q.techId)} currentMonthOnly/>
     <div className="qc-view-switch" aria-label="Record view"><button className={`button light${view==='list'?' active':''}`} aria-pressed={view==='list'} onClick={()=>{setView("list");setActivitySelection(null);}}>List</button><button className={`button light${view==='activity'?' active':''}`} aria-pressed={view==='activity'} onClick={()=>{setView("activity");setActivitySelection(null);setFilters({...filters,status:"all"});}}>Activity</button></div>

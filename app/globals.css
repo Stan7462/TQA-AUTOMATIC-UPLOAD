@@ -969,3 +969,12 @@ body:has(.admin-dark),body:has(.login-dark),body:has(.qc-reference){background:#
 .qc-job-edit-form input{box-sizing:border-box;width:100%;min-width:0;height:42px;padding:8px 10px;background:#233642;border:1px solid #668698;border-radius:8px;color:#edf4fb;font-size:18px}
 .qc-job-edit-form small{font-size:12px;line-height:1.5;color:#b6c8d5}
 .qc-job-edit-form>div{display:flex;gap:8px;flex-wrap:wrap}.qc-job-edit-form .button{padding:8px 12px;font-size:13px;min-height:38px}
+
+.qc-team-snapshot:not(.has-type-split){border-radius:19px}
+.qc-snapshot-goal{margin:0 0 20px}
+.qc-snapshot-goal-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:14px;color:#edf4fb}
+.qc-snapshot-goal-heading strong{font-weight:650}.qc-snapshot-goal-heading span{font-weight:650;font-variant-numeric:tabular-nums}
+.qc-snapshot-goal-track{height:9px;border-radius:10px;background:#2a414f;overflow:hidden}.qc-snapshot-goal-track>span{display:block;height:100%;border-radius:inherit;background:#8ed3bd}
+ .qc-snapshot-goal-caption{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#b7c7d3;font-size:12px;margin-top:9px}
+.qc-snapshot-goal-track{margin-top:11px}
+@media(max-width:600px){.qc-snapshot-goal{margin-bottom:15px}.qc-snapshot-goal-heading{font-size:13px}.qc-snapshot-goal-heading strong{flex:1;min-width:0}.qc-snapshot-goal-heading span{flex-shrink:0}}
