@@ -28,7 +28,10 @@ export function snapshotTypesPng(stats:SnapshotStat[],range:{start:number;end:nu
 export function snapshotGoalTotals(stats:Pick<SnapshotStat,'uploaded'|'monthlyGoal'>[],monthlyGoal:number){
  const uploaded=stats.reduce((sum,stat)=>sum+Number(stat.uploaded??0),0);
  const required=stats.reduce((sum,stat)=>sum+Number(stat.monthlyGoal??monthlyGoal),0);
- return {uploaded,required,remaining:Math.max(0,required-uploaded),percentage:snapshotPercentage(uploaded,required),progress:required?Math.min(1,Math.max(0,uploaded/required)):0};
+ const credited=stats.reduce((sum,stat)=>sum+Math.min(Number(stat.uploaded??0),Number(stat.monthlyGoal??monthlyGoal)),0);
+ // Never round an incomplete team up to 100%: every technician must meet their goal.
+ const percentage=required?`${new Intl.NumberFormat('en-US',{maximumFractionDigits:1}).format(credited<required?Math.min(99.9,credited/required*100):100)}%`:'—';
+ return {uploaded,required,credited,remaining:Math.max(0,required-credited),percentage,progress:required?Math.min(1,Math.max(0,credited/required)):0};
 }
 
 export function snapshotPng(stats: SnapshotStat[], range: { start: number; end: number }, monthlyGoal: number, view:SnapshotView="current") {

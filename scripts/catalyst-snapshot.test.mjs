@@ -49,7 +49,14 @@ test('team goal totals use individual requirements and successful uploads, inclu
  const team=Array.from({length:10},(_,i)=>({uploaded:i<5?5:0,monthlyGoal:5,failedUploaded:7}));
  let totals=snapshotGoalTotals(team,5);assert.equal(totals.uploaded,25);assert.equal(totals.required,50);assert.equal(totals.remaining,25);assert.equal(totals.percentage,'50%');assert.equal(totals.progress,.5);
  totals=snapshotGoalTotals([{uploaded:4,monthlyGoal:10},{uploaded:1,monthlyGoal:null}],5);assert.equal(totals.required,15);assert.equal(totals.percentage,'33.3%');
- totals=snapshotGoalTotals([{uploaded:8,monthlyGoal:5}],5);assert.equal(totals.percentage,'160%');assert.equal(totals.remaining,0);assert.equal(totals.progress,1);
+ totals=snapshotGoalTotals([{uploaded:8,monthlyGoal:5}],5);assert.equal(totals.uploaded,8);assert.equal(totals.percentage,'100%');assert.equal(totals.remaining,0);assert.equal(totals.progress,1);
+ totals=snapshotGoalTotals([{uploaded:20,monthlyGoal:5},{uploaded:4,monthlyGoal:5}],5);
+ assert.equal(totals.uploaded,24);assert.equal(totals.credited,9);assert.equal(totals.percentage,'90%');assert.equal(totals.progress,.9);assert.equal(totals.remaining,1);
+ totals=snapshotGoalTotals([{uploaded:20,monthlyGoal:10},{uploaded:4,monthlyGoal:null}],5);
+ assert.equal(totals.required,15);assert.equal(totals.credited,14);assert.equal(totals.percentage,'93.3%');assert.equal(totals.remaining,1);
+ const largeTeam=Array.from({length:101},(_,i)=>({uploaded:i===0?98:99,monthlyGoal:99}));
+ totals=snapshotGoalTotals(largeTeam,5);assert.equal(totals.percentage,'99.9%');assert.equal(totals.remaining,1);assert(totals.progress<1);
+ largeTeam[0].uploaded=100;totals=snapshotGoalTotals(largeTeam,5);assert.equal(totals.percentage,'100%');assert.equal(totals.remaining,0);
  totals=snapshotGoalTotals([],5);assert.equal(totals.required,0);assert.equal(totals.percentage,'—');assert.equal(totals.progress,0);
 });
 
@@ -62,9 +69,10 @@ test('current snapshot image includes team totals without overlapping technician
   const sandbox={File,Uint8Array,atob,Intl,Date,document:{createElement(){canvas={width:0,height:0,getContext:()=>context,toDataURL:()=> 'data:image/png;base64,aGVsbG8='};return canvas;}}};
   runInNewContext(output.outputFiles[0].text,sandbox);
   const team=Array.from({length:count},(_,i)=>({techId:`T${i}`,uploaded:i<5?5:0,monthlyGoal:5,failedUploaded:0}));
+  if(count===27)team[0].uploaded=20; // Actual uploads rise; goal credit must stay capped at five.
   const file=sandbox.snapshot.snapshotPng(team,{start:1000000000000,end:1002592000000},5);
   assert.equal(file.type,'image/png');
-  for(const label of ['Team monthly goal',`25 of ${count*5} required QCs uploaded`,`${count*5-25} remaining`,`Tech T${count-1}`])assert(text.some(t=>t.value===label),label);
+  for(const label of ['Team monthly goal',`${count===27?40:25} of ${count*5} required QCs uploaded`,`${count*5-25} remaining`,count===27?'18.5%':'50%',`Tech T${count-1}`])assert(text.some(t=>t.value===label),label);
   assert(text.find(t=>t.value==='TECHNICIAN').y>text.find(t=>t.value==='Team monthly goal').y);
   assert(text.every(t=>t.y>=0&&t.y<canvas.height));assert(boxes.every(b=>b[0]>=0&&b[1]>=0&&b[0]+b[2]<=canvas.width&&b[1]+b[3]<=canvas.height));
  }
